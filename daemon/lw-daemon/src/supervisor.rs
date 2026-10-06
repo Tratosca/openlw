@@ -536,6 +536,8 @@ pub fn supervise(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        #[cfg(all(target_os = "linux", feature = "pipewire"))]
+        shared.set_audio_nodes(Some(nodes.as_ref().is_some_and(lw_pw::Bridge::published)));
         // Log thread errors (lost interface, occupied port, etc.); daemon continues.
         if let Some(s) = session.as_mut() {
             while let Some(e) = s.failed() {

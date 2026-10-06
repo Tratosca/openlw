@@ -23,6 +23,16 @@ start_pipewire() {
     sleep 2
 }
 nodes() { pw-cli ls Node 2>/dev/null | grep -c -E "node.name = \"openlw_(in|out)\"" || true; }
+# status.audio_nodes reported by the daemon (true: nodes published, false: PipeWire unreachable).
+audio_nodes() {
+    want=$1
+    for i in $(seq 1 30); do
+        /target/debug/lw-daemon ctl --endpoint unix:/tmp/openlw.sock status 2>/dev/null \
+            | grep -q "\"audio_nodes\": $want" && { echo "ok   status.audio_nodes = $want"; return 0; }
+        sleep 0.5
+    done
+    echo "ÉCHEC : status.audio_nodes différent de $want"; exit 1
+}
 wait_nodes() {
     for i in $(seq 1 30); do [ "$(nodes)" = 2 ] && return 0; sleep 0.5; done
     echo "ÉCHEC : nœuds absents"; cat /tmp/daemon.log; exit 1
@@ -35,6 +45,7 @@ sleep 2
 start_pipewire
 wait_nodes
 echo "ok   nodes published after PipeWire started"
+audio_nodes true
 
 echo "--- audio"
 python3 - <<EOF
@@ -75,9 +86,11 @@ pkill wireplumber || true
 pkill -x pipewire || true
 sleep 1
 [ "$(nodes)" = 0 ] || true
+audio_nodes false
 start_pipewire
 wait_nodes
 echo "ok   nodes published again after PipeWire restart"
+audio_nodes true
 
 echo "--- daemon log"; cat /tmp/daemon.log
 echo "SUCCÈS"'

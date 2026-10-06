@@ -20,3 +20,9 @@ windows/driver/sdk/
 # .NET build output (Windows app)
 windows/app/bin/
 windows/app/obj/
+
+# Linux app build output
+linux/app/target/
+
+# Linux packages
+linux/packaging/dist/

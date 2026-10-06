@@ -1,0 +1,6 @@
+#!/bin/sh
+# Removal: user service no longer enabled at login. Running instances stop at logout.
+set -e
+if [ "$1" = "remove" ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --global disable openlw.service >/dev/null 2>&1 || true
+fi

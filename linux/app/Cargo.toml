@@ -1,0 +1,69 @@
+[package]
+name = "openlw-app"
+version = "0.5.0"
+description = "OpenLW configuration app for Linux (GTK4, libadwaita)"
+edition = "2021"
+rust-version = "1.92"
+license = "Apache-2.0"
+authors = ["François Brille (Tratosca)"]
+publish = false
+
+# Standalone: the daemon workspace (daemon/) builds without GTK.
+[workspace]
+
+[[bin]]
+name = "openlw"
+path = "src/main.rs"
+
+[dependencies]
+# Floor: GTK 4.12 and libadwaita 1.4 (Ubuntu 24.04, Debian 13, Fedora 39).
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_4"] }
+lw-proto = { path = "../../daemon/lw-proto" }
+pipewire = { version = "0.10", features = ["v0_3_49"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+socket2 = { version = "0.6.5", features = ["all"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+indexing_slicing = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+# Linux packages (linux/packaging/build-packages.sh): the app, on top of openlw-daemon.
+[package.metadata.deb]
+name = "openlw"
+maintainer = "François Brille"
+copyright = "2026 François Brille"
+license-file = ["../../LICENSE", "0"]
+section = "sound"
+priority = "optional"
+extended-description = """\
+App de réglage d'OpenLW (GTK 4, libadwaita) : réseau Livewire, grille des entrées, \
+sorties diffusées, pré-écoute."""
+depends = "$auto, openlw-daemon (>= 0.5.0)"
+assets = [
+    ["target/release/openlw", "usr/bin/", "755"],
+    ["../packaging/fr.francois_brille.openlw.desktop", "usr/share/applications/", "644"],
+    ["../packaging/fr.francois_brille.openlw.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["../packaging/icons/fr.francois_brille.openlw.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "openlw"
+summary = "OpenLW : audio Livewire et AES67 sur l'ordinateur"
+license = "Apache-2.0"
+assets = [
+    { source = "target/release/openlw", dest = "/usr/bin/openlw", mode = "755" },
+    { source = "../packaging/fr.francois_brille.openlw.desktop", dest = "/usr/share/applications/fr.francois_brille.openlw.desktop", mode = "644" },
+    { source = "../packaging/fr.francois_brille.openlw.metainfo.xml", dest = "/usr/share/metainfo/fr.francois_brille.openlw.metainfo.xml", mode = "644" },
+    { source = "../packaging/icons/fr.francois_brille.openlw.svg", dest = "/usr/share/icons/hicolor/scalable/apps/fr.francois_brille.openlw.svg", mode = "644" },
+]
+
+[package.metadata.generate-rpm.requires]
+openlw-daemon = ">= 0.5.0"

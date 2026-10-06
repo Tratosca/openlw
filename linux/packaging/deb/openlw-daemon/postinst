@@ -1,0 +1,7 @@
+#!/bin/sh
+# User service enabled for every user at their next login (running sessions: the app offers to
+# start it, or `systemctl --user enable --now openlw.service`).
+set -e
+if [ "$1" = "configure" ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --global enable openlw.service >/dev/null 2>&1 || true
+fi

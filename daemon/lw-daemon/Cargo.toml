@@ -25,3 +25,41 @@ lw-pw = { version = "0.5.0", path = "../lw-pw", optional = true }
 
 [lints]
 workspace = true
+
+# Linux packages (linux/packaging/build-packages.sh): service and PipeWire nodes, without GUI.
+[package.metadata.deb]
+name = "openlw-daemon"
+maintainer = "François Brille"
+copyright = "2026 François Brille"
+license-file = ["../../LICENSE", "0"]
+section = "sound"
+priority = "optional"
+extended-description = """\
+Service utilisateur OpenLW : relie l'ordinateur à un réseau audio compatible Livewire \
+ou AES67 et publie les périphériques PipeWire « OpenLW In » et « OpenLW Out ». \
+L'app de réglage est dans le paquet openlw."""
+depends = "$auto, pipewire, systemd"
+recommends = "wireplumber"
+assets = [
+    ["target/release/lw-daemon", "usr/bin/", "755"],
+    ["../../linux/packaging/openlw.service", "usr/lib/systemd/user/", "644"],
+    ["../README.md", "usr/share/doc/openlw-daemon/README.md", "644"],
+]
+maintainer-scripts = "../../linux/packaging/deb/openlw-daemon/"
+
+[package.metadata.generate-rpm]
+name = "openlw-daemon"
+summary = "Service OpenLW : audio Livewire et AES67 pour PipeWire"
+license = "Apache-2.0"
+assets = [
+    { source = "target/release/lw-daemon", dest = "/usr/bin/lw-daemon", mode = "755" },
+    { source = "../../linux/packaging/openlw.service", dest = "/usr/lib/systemd/user/openlw.service", mode = "644" },
+    { source = "../README.md", dest = "/usr/share/doc/openlw-daemon/README.md", mode = "644", doc = true },
+]
+# User service enabled for every user at their next login; disabled on removal.
+post_install_script = "systemctl --global enable openlw.service >/dev/null 2>&1 || :"
+pre_uninstall_script = "if [ \"$1\" -eq 0 ]; then systemctl --global disable openlw.service >/dev/null 2>&1 || :; fi"
+
+[package.metadata.generate-rpm.requires]
+pipewire = "*"
+systemd = "*"

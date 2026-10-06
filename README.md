@@ -2,13 +2,23 @@
 
 OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-over-IP networks. It connects desktop audio applications to network sources and destinations through a virtual audio device, source discovery, and an input/output patch matrix.
 
+> [!WARNING]
+> **Not for critical environments. Provided “as is”.** OpenLW is an independent, experimental project. It is not designed, tested or certified for critical environments: on-air broadcast chains, emergency or safety systems, or any use where an interruption, delay or corruption of audio could cause harm or loss. It is provided “as is”, without warranty of any kind, express or implied, as stated in sections 7 and 8 of the [Apache License 2.0](LICENSE) (sections 15 and 16 of the GPLv3 for the Windows ASIO driver). You use it at your own risk.
+
 | Platform | Architectures | Audio device | App | Status |
 |---|---|---|---|---|
 | macOS 10.13 and later | Intel, Apple Silicon | CoreAudio (all applications) | OpenLW (AppKit, Liquid Glass on macOS 26) | Available |
-| Windows 10 22H2 and 11 | x64, ARM64 | ASIO® driver, displayed as “OpenLW” (ASIO-compatible applications) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3, planned) | In progress; network service implemented |
-| Linux (PipeWire 0.3.49+) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications) | OpenLW (GTK4, planned) | In progress; network service and PipeWire nodes implemented |
+| Windows 10 22H2 and 11 | x64, ARM64 | ASIO® driver, displayed as “OpenLW” (ASIO-compatible applications) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3) | Build from source only, no binary release ([why](#windows-build-from-source-only)) |
+| Linux (PipeWire 0.3.49+) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications) | OpenLW (GTK4) | In progress; service, PipeWire nodes, app and packages implemented, real machine validation pending |
 
 See the [roadmap](docs/roadmap.md), [Windows guide](windows/README.md), and [Linux guide](linux/README.md) for platform-specific progress and validation limits. The following usage instructions describe macOS.
+
+### Windows: build from source only
+
+The Windows service, ASIO® driver, app and MSI installer stay in the repository and build from source ([Windows guide](windows/README.md)), but no Windows binary or installer is published:
+
+- Telos Alliance already offers a proprietary, paid Windows driver for Livewire networks (Axia IP-Audio Driver).
+- Distributing an installer that installs cleanly requires Authenticode code signing (organization-validated or EV certificate, or a signing service); otherwise SmartScreen warns and Smart App Control may block it. A driver visible to all Windows applications (WaveRT kernel driver) would additionally require an EV certificate and Microsoft attestation signing for every release ([roadmap](docs/roadmap.md)).
 
 ## Features
 
@@ -73,7 +83,7 @@ tools/ci/test-wine.sh               # Windows build under Wine (Docker)
 | `macos/app/` | OpenLW app in Swift and AppKit |
 | `macos/installer/` | macOS `.pkg` installer |
 | `windows/` | Windows service, audio driver, app, and installer (in progress) |
-| `linux/` | Linux systemd unit, app, and packages (in progress) |
+| `linux/` | Linux systemd unit, GTK app, and `.deb`/`.rpm` packages |
 | `docs/protocol/` | Network specification: what OpenLW sends and accepts |
 | `docs/adr/` | Architecture decisions |
 | `tools/lw/` | Python codecs, test transmitters, and capture analysis tools |

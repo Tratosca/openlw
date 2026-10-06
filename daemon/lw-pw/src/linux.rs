@@ -25,6 +25,8 @@ const RETRY: Duration = Duration::from_secs(5);
 
 struct Control {
     stop: AtomicBool,
+    /// Nodes currently published (connected to the PipeWire server).
+    published: AtomicBool,
     /// Wakes the main loop of the current connection attempt.
     current: Mutex<Option<pw::channel::Sender<()>>>,
 }
@@ -54,12 +56,20 @@ impl Drop for Bridge {
     }
 }
 
+impl Bridge {
+    /// True while the nodes are published; false while PipeWire is unreachable.
+    pub fn published(&self) -> bool {
+        self.control.published.load(Ordering::Acquire)
+    }
+}
+
 /// Publish the nodes on `region` (TO_NET producer, FROM_NET consumer) from a dedicated thread.
 /// Connection failures are retried every 5 s and reported through `report`; only a thread
 /// creation failure is an error here.
 pub fn start(region: Arc<Region>, cfg: BridgeConfig, report: Report) -> Result<Bridge, Error> {
     let control = Arc::new(Control {
         stop: AtomicBool::new(false),
+        published: AtomicBool::new(false),
         current: Mutex::new(None),
     });
     let ctl = control.clone();
@@ -85,9 +95,11 @@ fn supervise(region: &Region, cfg: &BridgeConfig, control: &Control, report: Rep
             break;
         }
         let result = run(region, cfg, rx, || {
+            control.published.store(true, Ordering::Release);
             last_error.clear();
             report(false, "nœuds PipeWire publiés (OpenLW In, OpenLW Out)");
         });
+        control.published.store(false, Ordering::Release);
         if control.stop.load(Ordering::Acquire) {
             break;
         }

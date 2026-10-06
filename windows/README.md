@@ -11,6 +11,10 @@ Windows 10 22H2 and 11, x64 and ARM64. Audio device: ASIO® driver, displayed as
 | OpenLW app | [`windows/app`](app/README.md) (WinUI 3, C#) | Implemented; starts and connects on Windows 11 ARM64; full UI review pending |
 | Installer | `windows/installer` (x64 and ARM64 MSI, WiX 5.0.2) | Implemented; install, driver test and clean removal validated (ARM64 natively, x64 under emulation) |
 
+## No binary release
+
+Windows components build from source only; no MSI or binary is published ([why](../README.md#windows-build-from-source-only)): Telos Alliance already sells a proprietary Windows driver for Livewire networks, and a cleanly installing public installer would require Authenticode code signing. Locally built MSIs are unsigned: SmartScreen warns, and Smart App Control, when enabled, may block them.
+
 ## Installer
 
 ```powershell

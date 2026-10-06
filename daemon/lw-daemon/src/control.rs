@@ -42,6 +42,9 @@ pub struct Status {
     pub advertised_sources: usize,
     /// Virtual device (region shared with the plugin), if active.
     pub device: Option<crate::device::DeviceStatus>,
+    /// Linux: PipeWire nodes published (false while PipeWire is unreachable); absent elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_nodes: Option<bool>,
 }
 
 /// Device-state source (refreshed by its own thread).
@@ -87,6 +90,7 @@ impl Shared {
                 rx: BTreeMap::new(),
                 advertised_sources,
                 device: None,
+                audio_nodes: None,
             })),
             started: Instant::now(),
             device: Arc::new(Mutex::new(None)),
@@ -112,6 +116,10 @@ impl Shared {
             s.tx.clear();
             s.rx.clear();
         });
+    }
+
+    pub fn set_audio_nodes(&self, published: Option<bool>) {
+        self.with(|s| s.audio_nodes = published);
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut Status) -> R) -> R {

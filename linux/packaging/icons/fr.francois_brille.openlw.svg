@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OpenLW app icon: audio waveform carried over a network link (GNOME style, 128 px grid). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#1c71d8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="12" width="112" height="108" rx="22" fill="#1a5fb4"/>
+  <rect x="8" y="8" width="112" height="106" rx="22" fill="url(#bg)"/>
+  <path d="M20 61h12l6-18 10 40 10-52 10 58 10-46 8 26 6-8h16" fill="none" stroke="#fff"
+        stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#fff" opacity="0.9">
+    <circle cx="32" cy="98" r="5"/>
+    <circle cx="64" cy="98" r="5"/>
+    <circle cx="96" cy="98" r="5"/>
+    <rect x="32" y="96" width="64" height="4" rx="2"/>
+  </g>
+</svg>

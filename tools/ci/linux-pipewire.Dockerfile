@@ -8,7 +8,9 @@ RUN apt-get update \
        libpipewire-0.3-dev libspa-0.2-dev clang pkg-config \
        pipewire pipewire-bin wireplumber dbus \
     && rm -rf /var/lib/apt/lists/* \
-    && rustup component add clippy rustfmt
+    && rustup component add clippy rustfmt \
+    && cargo install --locked cargo-deb \
+    && rm -rf /usr/local/cargo/registry
 # WirePlumber 0.4 stops when its Bluetooth monitor cannot reach logind (absent in containers):
 # override the file that enables it.
 RUN mkdir -p /root/.config/wireplumber/bluetooth.lua.d \

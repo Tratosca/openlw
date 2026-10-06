@@ -92,6 +92,45 @@ jobs:
       - name: Daemon with PipeWire in a container (retry, audio loopback, reconnection)
         run: PLATFORM=${{ matrix.platform }} tools/ci/test-pipewire.sh
 
+  linux-app:
+    name: Linux app and packages (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux/amd64
+          - os: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: GTK, libadwaita and PipeWire development files
+        run: >-
+          sudo apt-get update && sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+          libpipewire-0.3-dev libspa-0.2-dev clang pkg-config desktop-file-utils appstream
+      - name: Format, clippy, tests
+        working-directory: linux/app
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --no-fail-fast
+      - name: Desktop entry and AppStream metadata
+        run: |
+          desktop-file-validate linux/packaging/fr.francois_brille.openlw.desktop
+          appstreamcli validate --no-net --explain --override=url-homepage-missing=info linux/packaging/fr.francois_brille.openlw.metainfo.xml
+      - name: Packages (.deb, .rpm)
+        run: PLATFORM=${{ matrix.platform }} linux/packaging/build-packages.sh all
+      - name: Package installation (Debian 12, Ubuntu 24.04, Fedora 43)
+        run: PLATFORM=${{ matrix.platform }} tools/ci/test-packages.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages-${{ matrix.os }}
+          path: linux/packaging/dist/
+
   macos-bundle:
     name: macOS plugin, app, and package
     runs-on: macos-26   # macOS 26 SDK (NSGlassEffectView)

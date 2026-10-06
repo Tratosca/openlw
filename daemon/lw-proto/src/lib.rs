@@ -1,8 +1,8 @@
-//! Codecs Livewire / AES67, sans I/O.
+//! Livewire / AES67 codecs, no I/O.
 //!
-//! Référence : `docs/protocol/`. Chaque module cite la fiche qu'il implémente.
-//! Règle de conception : les décodeurs reçoivent des octets non authentifiés venus du réseau ;
-//! ils ne paniquent jamais et renvoient une [`Error`] sur toute entrée invalide ou tronquée.
+//! Reference: `docs/protocol/`. Each module cites the document it implements.
+//! Design rule: decoders receive unauthenticated network bytes;
+//! they never panic and return [`Error`] for invalid or truncated inputs.
 
 pub mod adv;
 pub mod channel;

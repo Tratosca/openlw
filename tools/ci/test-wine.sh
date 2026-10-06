@@ -1,12 +1,12 @@
 #!/bin/sh
-# Tests du daemon compilé pour Windows, exécutés sous Wine dans un conteneur.
-#   tools/ci/test-wine.sh          Windows ARM64 (aarch64-pc-windows-gnullvm, Wine natif sur hôte arm64),
-#                                  puis pilote audio (windows/driver) avec son hôte de test
-#   tools/ci/test-wine.sh x64      Windows x64 (x86_64-pc-windows-gnu ; sur hôte arm64, Wine émulé)
+# Windows-compiled daemon tests run under Wine in a container.
+#   tools/ci/test-wine.sh          Windows ARM64 (aarch64-pc-windows-gnullvm, native Wine on arm64 host),
+#                                  then audio driver (windows/driver) with its test host
+#   tools/ci/test-wine.sh x64      Windows x64 (x86_64-pc-windows-gnu; emulated Wine on arm64 host)
 #
-# Limites : Wine n'énumère pas les cartes réseau du conteneur, les tests réseau (interfaces,
-# multicast) ne tournent que sur un vrai Windows (CI) ; MMCSS, jetons et ACL n'y sont qu'imités.
-# Sous émulation amd64 (Rosetta, OrbStack), un seul thread de test : Wine y échoue en parallèle.
+# Limitations: Wine does not enumerate container network adapters; network tests (interfaces,
+# multicast) run only on real Windows (CI); MMCSS, tokens, and ACLs are merely emulated.
+# Under amd64 emulation (Rosetta, OrbStack), use one test thread: Wine fails with parallel tests.
 set -eu
 cd "$(dirname "$0")/../.."
 case "${1:-arm64}" in
@@ -33,7 +33,7 @@ docker run --rm --platform "$PLATFORM" -v "$PWD":/src -v "$VOL":/target \
     cargo test \$T -p lw-daemon --lib -- $THREADS --skip iface::tests::loopback_is_listed
     cargo test \$T -p lw-daemon --test device -- $THREADS"
 
-# Pilote audio Windows (ARM64 seulement : l'hôte de test exige l'exécution native).
+# Windows audio driver (ARM64 only: test host requires native execution).
 [ "${1:-arm64}" = arm64 ] || exit 0
 docker run --rm --platform "$PLATFORM" -v "$PWD":/src -v "$VOL":/target -v openlw-driver-build:/build \
     -v "openlw-cargo-${PLATFORM#linux/}":/usr/local/cargo/registry -e CARGO_TARGET_DIR=/target \

@@ -1,5 +1,5 @@
--- Livewire : d'après la spécification docs/protocol/.
--- Tous les accès au tampon sont bornés, y compris les sous-messages TlvMsg.
+-- Livewire: based on docs/protocol/ specification.
+-- All buffer accesses are bounded, including TlvMsg submessages.
 local adv = Proto("lwadv", "Livewire Envelope / TlvMsg")
 local clock = Proto("lwclock", "Horloge Livewire")
 local audio = Proto("lwrtp", "Audio RTP Livewire")
@@ -51,14 +51,14 @@ local function fourcc(range)
     return (range:string():gsub("[^ -~]", function(c) return string.format("\\x%02X", c:byte()) end))
 end
 local function printable(range)
-    -- Les noms de taille fixe peuvent être complétés par des NUL terminaux.
+    -- Fixed-size names may be padded with trailing NULs.
     local s = range:string():gsub("%z+$", "")
     if not s:find("[^ -~]") then return s end
 end
 local sizes = {[1]=4, [7]=1, [8]=2, [9]=8}
 local fields = {[1]=f.u32, [7]=f.u8, [8]=f.u16, [9]=f.u64}
 local function message(tvb, offset, limit, parent, depth, summary, context)
-    -- La racine est le niveau 1 : huit niveaux au total au maximum.
+    -- Root is level 1: at most eight total levels.
     if depth > 8 then return bad(parent, adv, "Profondeur TlvMsg supérieure à 8") end
     if not need(parent, adv, offset, 6, limit) then return nil end
     local start = offset
@@ -157,7 +157,7 @@ function adv.dissector(tvb, pinfo, tree)
     else pinfo.cols.info = summary.id or "TlvMsg tronqué" end
 end
 
--- Décodage RTP commun, avec prise en compte de CSRC, extension et bourrage.
+-- Shared RTP decoding, accounting for CSRCs, extension, padding.
 local function rtp_fields(prefix)
     return {
         version=ProtoField.uint8(prefix..".version", "Version RTP", base.DEC, nil, 0xc0),
@@ -213,7 +213,7 @@ function clock.dissector(tvb, pinfo, tree)
     pinfo.cols.info = "Horloge Livewire"
     local node = tree:add(clock, tvb())
     if not rtp(tvb, node, clock, c) then return end
-    -- Offsets absolus dans la charge UDP (docs/protocol/04-clock.md).
+    -- Absolute offsets in UDP payload (docs/protocol/04-clock.md).
     local size = tvb:len()
     if size >= 24 then
         local profile, words = tvb(12,2):uint(), tvb(14,2):uint()
@@ -251,7 +251,7 @@ function audio.dissector(tvb, pinfo, tree)
         kind, channel, samples, tvb(2,2):uint(), equal and "oui" or "non")
 end
 
--- 0 désactive une liaison ; les ports hors plage sont ignorés.
+-- Zero disables binding; out-of-range ports ignored.
 adv.prefs.control_port = Pref.uint("Port UDP contrôle", 4000, "1–65535 ; 0 désactive")
 adv.prefs.announce_port = Pref.uint("Port UDP annonces", 4001, "1–65535 ; 0 désactive")
 clock.prefs.port = Pref.uint("Port UDP horloge", 7000, "1–65535 ; 0 désactive")

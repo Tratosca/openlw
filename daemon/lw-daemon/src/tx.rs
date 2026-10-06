@@ -1,4 +1,4 @@
-//! Émission RTP d'un flux Livewire / AES67 (générateur de test en attendant le ring buffer du plugin).
+//! Livewire / AES67 RTP transmission (test generator pending the plugin ring buffer).
 
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -13,7 +13,7 @@ use crate::iface::Iface;
 use crate::net::{mark_dscp, tx_socket, TxOptions};
 use crate::Stop;
 
-/// Générateur de sinusoïde, identique sur tous les canaux.
+/// Sine-wave generator, identical on all channels.
 #[derive(Debug, Clone)]
 pub struct Tone {
     pub freq_hz: f64,
@@ -30,7 +30,7 @@ impl Tone {
         }
     }
 
-    /// Remplit `out` avec `frames` trames de `channels` échantillons 24 bits.
+    /// Fill `out` with `frames` frames of `channels` 24-bit samples.
     pub fn fill(&mut self, frames: u32, channels: u16, out: &mut Vec<i32>) {
         out.clear();
         let amp = 8_388_607.0 * 10f64.powf(self.level_dbfs / 20.0);
@@ -43,7 +43,7 @@ impl Tone {
     }
 }
 
-/// Description d'un flux émis.
+/// Transmitted-stream description.
 #[derive(Debug, Clone)]
 pub struct TxStream {
     pub channel: Channel,
@@ -69,26 +69,26 @@ impl TxStream {
     }
 }
 
-/// Bilan d'émission.
+/// Transmission summary.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct TxReport {
     pub group: String,
     pub packets: u64,
     pub send_errors: u64,
-    /// Retard maximal d'un envoi par rapport à son échéance.
+    /// Maximum send lateness relative to its deadline.
     pub max_late_us: u64,
-    /// Paquets envoyés avec plus d'un intervalle de retard.
+    /// Packets sent more than one interval late.
     pub late_packets: u64,
-    /// Le thread a obtenu l'ordonnancement temps réel.
+    /// The thread obtained real-time scheduling.
     pub realtime: bool,
 }
 
-/// Émet le flux jusqu'à l'arrêt, cadencé sur des échéances absolues (pas de dérive cumulée).
+/// Transmit until stopped, paced by absolute deadlines (no accumulated drift).
 pub fn run(iface: &Iface, stream: &TxStream, opts: TxOptions, stop: &Stop) -> io::Result<TxReport> {
     run_with_progress(iface, stream, opts, stop, |_| {})
 }
 
-/// Comme [`run`], avec un bilan intermédiaire environ chaque seconde.
+/// Like [`run`], with an intermediate report approximately every second.
 pub fn run_with_progress(
     iface: &Iface,
     stream: &TxStream,
@@ -99,8 +99,8 @@ pub fn run_with_progress(
     run_from(iface, stream, opts, stop, None, on_progress)
 }
 
-/// Émet le flux ; l'audio vient de `source` (sorties du périphérique) s'il est fourni, sinon du
-/// générateur de test du flux. Échantillons float → L24 avec saturation.
+/// Transmit the stream; audio comes from `source` (device outputs), if supplied, otherwise
+/// from the stream's test generator. Float samples → L24 with saturation.
 pub fn run_from(
     iface: &Iface,
     stream: &TxStream,
@@ -121,8 +121,8 @@ pub fn run_from(
         .map_err(|e| crate::error!("{group} : marquage DSCP refusé (erreur {e})"))
         .ok()
         .flatten();
-    // Séquence et horodatage dérivés de l'horloge hôte : un flux relancé reprend là où un flux
-    // continu serait (saut vers l'avant, vu comme une perte) au lieu de repartir de zéro.
+    // Sequence and timestamp derived from the host clock: a restarted stream resumes where a
+    // continuous stream would be (forward jump seen as loss) instead of restarting at zero.
     let spp = u64::from(stream.format.samples_per_packet()).max(1);
     let frames = lw_sys::rt::host_time_ns() / 1_000 * 48 / 1_000;
     let mut packetizer = Packetizer::new(
@@ -194,8 +194,8 @@ pub fn run_from(
     Ok(report)
 }
 
-/// Attente en thread temps réel : sommeil précis uniquement, jamais d'attente active
-/// (un dépassement du budget de calcul fait rétrograder le thread par le noyau).
+/// Real-time thread waiting: precise sleep only, never busy-wait
+/// (exceeding the compute budget causes kernel demotion).
 fn wait_until_blocking(deadline: Instant) {
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -206,7 +206,7 @@ fn wait_until_blocking(deadline: Instant) {
     }
 }
 
-/// Attente en thread normal : sommeil grossier puis attente active courte.
+/// Normal-thread waiting: coarse sleep, then brief busy-wait.
 fn wait_until(deadline: Instant) {
     loop {
         let now = Instant::now();

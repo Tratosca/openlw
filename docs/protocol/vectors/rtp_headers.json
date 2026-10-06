@@ -12,8 +12,8 @@
       "header_hex": "806003e800075300efc00065",
       "ssrc_is_dst": true,
       "confidence": {
-        "ssrc_is_dst": "choix OpenLW",
-        "ts_step": "observe en Standard, suppose pour les autres formats"
+        "ssrc_is_dst": "OpenLW choice",
+        "ts_step": "observed for Standard, assumed for other formats"
       }
     },
     {
@@ -27,8 +27,8 @@
       "header_hex": "806003e800075300efc00065",
       "ssrc_is_dst": true,
       "confidence": {
-        "ssrc_is_dst": "choix OpenLW",
-        "ts_step": "observe en Standard, suppose pour les autres formats"
+        "ssrc_is_dst": "OpenLW choice",
+        "ts_step": "observed for Standard, assumed for other formats"
       }
     },
     {
@@ -42,8 +42,8 @@
       "header_hex": "806003e800075300efc00065",
       "ssrc_is_dst": true,
       "confidence": {
-        "ssrc_is_dst": "choix OpenLW",
-        "ts_step": "observe en Standard, suppose pour les autres formats"
+        "ssrc_is_dst": "OpenLW choice",
+        "ts_step": "observed for Standard, assumed for other formats"
       }
     },
     {
@@ -57,8 +57,8 @@
       "header_hex": "806003e800075300efc40065",
       "ssrc_is_dst": true,
       "confidence": {
-        "ssrc_is_dst": "choix OpenLW",
-        "ts_step": "observe en Standard, suppose pour les autres formats"
+        "ssrc_is_dst": "OpenLW choice",
+        "ts_step": "observed for Standard, assumed for other formats"
       }
     }
   ]

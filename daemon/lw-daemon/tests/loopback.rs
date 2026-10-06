@@ -1,5 +1,5 @@
-//! Boucle locale sur l'interface de bouclage : émission → réception, et annonce → décodage.
-//! Valide sockets liées à l'interface, cadencement, paquetisation et format d'annonce sans banc.
+//! Local loopback: transmission → reception, advertisement → decoding.
+//! Validate interface-bound sockets, pacing, packetization, and advertisements without external equipment.
 
 #![allow(clippy::indexing_slicing)]
 
@@ -24,7 +24,7 @@ fn loopback() -> Iface {
         .expect("interface de bouclage")
 }
 
-/// Émet `seconds` secondes au format donné et renvoie les statistiques de réception.
+/// Transmit `seconds` seconds in the given format and return receive statistics.
 fn roundtrip(channel: u16, format: StreamFormat, seconds: f64) -> (tx::TxReport, RxStats) {
     let lo = loopback();
     let stream = tx::TxStream::new(Channel::new(channel).unwrap(), format);
@@ -97,8 +97,8 @@ fn aes67_stream_roundtrip() {
         "AES67 : {} paquets, {} en retard > 1 ms, retard max {} µs",
         tx.packets, tx.late_packets, tx.max_late_us
     );
-    // Le retard d'ordonnancement dépend de l'OS (thread à priorité normale) : mesuré, pas exigé.
-    // Le daemon passera ses threads audio en temps réel (THREAD_TIME_CONSTRAINT_POLICY, couche C).
+    // Scheduling delay depends on the OS (normal-priority thread): measured, not required.
+    // Daemon audio threads will use real-time scheduling (THREAD_TIME_CONSTRAINT_POLICY, C layer).
 }
 
 #[test]

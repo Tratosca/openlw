@@ -1,20 +1,20 @@
-//! Édition de la configuration (patch à chaud) : fonctions pures, validées, sans effet de bord.
+//! Configuration editing (live patching): pure validated functions without side effects.
 //!
-//! - Patcher une entrée : les entrées du périphérique visées sont d'abord libérées (le flux qui les
-//!   occupait reste reçu pour les statistiques, sans patch), puis le flux est mis à jour ou ajouté.
-//! - Dépatcher une entrée : le flux qui alimentait ces entrées n'est plus reçu.
-//! - Patcher une sortie : la source émise sur ce canal est mise à jour ou ajoutée.
-//! - Changer le nombre de canaux du périphérique : les patchs qui visent des canaux disparus sont
-//!   retirés (flux émis arrêtés, flux reçus non patchés retirés).
+//! - Patch an input: first release target device inputs (the occupying stream
+//!   remains received for statistics, unpatched), then update or add the stream.
+//! - Unpatch an input: stop receiving the stream that fed these inputs.
+//! - Patch an output: update or add the source transmitted on this channel.
+//! - Change device channel counts: remove patches targeting vanished channels
+//!   (stop transmitted streams, remove unpatched received streams).
 
 use std::net::Ipv4Addr;
 
 use crate::config::{Config, ConfigError, DestinationConfig, Format, Kind, SourceConfig};
 
-/// Modification demandée.
+/// Requested change.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
-    /// Flux Livewire (canal) ou AES67 (groupe) vers des entrées du périphérique.
+    /// Livewire stream (channel) or AES67 stream (group) to device inputs.
     PatchInput {
         channel: Option<u16>,
         group: Option<Ipv4Addr>,
@@ -22,41 +22,41 @@ pub enum Edit {
         kind: Kind,
         device_channels: Vec<u16>,
     },
-    /// Libère des entrées du périphérique.
+    /// Release device inputs.
     UnpatchInput {
         device_channels: Vec<u16>,
     },
-    /// Sorties du périphérique vers un canal Livewire.
+    /// Device outputs to a Livewire channel.
     PatchOutput {
         channel: u16,
         name: String,
         format: Format,
         device_channels: Vec<u16>,
     },
-    /// Arrête l'émission d'un canal.
+    /// Stop transmitting a channel.
     UnpatchOutput {
         channel: u16,
     },
     SetIface(String),
     SetAdvertise(bool),
-    /// Nom du périphérique d'après les sources reçues.
+    /// Device name based on received sources.
     SetDeviceNaming(bool),
-    /// Présentation dans macOS : un périphérique ou deux.
+    /// macOS layout: one device or two.
     SetDeviceLayout(crate::config::Layout),
-    /// Réglages avancés (seuls les champs présents changent).
+    /// Advanced settings (only supplied fields change).
     SetAdvanced {
         terminal_name: Option<String>,
         latency: Option<crate::config::Latency>,
         dscp: Option<u8>,
     },
-    /// Canaux du périphérique dans chaque sens.
+    /// Device channels in each direction.
     SetDeviceChannels {
         to_net: u32,
         from_net: u32,
     },
 }
 
-/// Applique `edit` à une copie de `cfg` et valide le résultat.
+/// Apply `edit` to a copy of `cfg` and validate the result.
 pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
     let mut c = cfg.clone();
     match edit {
@@ -203,12 +203,12 @@ mod tests {
     fn patch_input_moves_and_replaces() {
         let c = apply(&base(), &patch_in(1, [1, 2])).unwrap();
         assert_eq!(c.destinations.len(), 1);
-        // Un autre canal sur les mêmes entrées : l'ancien flux perd son patch.
+        // Another channel on the same inputs: the old stream loses its patch.
         let c = apply(&c, &patch_in(7, [1, 2])).unwrap();
         assert_eq!(c.destinations.len(), 2);
         assert_eq!(c.destinations[0].device_channels, None);
         assert_eq!(c.destinations[1].device_channels, Some(vec![1, 2]));
-        // Repatcher le canal 7 ailleurs : mise à jour, pas de doublon.
+        // Repatch channel 7 elsewhere: update, no duplicate.
         let c = apply(&c, &patch_in(7, [3, 4])).unwrap();
         assert_eq!(
             c.destinations
@@ -218,7 +218,7 @@ mod tests {
             1
         );
         assert_eq!(c.destinations[1].device_channels, Some(vec![3, 4]));
-        // Dépatcher.
+        // Unpatch.
         let c = apply(
             &c,
             &Edit::UnpatchInput {

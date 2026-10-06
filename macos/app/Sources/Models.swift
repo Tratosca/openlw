@@ -1,4 +1,4 @@
-// Modèles décodés depuis les réponses JSON du daemon. Les crêtes « -inf » arrivent en null.
+// Models decoded from daemon JSON responses. “-inf” peaks arrive as null.
 
 import Foundation
 
@@ -7,9 +7,9 @@ struct Iface {
     let friendly: String
     let ipv4: String
     let loopback: Bool
-    /// Interface Ethernet susceptible de porter Livewire (hors bouclage et interfaces virtuelles).
+    /// Ethernet interface potentially carrying Livewire (excluding loopback/virtual interfaces).
     let candidate: Bool
-    /// Annonces Livewire entendues récemment sur cette interface.
+    /// Livewire advertisements recently heard on this interface.
     let livewire: Bool
 
     init?(_ d: [String: Any]) {
@@ -22,7 +22,7 @@ struct Iface {
         livewire = d["livewire"] as? Bool ?? false
     }
 
-    /// Libellé du menu : nom convivial, nom BSD, adresse.
+    /// Menu label: friendly name, BSD name, address.
     var title: String {
         let base = friendly == name ? "\(name) · \(ipv4)" : "\(friendly) (\(name)) · \(ipv4)"
         return livewire ? base + " · réseau Livewire" : base
@@ -53,11 +53,11 @@ struct DiscoveredSource: Equatable {
         self.terminal = terminal
     }
 
-    /// Valeur `kind` du daemon pour un patch d'entrée (les variantes stéréo annoncées donnent « stereo »).
+    /// Daemon `kind` value for input patch (advertised stereo variants yield “stereo”).
     var patchKind: String { ["stereo", "backfeed", "surround"].contains(kind) ? kind : "stereo" }
 }
 
-/// Flux reçu de la configuration (destination).
+/// Configured received stream (destination).
 struct InputPatch: Equatable {
     let channel: Int?
     let group: String?
@@ -65,7 +65,7 @@ struct InputPatch: Equatable {
     let deviceChannels: [Int]
 }
 
-/// Flux émis de la configuration (source).
+/// Configured transmitted stream (source).
 struct OutputPatch: Equatable {
     let channel: Int
     let name: String
@@ -80,16 +80,16 @@ struct DaemonConfig {
     var outputs: [OutputPatch] = []
     var channelsToNet = 2
     var channelsFromNet = 2
-    /// Nom du périphérique d'après les sources reçues.
+    /// Device name based on received sources.
     var nameFromSources = false
-    /// Présentation dans macOS : "duplex" (un périphérique) ou "split" (In et Out).
+    /// macOS layout: "duplex" (one device) or "split" (In and Out).
     var layout = "duplex"
-    /// Nom annoncé (vide : nom de l'ordinateur), préréglage de latence, octet TOS.
+    /// Advertised name (empty: computer name), latency preset, TOS byte.
     var terminalName = ""
     var latency = "normal"
     var tos = 184
 
-    /// Interface choisie automatiquement.
+    /// Automatically selected interface.
     var autoIface: Bool { iface.isEmpty || iface == "auto" }
 
     init() {}
@@ -137,13 +137,13 @@ struct DeviceMeters {
         }
     }
 
-    /// Crête maximale (dBFS) d'un ensemble de canaux 1-based, ou nil si silence.
+    /// Maximum peak (dBFS) across 1-based channels, or nil for silence.
     static func peak(_ values: [Double?], channels: [Int]) -> Double? {
         channels.compactMap { c in c >= 1 && c <= values.count ? values[c - 1] : nil }.max()
     }
 }
 
-/// Liaison réseau : interface de la session, ou recherche.
+/// Network connection: session interface or searching.
 struct LinkStatus {
     var auto = true
     var searching = true

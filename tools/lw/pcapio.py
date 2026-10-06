@@ -1,4 +1,4 @@
-"""Lecture pcap / pcapng (stdlib) et decodage Ethernet / 802.1Q / IPv4 / UDP.
+"""Read pcap / pcapng (standard library), decode Ethernet / 802.1Q / IPv4 / UDP.
 
     for pkt in udp_packets("capture.pcapng"):
         pkt.ts, pkt.src, pkt.dst, pkt.sport, pkt.dport, pkt.payload, pkt.tos, pkt.ttl, pkt.vlan
@@ -52,7 +52,7 @@ def _read_pcapng(f):
         if len(head) < 8:
             return
         if first:
-            # le Section Header Block porte le byte-order magic a l'offset 8
+            # Section Header Block carries byte-order magic at offset 8
             bom = f.read(4)
             endian = "<" if bom == b"\x4d\x3c\x2b\x1a" else ">"
             btype, blen = struct.unpack(endian + "II", head)
@@ -61,7 +61,7 @@ def _read_pcapng(f):
             continue
         btype, blen = struct.unpack(endian + "II", head)
         body = f.read(blen - 8)
-        if btype == 0x0A0D0D0A:  # nouvelle section
+        if btype == 0x0A0D0D0A:  # New section
             endian = "<" if body[:4] == b"\x4d\x3c\x2b\x1a" else ">"
             interfaces = []
         elif btype == 1:  # Interface Description Block
@@ -88,7 +88,7 @@ def _read_pcapng(f):
 
 
 def frames(path):
-    """Itere (timestamp, linktype, trame) sur un pcap ou un pcapng."""
+    """Iterate (timestamp, linktype, frame) over pcap or pcapng."""
     with open(path, "rb") as f:
         magic = f.read(4)
         if magic == b"\x0a\x0d\x0d\x0a":
@@ -101,7 +101,7 @@ def frames(path):
 
 
 def parse_udp(ts, linktype, frame):
-    """Retourne un UdpPacket ou None (non IPv4/UDP, fragment, trame tronquee)."""
+    """Return a UdpPacket or None (not IPv4/UDP, fragment, truncated frame)."""
     if linktype != LINKTYPE_ETHERNET or len(frame) < 14:
         return None
     pos = 12
@@ -139,7 +139,7 @@ def udp_packets(path):
 
 
 def write_pcap(path, records):
-    """Ecrit un pcap classique Ethernet. records : iterable de (timestamp, trame)."""
+    """Write a classic Ethernet pcap. records: iterable of (timestamp, frame)."""
     with open(path, "wb") as f:
         f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, LINKTYPE_ETHERNET))
         for ts, frame in records:
@@ -149,7 +149,7 @@ def write_pcap(path, records):
 
 
 def build_udp_frame(src, dst, sport, dport, payload, tos=0xB8, ttl=128, ip_id=0xD0F8, vlan=None):
-    """Trame Ethernet/IPv4/UDP (checksum UDP a 0). Pour les tests et vecteurs."""
+    """Ethernet/IPv4/UDP frame (UDP checksum 0). For tests and vectors."""
     dst_ip = ipaddress.IPv4Address(dst)
     if dst_ip.is_multicast:
         b = dst_ip.packed

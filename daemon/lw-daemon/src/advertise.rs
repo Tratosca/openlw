@@ -1,7 +1,7 @@
-//! Annonce des sources (ADV) sur 239.192.255.3:4001, cadence des appareils Livewire (`docs/protocol/03-advertisement.md`).
+//! Source advertisements (ADV) on 239.192.255.3:4001, Livewire device timing (`docs/protocol/03-advertisement.md`).
 //!
-//! Annonce complète au démarrage puis à 1 s ± 0,5 s ; ensuite une courte toutes les 20 s ± 5 s ;
-//! complète après 8 courtes ou à chaque changement. Pages de 8 sources espacées de 100 ms ± 50 ms.
+//! Full advertisement at startup, then after 1 s ± 0.5 s; short advertisements every 20 s ± 5 s;
+//! full after eight short advertisements or any change. Eight-source pages spaced 100 ms ± 50 ms apart.
 
 use std::io;
 use std::net::{SocketAddrV4, UdpSocket};
@@ -15,8 +15,8 @@ use crate::iface::Iface;
 use crate::net::{tx_socket, TxOptions};
 use crate::{Jitter, Stop};
 
-/// Version d'annonce (`ADVV`) d'une nouvelle session : secondes Unix, donc différente et croissante
-/// à chaque relance. Un appareil qui connaît déjà la version 1 ignorerait sinon la nouvelle liste.
+/// New session advertisement version (`ADVV`): Unix seconds, thus different and increasing
+/// on each restart. Otherwise a device already knowing version 1 would ignore the new list.
 fn session_advv() -> u32 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -37,7 +37,7 @@ pub struct Advertiser {
 
 impl Advertiser {
     pub fn new(iface: &Iface, terminal_name: &str, sources: Vec<Source>) -> io::Result<Self> {
-        // TTL 128 et TOS 0 ; port source éphémère.
+        // TTL 128 and TOS 0; ephemeral source port.
         let sock = tx_socket(
             iface,
             0,
@@ -69,7 +69,7 @@ impl Advertiser {
         Ok(())
     }
 
-    /// Envoie toutes les pages d'une annonce complète (`page_gap` entre pages).
+    /// Send every page of a full advertisement (`page_gap` between pages).
     pub fn send_full(
         &mut self,
         mut page_gap: impl FnMut() -> Duration,
@@ -102,13 +102,13 @@ impl Advertiser {
         Ok(())
     }
 
-    /// Change la liste des sources : nouvelle version d'annonce, complète immédiate au prochain tour.
+    /// Change the source list: new advertisement version, immediate full advertisement on the next iteration.
     pub fn set_sources(&mut self, sources: Vec<Source>) {
         self.sources = sources;
         self.terminal.advv = self.terminal.advv.wrapping_add(1);
     }
 
-    /// Boucle d'annonce jusqu'à l'arrêt.
+    /// Advertisement loop until stopped.
     pub fn run(&mut self, stop: &Stop) -> io::Result<()> {
         let mut jitter = Jitter::seeded();
         let mut shorts = 0u32;

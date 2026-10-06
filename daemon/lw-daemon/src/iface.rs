@@ -1,6 +1,6 @@
-//! Interfaces réseau : nom système, nom convivial, index, adresse IPv4.
+//! Network interfaces: system name, friendly name, index, IPv4 address.
 //!
-//! Nom système : `en7` (macOS), `enp3s0` (Linux), nom de la connexion (« Ethernet 2 », Windows).
+//! System name: `en7` (macOS), `enp3s0` (Linux), connection name (“Ethernet 2”, Windows).
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
@@ -10,12 +10,12 @@ use std::process::Command;
 
 use serde::Serialize;
 
-/// Interface utilisable pour Livewire (IPv4 configurée).
+/// Interface usable for Livewire (configured IPv4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Iface {
-    /// Nom système, ex. `en7`, `enp3s0`, « Ethernet 2 ».
+    /// System name, e.g. `en7`, `enp3s0`, “Ethernet 2”.
     pub name: String,
-    /// Nom convivial, ex. « Thunderbolt Ethernet » (macOS : `networksetup`) ; ailleurs le nom système.
+    /// Friendly name, e.g. “Thunderbolt Ethernet” (macOS: `networksetup`); system name elsewhere.
     pub friendly: String,
     pub index: u32,
     pub ipv4: Ipv4Addr,
@@ -28,7 +28,7 @@ impl Iface {
     }
 }
 
-/// Interfaces avec une adresse IPv4, triées par nom.
+/// Interfaces with an IPv4 address, sorted by name.
 pub fn list() -> std::io::Result<Vec<Iface>> {
     let friendly = friendly_names();
     let mut out: Vec<Iface> = if_addrs::get_if_addrs()?
@@ -52,7 +52,7 @@ pub fn list() -> std::io::Result<Vec<Iface>> {
     Ok(out)
 }
 
-/// Résout une interface par nom système ou nom convivial.
+/// Resolve an interface by system or friendly name.
 pub fn find(name: &str) -> std::io::Result<Iface> {
     list()?
         .into_iter()
@@ -65,14 +65,14 @@ pub fn find(name: &str) -> std::io::Result<Iface> {
         })
 }
 
-/// Correspondance nom système → nom convivial (macOS : `networksetup -listallhardwareports`).
-/// Linux n'en a pas ; sous Windows, le nom système est déjà le nom de la connexion.
+/// System → friendly name mapping (macOS: `networksetup -listallhardwareports`).
+/// Linux has none; on Windows, the system name is already the connection name.
 #[cfg(not(target_os = "macos"))]
 fn friendly_names() -> BTreeMap<String, String> {
     BTreeMap::new()
 }
 
-/// Correspondance nom système → nom convivial (macOS : `networksetup -listallhardwareports`).
+/// System → friendly name mapping (macOS: `networksetup -listallhardwareports`).
 #[cfg(target_os = "macos")]
 fn friendly_names() -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();

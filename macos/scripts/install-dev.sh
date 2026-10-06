@@ -1,12 +1,12 @@
 #!/bin/sh
-# Installation de développement : daemon (LaunchDaemon), plugin HAL et app. À lancer avec sudo
-# après macos/scripts/build-all.sh. Retrait : sudo macos/scripts/uninstall-dev.sh
+# Development installation: daemon (LaunchDaemon), HAL plugin, app. Run with sudo
+# after macos/scripts/build-all.sh. Remove: sudo macos/scripts/uninstall-dev.sh
 #
-# Fichiers installés :
+# Installed files:
 #   /Library/Application Support/OpenLW/lw-daemon        (root:wheel 755)
-#   /Library/Application Support/OpenLW/lw-daemon.json   (conservé s'il existe déjà)
+#   /Library/Application Support/OpenLW/lw-daemon.json   (preserved if already present)
 #   /Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist        (root:wheel 644)
-#   /Library/Logs/OpenLW/                                         (journal stderr du daemon)
+#   /Library/Logs/OpenLW/                                         (daemon stderr log)
 #   /Library/Audio/Plug-Ins/HAL/OpenLW.driver             (root:wheel)
 #   /Applications/OpenLW.app
 set -eu

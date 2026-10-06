@@ -1,13 +1,13 @@
-//! Canal de contrôle du daemon : une requête JSON, une réponse JSON (ADR 0007).
+//! Daemon control channel: one JSON request, one JSON response (ADR 0007).
 //!
-//! | Système | Transport du service installé                         | Peut modifier                          |
+//! | System | Installed service transport | May modify |
 //! |---------|-------------------------------------------------------|----------------------------------------|
-//! | macOS   | XPC, service Mach `fr.francois-brille.openlw.daemon`  | root, groupe `admin`                   |
-//! | Linux   | socket Unix `$XDG_RUNTIME_DIR/openlw/control.sock`    | root, l'utilisateur du service         |
-//! | Windows | tube nommé `\\.\pipe\fr.francois-brille.openlw.daemon` | administrateurs (session élevée), SYSTEM, groupe local `OpenLW` |
+//! | macOS | XPC, Mach service `fr.francois-brille.openlw.daemon` | root, `admin` group |
+//! | Linux | Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock` | root, service user |
+//! | Windows | Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon` | Elevated administrators, SYSTEM, local `OpenLW` group |
 //!
-//! La socket Unix sert aussi sur macOS (tests, outils). Sur les transports par flux (socket, tube),
-//! chaque message tient sur une ligne terminée par `\n` ; le JSON compact n'en contient jamais.
+//! Unix socket also works on macOS (tests, tools). On stream transports (socket, pipe),
+//! each message is one line ending with `\n`; compact JSON contains no literal newlines.
 
 use std::fmt;
 #[cfg(unix)]
@@ -16,13 +16,13 @@ use std::sync::Arc;
 
 use crate::shm::Region;
 
-/// Nom du service : service Mach (macOS), tube nommé (Windows).
+/// Service name: Mach service (macOS), named pipe (Windows).
 pub const SERVICE_NAME: &str = "fr.francois-brille.openlw.daemon";
 
-/// Groupe local Windows dont les membres peuvent modifier la configuration (créé par l'installeur).
+/// Local Windows group whose members may modify configuration (created by installer).
 pub const EDIT_GROUP_WINDOWS: &str = "OpenLW";
 
-/// Erreur du canal de contrôle.
+/// Control-channel error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(pub String);
 
@@ -34,21 +34,21 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Appelant d'une requête, identifié par le transport.
+/// Request caller, identified by transport.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
-    /// Identité lisible (« uid 501 », « PC\\françois »).
+    /// Readable identity (“uid 501”, “PC\\françois”).
     pub label: String,
-    /// UID effectif (macOS, Linux).
+    /// Effective UID (macOS/Linux).
     pub uid: Option<u32>,
-    /// Processus appelant, s'il est connu.
+    /// Calling process, if known.
     pub pid: Option<u32>,
-    /// Autorisé à modifier la configuration (voir [`edit_policy`]).
+    /// Authorized to modify configuration (see [`edit_policy`]).
     pub may_edit: bool,
 }
 
 impl Caller {
-    /// Appelant interne au processus, autorisé à tout (tests, outils).
+    /// In-process caller, fully authorized (tests, tools).
     pub fn trusted(label: &str) -> Self {
         Self {
             label: label.into(),
@@ -58,7 +58,7 @@ impl Caller {
         }
     }
 
-    /// Appelant identifié par son UID, avec la règle d'édition du système.
+    /// Caller identified by UID with system-specific edit policy.
     #[cfg(unix)]
     pub fn from_uid(uid: u32, pid: Option<u32>) -> Self {
         #[cfg(target_os = "macos")]
@@ -74,7 +74,7 @@ impl Caller {
     }
 }
 
-/// Qui peut modifier la configuration sur ce système (message d'erreur destiné à l'utilisateur).
+/// Who may modify configuration on this system (user-facing error message).
 pub fn edit_policy() -> &'static str {
     if cfg!(target_os = "macos") {
         "réservé aux administrateurs de ce Mac (groupe admin)"
@@ -85,30 +85,30 @@ pub fn edit_policy() -> &'static str {
     }
 }
 
-/// Gestionnaire de requêtes : JSON de la requête et appelant → JSON de la réponse.
+/// Request handler: request JSON and caller → response JSON.
 pub type Handler = Box<dyn Fn(&str, &Caller) -> String + Send + Sync + 'static>;
 
-/// Point d'accès du canal de contrôle.
+/// Control-channel endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Endpoint {
-    /// Service Mach.
+    /// Mach service.
     #[cfg(target_os = "macos")]
     Mach {
-        /// Nom du service.
+        /// Service name.
         name: String,
-        /// Domaine système (LaunchDaemon) plutôt qu'utilisateur (LaunchAgent).
+        /// System domain (LaunchDaemon) rather than user domain (LaunchAgent).
         privileged: bool,
     },
-    /// Socket Unix.
+    /// Unix socket.
     #[cfg(unix)]
     Socket(PathBuf),
-    /// Tube nommé local (`\\.\pipe\<nom>`).
+    /// Local named pipe (`\\.\pipe\<name>`).
     #[cfg(windows)]
     Pipe(String),
 }
 
 impl Endpoint {
-    /// Point d'accès du service installé sur ce système.
+    /// Installed service endpoint on this system.
     pub fn service() -> Self {
         #[cfg(target_os = "macos")]
         {
@@ -127,8 +127,8 @@ impl Endpoint {
         }
     }
 
-    /// Lit `mach:NOM`, `mach-user:NOM` (macOS), `unix:CHEMIN` (macOS, Linux), `pipe:NOM` (Windows),
-    /// ou `service` (point d'accès du service installé).
+    /// Parse `mach:NAME`, `mach-user:NAME` (macOS), `unix:PATH` (macOS/Linux), `pipe:NAME` (Windows),
+    /// or `service` (installed service endpoint).
     pub fn parse(s: &str) -> Result<Self, Error> {
         if s == "service" {
             return Ok(Self::service());
@@ -184,8 +184,8 @@ impl fmt::Display for Endpoint {
     }
 }
 
-/// Répertoire d'exécution de l'utilisateur : `$XDG_RUNTIME_DIR`, sinon `/run/user/<uid>`, sinon le
-/// répertoire temporaire.
+/// User runtime directory: `$XDG_RUNTIME_DIR`, otherwise `/run/user/<uid>`, otherwise the
+/// temporary directory.
 #[cfg(unix)]
 pub fn runtime_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
@@ -199,7 +199,7 @@ pub fn runtime_dir() -> PathBuf {
     }
 }
 
-/// Serveur du canal de contrôle. Arrêté au `drop` (attend la fin des requêtes en cours).
+/// Control-channel server. Stopped on `drop` (waits for active requests).
 pub struct Server {
     inner: ServerInner,
 }
@@ -208,13 +208,13 @@ enum ServerInner {
     #[cfg(target_os = "macos")]
     Xpc(crate::xpc::Server),
     #[cfg(unix)]
-    Socket(#[allow(dead_code)] unix::SocketServer), // gardé pour son arrêt au drop
+    Socket(#[allow(dead_code)] unix::SocketServer), // Retained to stop on drop
     #[cfg(windows)]
     Pipe(windows::PipeServer),
 }
 
 impl Server {
-    /// Démarre le serveur sur `endpoint`.
+    /// Start server on `endpoint`.
     pub fn start(endpoint: &Endpoint, handler: Handler) -> Result<Self, Error> {
         let inner = match endpoint {
             #[cfg(target_os = "macos")]
@@ -235,7 +235,7 @@ impl Server {
         Ok(Self { inner })
     }
 
-    /// Serveur XPC anonyme (tests, même processus) : se joindre par [`Server::xpc`] et
+    /// Anonymous XPC server (tests, same process): connect through [`Server::xpc`] and
     /// [`crate::xpc::Client::from_endpoint`].
     #[cfg(target_os = "macos")]
     pub fn anonymous_xpc(handler: Handler) -> Result<Self, Error> {
@@ -249,7 +249,7 @@ impl Server {
         })
     }
 
-    /// Serveur XPC sous-jacent, s'il y en a un.
+    /// Underlying XPC server, if any.
     #[cfg(target_os = "macos")]
     pub fn xpc(&self) -> Option<&crate::xpc::Server> {
         match &self.inner {
@@ -258,9 +258,9 @@ impl Server {
         }
     }
 
-    /// Région partagée remise aux clients qui la demandent (requête `attach` avec la région) :
-    /// objet joint à la réponse XPC (macOS), section dupliquée dans le processus du client et
-    /// décrite dans le champ `shmem` de la réponse (Windows). Sans effet sur la socket Unix.
+    /// Shared region returned to requesting clients (`attach` request with region):
+    /// object attached to XPC response (macOS), section duplicated into client process and
+    /// described in response `shmem` field (Windows). No effect on Unix socket.
     pub fn set_region(&self, region: &Arc<Region>) {
         match &self.inner {
             #[cfg(target_os = "macos")]
@@ -275,7 +275,7 @@ impl Server {
     }
 }
 
-/// Client du canal de contrôle.
+/// Control-channel client.
 pub struct Client {
     inner: ClientInner,
 }
@@ -290,7 +290,7 @@ enum ClientInner {
 }
 
 impl Client {
-    /// Connexion à `endpoint`.
+    /// Connect to `endpoint`.
     pub fn connect(endpoint: &Endpoint) -> Result<Self, Error> {
         let inner = match endpoint {
             #[cfg(target_os = "macos")]
@@ -305,7 +305,7 @@ impl Client {
         Ok(Self { inner })
     }
 
-    /// Requête synchrone : JSON envoyé (sur une ligne), JSON reçu.
+    /// Synchronous request: JSON sent (one line), JSON received.
     pub fn call(&self, request: &str) -> Result<String, Error> {
         match &self.inner {
             #[cfg(target_os = "macos")]
@@ -317,7 +317,7 @@ impl Client {
         }
     }
 
-    /// Requête qui demande aussi la région partagée (macOS par XPC, Windows par tube nommé).
+    /// Request also asking for the shared region (XPC on macOS, named pipe on Windows).
     #[cfg(any(target_os = "macos", windows))]
     pub fn call_with_region(
         &self,
@@ -346,7 +346,7 @@ fn check_line(request: &str) -> Result<(), Error> {
     }
 }
 
-/// Socket Unix (macOS, Linux) : une connexion par client, un thread par connexion.
+/// Unix socket (macOS/Linux): one connection per client, one thread per connection.
 #[cfg(unix)]
 mod unix {
     use std::io::{BufRead, BufReader, ErrorKind, Write};
@@ -362,7 +362,7 @@ mod unix {
 
     use super::{check_line, Caller, Error, Handler};
 
-    /// Intervalle de vérification de l'arrêt (attente d'une connexion, d'une requête).
+    /// Stop-check interval (waiting for connection/request).
     const POLL: Duration = Duration::from_millis(100);
     const MAX_REQUEST_BYTES: usize = 1 << 20;
 
@@ -381,7 +381,7 @@ mod unix {
 
     fn peer(stream: &UnixStream) -> Caller {
         let (mut uid, mut pid) = (u32::MAX, 0u32);
-        // SAFETY: descripteur valide (socket connectée possédée par `stream`) ; pointeurs de sortie valides.
+        // SAFETY: valid descriptor (connected socket owned by `stream`); valid output pointers.
         let rc = unsafe { crate::ffi::lw_peer_cred(stream.as_raw_fd(), &mut uid, &mut pid) };
         if rc != 0 {
             return Caller {
@@ -422,7 +422,7 @@ mod unix {
                         break;
                     }
                 }
-                Ok(_) => break, // fin de flux au milieu d'une ligne
+                Ok(_) => break, // Stream ended mid-line
                 Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
                     if line.len() > MAX_REQUEST_BYTES {
                         break;
@@ -442,7 +442,7 @@ mod unix {
                 if !dir.as_os_str().is_empty() && !dir.exists() {
                     std::fs::create_dir_all(dir)
                         .map_err(|e| err("création du répertoire de", e))?;
-                    // Répertoire privé : seul l'utilisateur du service y accède.
+                    // Private directory: only service user has access.
                     let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
                 }
             }
@@ -570,7 +570,7 @@ mod unix {
     }
 }
 
-/// Tube nommé (Windows) : couche C `lw_pipe_*`.
+/// Named pipe (Windows): `lw_pipe_*` C layer.
 #[cfg(windows)]
 mod windows {
     use std::ffi::{c_char, c_void, CStr, CString};
@@ -582,25 +582,25 @@ mod windows {
     use super::{check_line, Caller, Error, Handler, EDIT_GROUP_WINDOWS};
     use crate::shm::{Region, SharedObject};
 
-    /// Attente maximale d'une instance libre du tube.
+    /// Maximum wait for an available pipe instance.
     const CONNECT_TIMEOUT_MS: u32 = 2000;
 
     struct Ctx {
         handler: Handler,
         region: Mutex<Option<Arc<Region>>>,
-        /// Processus qui détient la région (un seul client audio à la fois : les anneaux sont SPSC).
+        /// Process holding the region (one audio client at a time: rings are SPSC).
         holder: Mutex<Option<u32>>,
     }
 
-    /// Processus vivant ? Renvoie son nom d'image s'il l'est.
+    /// Is process alive? Return its image name if so.
     fn process_alive(pid: u32) -> Option<String> {
         let mut name = [0 as c_char; 260];
-        // SAFETY: tampon de sortie valide, de la taille annoncée.
+        // SAFETY: valid output buffer of declared size.
         let alive = unsafe { crate::ffi::lw_process_alive(pid, name.as_mut_ptr(), name.len()) };
         if alive == 0 {
             return None;
         }
-        // SAFETY: la couche C termine toujours le tampon par un octet nul.
+        // SAFETY: C layer always NUL-terminates the buffer.
         let name = unsafe { CStr::from_ptr(name.as_ptr()) };
         Some(name.to_string_lossy().into_owned())
     }
@@ -616,7 +616,7 @@ mod windows {
                 .as_ref()
                 .and_then(|v| v.get("want_shmem").and_then(Value::as_bool))
                 .unwrap_or(false);
-            // `detach` : le client audio rend la région (fin d'utilisation du pilote).
+            // `detach`: audio client releases the region (driver no longer in use).
             if cmd == Some("detach") {
                 let mut holder = self.holder.lock().unwrap_or_else(PoisonError::into_inner);
                 if holder.is_some() && *holder == caller.pid {
@@ -670,12 +670,12 @@ mod windows {
         ctx: *mut c_void,
     ) -> *mut c_char {
         let run = || {
-            // SAFETY: `ctx` est le `Box<Ctx>` créé par `PipeServer::start`, libéré seulement après
-            // `lw_pipe_server_stop`, qui attend la fin de tous les appels.
+            // SAFETY: `ctx` is the `Box<Ctx>` created by `PipeServer::start`, freed only after
+            // `lw_pipe_server_stop`, which waits for all calls to finish.
             let ctx = unsafe { &*(ctx as *const Ctx) };
-            // SAFETY: la couche C passe une chaîne terminée et un appelant valides pendant l'appel.
+            // SAFETY: C layer passes a terminated string and caller valid during the call.
             let (request, c) = unsafe { (CStr::from_ptr(req).to_string_lossy(), &*caller) };
-            // SAFETY: `user` est une chaîne terminée (tampon de la couche C, mis à zéro puis rempli).
+            // SAFETY: `user` is terminated (C-layer buffer, zeroed then filled).
             let user = unsafe { CStr::from_ptr(c.user.as_ptr()) }.to_string_lossy();
             let caller = Caller {
                 label: user.into_owned(),
@@ -695,7 +695,7 @@ mod windows {
 
     extern "C" fn free_response(p: *mut c_char) {
         if !p.is_null() {
-            // SAFETY: `p` provient de `CString::into_raw` dans `trampoline`, libéré une seule fois.
+            // SAFETY: `p` comes from `CString::into_raw` in `trampoline`, freed once.
             drop(unsafe { CString::from_raw(p) });
         }
     }
@@ -705,10 +705,10 @@ mod windows {
         ctx: *mut Ctx,
     }
 
-    // SAFETY: la couche C protège son état ; `ctx` n'est partagé qu'en lecture (`Handler` est
-    // `Send + Sync`, la région est sous mutex).
+    // SAFETY: C layer protects its state; `ctx` is shared read-only (`Handler` is
+    // `Send + Sync`, region is mutex-protected).
     unsafe impl Send for PipeServer {}
-    // SAFETY: idem.
+    // SAFETY: same reasoning as above.
     unsafe impl Sync for PipeServer {}
 
     impl PipeServer {
@@ -720,8 +720,8 @@ mod windows {
                 region: Mutex::new(None),
                 holder: Mutex::new(None),
             }));
-            // SAFETY: chaînes valides pendant l'appel (copiées par la couche C) ; rappels `extern "C"` ;
-            // `ctx` reste valide jusqu'à `lw_pipe_server_stop` (voir `Drop`).
+            // SAFETY: strings valid during call (copied by C layer); `extern "C"` callbacks;
+            // `ctx` remains valid until `lw_pipe_server_stop` (see `Drop`).
             let raw = unsafe {
                 crate::ffi::lw_pipe_server_start(
                     cname.as_ptr(),
@@ -732,7 +732,7 @@ mod windows {
                 )
             };
             if raw.is_null() {
-                // SAFETY: le serveur n'a pas été créé, `ctx` n'est référencé nulle part ailleurs.
+                // SAFETY: server was not created; `ctx` is referenced nowhere else.
                 drop(unsafe { Box::from_raw(ctx) });
                 return Err(Error(format!(
                     "tube \\\\.\\pipe\\{name} indisponible (déjà servi par un autre processus ?)"
@@ -742,7 +742,7 @@ mod windows {
         }
 
         pub(super) fn set_region(&self, region: Arc<Region>) {
-            // SAFETY: `ctx` est valide tant que le serveur vit.
+            // SAFETY: `ctx` is valid for the server's lifetime.
             let ctx = unsafe { &*self.ctx };
             *ctx.region.lock().unwrap_or_else(PoisonError::into_inner) = Some(region);
         }
@@ -750,9 +750,9 @@ mod windows {
 
     impl Drop for PipeServer {
         fn drop(&mut self) {
-            // SAFETY: serveur actif arrêté une seule fois ; au retour, plus aucun appel en cours.
+            // SAFETY: active server stopped once; no calls remain on return.
             unsafe { crate::ffi::lw_pipe_server_stop(self.raw) };
-            // SAFETY: `ctx` vient de `Box::into_raw` et n'est plus utilisé (barrière ci-dessus).
+            // SAFETY: `ctx` comes from `Box::into_raw`, no longer used (barrier above).
             drop(unsafe { Box::from_raw(self.ctx) });
         }
     }
@@ -761,17 +761,17 @@ mod windows {
         raw: Mutex<*mut crate::ffi::PipeClient>,
     }
 
-    // SAFETY: le handle de tube peut être utilisé depuis n'importe quel thread ; les appels sont
-    // sérialisés par le mutex.
+    // SAFETY: pipe handle usable from any thread; calls
+    // serialized by mutex.
     unsafe impl Send for PipeClient {}
-    // SAFETY: idem.
+    // SAFETY: same reasoning as above.
     unsafe impl Sync for PipeClient {}
 
     fn error_from(err: *const c_char, fallback: &str) -> Error {
         if err.is_null() {
             Error(fallback.into())
         } else {
-            // SAFETY: `err` pointe vers une chaîne statique de la couche C.
+            // SAFETY: `err` points to a static C-layer string.
             Error(
                 unsafe { CStr::from_ptr(err) }
                     .to_string_lossy()
@@ -784,7 +784,7 @@ mod windows {
         pub(super) fn connect(name: &str) -> Result<Self, Error> {
             let cname = CString::new(name).map_err(|_| Error("nom de tube invalide".into()))?;
             let mut err: *const c_char = std::ptr::null();
-            // SAFETY: chaîne valide pendant l'appel ; pointeur de sortie valide.
+            // SAFETY: string valid during call; valid output pointer.
             let raw = unsafe {
                 crate::ffi::lw_pipe_client_connect(cname.as_ptr(), CONNECT_TIMEOUT_MS, &mut err)
             };
@@ -802,16 +802,16 @@ mod windows {
                 .map_err(|_| Error("requête contenant un octet nul".into()))?;
             let raw = self.raw.lock().unwrap_or_else(PoisonError::into_inner);
             let mut err: *const c_char = std::ptr::null();
-            // SAFETY: client ouvert, utilisé par un seul thread à la fois (mutex) ; chaînes valides.
+            // SAFETY: open client, used by one thread at a time (mutex); valid strings.
             let out = unsafe { crate::ffi::lw_pipe_call(*raw, req.as_ptr(), &mut err) };
             if out.is_null() {
                 return Err(error_from(err, "erreur du tube"));
             }
-            // SAFETY: chaîne allouée par la couche C, terminée ; libérée juste après la copie.
+            // SAFETY: terminated C-allocated string; freed immediately after copying.
             let s = unsafe { CStr::from_ptr(out) }
                 .to_string_lossy()
                 .into_owned();
-            // SAFETY: `out` vient de malloc dans la couche C, libéré une seule fois.
+            // SAFETY: `out` comes from malloc in C layer, freed once.
             unsafe { crate::ffi::lw_free(out) };
             Ok(s)
         }
@@ -836,7 +836,7 @@ mod windows {
     impl Drop for PipeClient {
         fn drop(&mut self) {
             let raw = *self.raw.get_mut().unwrap_or_else(PoisonError::into_inner);
-            // SAFETY: client ouvert par `connect`, fermé une seule fois.
+            // SAFETY: client opened by `connect`, closed once.
             unsafe { crate::ffi::lw_pipe_client_close(raw) };
         }
     }
@@ -930,7 +930,7 @@ mod tests {
         assert!(client.call("{}").unwrap().contains("panique"));
     }
 
-    /// Sous Linux, l'utilisateur du service peut modifier ; sous macOS, seuls les administrateurs.
+    /// On Linux, service user may edit; on macOS, administrators only.
     #[cfg(unix)]
     #[test]
     fn edit_rule_follows_uid() {
@@ -960,7 +960,7 @@ mod tests {
         assert!(resp.contains("\"shmem\""));
         let mapped = Region::map(obj.expect("section reçue")).unwrap();
         assert_eq!(mapped.geometry(), region.geometry());
-        // Même processus : nouvel attachement accepté ; `detach` rend la région.
+        // Same process: new attachment accepted; `detach` releases the region.
         assert!(client
             .call_with_region(r#"{"cmd":"attach"}"#)
             .unwrap()

@@ -1,5 +1,5 @@
-# Intégration continue : daemon sur les six plateformes visées, plugin et paquet macOS, outils Python.
-# Les tests réseau du daemon passent par l'interface de bouclage (multicast local).
+# Continuous integration: daemon on all six target platforms, macOS plugin/package, Python tools.
+# Daemon network tests use the loopback interface (local multicast).
 name: CI
 
 on:
@@ -41,7 +41,7 @@ jobs:
         run: cargo build --release -p lw-daemon
 
   windows-driver:
-    name: pilote Windows (${{ matrix.arch }})
+    name: Windows driver (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -54,13 +54,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: SDK ASIO (steinberg.net, empreinte vérifiée)
+      - name: ASIO SDK (steinberg.net, verified hash)
         run: powershell -ExecutionPolicy Bypass -File windows/driver/fetch-sdk.ps1
-      - name: Pilote et hôte de test (MSVC)
+      - name: Driver and test host (MSVC)
         run: |
           cmake -S windows/driver -B build/driver -A ${{ matrix.arch }}
           cmake --build build/driver --config Release
-      - name: Service en boucle interne, essai du pilote
+      - name: Internal-loopback service and driver test
         shell: pwsh
         run: |
           cargo build --release -p lw-daemon --manifest-path daemon/Cargo.toml
@@ -74,22 +74,22 @@ jobs:
           exit $code
 
   macos-bundle:
-    name: plugin, app et paquet macOS
-    runs-on: macos-26   # SDK macOS 26 (NSGlassEffectView)
+    name: macOS plugin, app, and package
+    runs-on: macos-26   # macOS 26 SDK (NSGlassEffectView)
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin, aarch64-apple-darwin
-      - name: Harnais du plugin HAL
+      - name: HAL plugin harness
         run: make -C macos/plugin test
-      - name: Binaires universels et paquet
+      - name: Universal binaries and package
         run: |
           macos/scripts/build-all.sh
           macos/installer/build-pkg.sh
 
   tools:
-    name: outils Python
+    name: Python tools
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

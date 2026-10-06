@@ -1,23 +1,23 @@
-//! Types de flux et tailles de paquet (`docs/protocol/02-rtp-audio.md`).
+//! Stream types and packet sizes (`docs/protocol/02-rtp-audio.md`).
 
 use crate::channel::GroupKind;
 
-/// Fréquence d'échantillonnage Livewire.
+/// Livewire sample rate.
 pub const SAMPLE_RATE: u32 = 48_000;
 
-/// Charge utile maximale d'un paquet audio Livewire.
+/// Maximum Livewire audio-packet payload.
 pub const MAX_PAYLOAD: usize = 1440;
 
-/// Type de flux audio Livewire.
+/// Livewire audio-stream type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StreamFormat {
-    /// 240 échantillons (5 ms), stéréo.
+    /// 240 samples (5 ms), stereo.
     Standard,
-    /// 48 échantillons (1 ms), stéréo, horloge média PTP.
+    /// 48 samples (1 ms), stereo, PTP media clock.
     Aes67,
-    /// 12 échantillons (0,25 ms), stéréo.
+    /// 12 samples (0.25 ms), stereo.
     Livestream,
-    /// 60 échantillons (1,25 ms), 8 canaux.
+    /// 60 samples (1.25 ms), eight channels.
     Surround,
 }
 
@@ -45,17 +45,17 @@ impl StreamFormat {
         }
     }
 
-    /// Intervalle entre paquets en microsecondes.
+    /// Packet interval in microseconds.
     pub const fn packet_interval_us(self) -> u32 {
         self.samples_per_packet() * 1_000_000 / SAMPLE_RATE
     }
 
-    /// Charge utile en L24.
+    /// L24 payload.
     pub const fn payload_bytes_l24(self) -> usize {
         self.samples_per_packet() as usize * self.channels() as usize * 3
     }
 
-    /// Format correspondant à une taille de paquet et un nombre de canaux observés.
+    /// Format matching an observed packet size and channel count.
     pub fn from_samples(samples: u32, channels: u16) -> Option<Self> {
         [
             StreamFormat::Standard,
@@ -68,8 +68,8 @@ impl StreamFormat {
     }
 }
 
-/// Valeur de `a=ptime` :
-/// multiple de 48 échantillons → entier en ms ; 60 ou 12 → deux décimales ; sinon « 1 ».
+/// `a=ptime` value:
+/// Multiple of 48 samples → integer milliseconds; 60 or 12 → two decimals; otherwise “1”.
 pub fn ptime_text(samples: u32) -> String {
     if samples % 48 == 0 {
         (samples * 1000 / SAMPLE_RATE).to_string()

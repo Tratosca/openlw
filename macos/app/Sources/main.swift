@@ -1,8 +1,8 @@
-// Point d'entrée de OpenLW.
-// Options de développement :
-//   --snapshot <fichier.png>  rend la fenêtre dans un PNG après 3 s puis quitte (vérification sans écran)
-//   --service <nom> --user    daemon publié par un LaunchAgent plutôt que par le LaunchDaemon
-//   --listen <canal>          pré-écoute de ce canal stéréo dès que l'interface est connue
+// OpenLW entry point.
+// Development options:
+//   --snapshot <file.png>  render window to PNG after 3 s, then exit (headless verification)
+//   --service <name> --user    daemon published by LaunchAgent rather than LaunchDaemon
+//   --listen <channel>          preview this stereo channel once the interface is known
 
 import AppKit
 
@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Script de désinstallation posé par l'installeur (macos/installer/payload).
+    /// Uninstall script provided by installer (macos/installer/payload).
     static let uninstaller = "/Library/Application Support/OpenLW/uninstall.sh"
 
     @objc private func uninstall(_ sender: Any) {
@@ -51,12 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         confirm.addButton(withTitle: "Désinstaller")
         confirm.addButton(withTitle: "Annuler")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
-        // Droits administrateur demandés par macOS (fenêtre d'authentification standard).
+        // Administrator privileges requested by macOS (standard authentication dialog).
         let script = "do shell script quoted form of \"\(Self.uninstaller)\" with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let e = error {
-            if (e[NSAppleScript.errorNumber] as? Int) == -128 { return } // authentification annulée
+            if (e[NSAppleScript.errorNumber] as? Int) == -128 { return } // Authentication canceled
             alert("Désinstallation incomplète", e[NSAppleScript.errorMessage] as? String ?? "Erreur inconnue.")
             return
         }
@@ -89,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "Masquer OpenLW", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quitter OpenLW", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
-        // Menu Édition : copier-coller dans les champs de saisie.
+        // Edit menu: copy/paste in text fields.
         let editItem = NSMenuItem()
         bar.addItem(editItem)
         let edit = NSMenu(title: "Édition")

@@ -1,124 +1,124 @@
-# 03 — Annonce et découverte des sources
+# 03 — Source advertisements and discovery
 
-Les appareils Livewire annoncent leurs sources en multicast. OpenLW écoute ces annonces pour découvrir les sources du réseau, et annonce les canaux qu'il diffuse.
+Livewire devices advertise their sources through multicast. OpenLW listens to these advertisements to discover network sources and advertises the channels it transmits.
 
 ## Transport
 
-| Élément | Valeur | Mention |
+| Item | Value | Evidence |
 |---|---|---|
-| Annonces | multicast **239.192.255.3**, UDP **4001** | Observé |
-| Port de contrôle d'un terminal | UDP **4000** (annoncé dans `UDPC`), unicast | Observé |
-| TTL | 128 | Observé |
+| Advertisements | Multicast **239.192.255.3**, UDP **4001** | Observed |
+| Terminal control port | UDP **4000** (advertised in `UDPC`), unicast | Observed |
+| TTL | 128 | Observed |
 
-Un datagramme = **enveloppe de 16 octets** + **message TLV**.
+One datagram = **16-byte envelope** + **TLV message**.
 
-## Enveloppe (16 octets)
+## Envelope (16 bytes)
 
-| Octet(s) | Valeur observée | Rôle |
+| Byte(s) | Observed value | Role |
 |---|---|---|
-| 0 | 3 | couche du message (message TLV) |
-| 1 | 0 | datagramme sans acquittement |
-| 2 | 2 | version du format TLV |
-| 3 | 7 | version de l'enveloppe |
-| 4–7 | numéro de séquence | incrémenté à chaque envoi, jamais 0 |
-| 8–15 | 0 | non utilisés dans les annonces |
+| 0 | 3 | Message layer (TLV message) |
+| 1 | 0 | Datagram without acknowledgment |
+| 2 | 2 | TLV format version |
+| 3 | 7 | Envelope version |
+| 4–7 | Sequence number | Incremented on each send, never 0 |
+| 8–15 | 0 | Unused in advertisements |
 
-OpenLW rejette un datagramme dont l'octet 3 n'est pas 7.
+OpenLW rejects datagrams whose byte 3 is not 7.
 
-## Message TLV
+## TLV message
 
 ```
-u32  identifiant du message (quatre caractères ASCII, ex. 'NEST')
-u16  nombre d'entrées
-entrées :
-  u32  étiquette (quatre caractères ASCII, ex. 'PSNM')
+u32  message identifier (four ASCII characters, e.g. 'NEST')
+u16  entry count
+entries:
+  u32  tag (four ASCII characters, e.g. 'PSNM')
   u8   type
-  ...  valeur selon le type
+  ...  value according to type
 ```
 
-| Type | Valeur |
+| Type | Value |
 |---|---|
 | 1 | u32 |
-| 2 | u16 longueur + octets |
-| 3 | u16 longueur + chaîne (longueur fixe, complétée par des zéros) |
-| 4 | u16 nombre + nombre × u16 |
-| 5 | u16 nombre + nombre × u32 |
-| 6 | u16 longueur + message TLV imbriqué (identifiant puis entrées) |
+| 2 | u16 length + bytes |
+| 3 | u16 length + string (fixed length, zero-padded) |
+| 4 | u16 count + count × u16 |
+| 5 | u16 count + count × u32 |
+| 6 | u16 length + nested TLV message (identifier followed by entries) |
 | 7 | u8 |
 | 8 | u16 |
 | 9 | u64 |
 
-Un message imbriqué observé porte l'identifiant `INDI`, suivi du nombre d'entrées comme tout message.
+An observed nested message has the identifier `INDI`, followed by the entry count like any message.
 
-## Annonce complète et annonce courte
+## Full and short advertisements
 
 ```
 'NEST'
   'PVER'  u16  2
-  'ADVT'  u8   1 = annonce complète, 2 = annonce courte (keepalive)
-  'TERM'  message 'INDI' : le terminal
-     'ADVV'  u32  version de l'annonce (change quand la liste des sources change)
-     'HWID'  u16  identifiant du terminal (16 bits bas de son adresse IP)
-     'INIP'  u32  adresse IP du terminal
-     'UDPC'  u16  port de contrôle (4000)
-     'NUMS'  u16  nombre de sources annoncées
-     'ATRN'  chaîne[32]  nom du terminal (annonce complète seulement)
-  'S001' … 'S240'  message 'INDI' : une source par emplacement (annonce complète seulement)
-     'PSID'  u32  canal Livewire
-     'SHAB'  u8   source partageable
-     'FSID'  u32  groupe du flux aller (239.192.x.y)
-     'FAST'  u8   type du flux aller : 2 stéréo L24, 3 stéréo L16, 4 surround
-     'FASM'  u8   mode du flux aller (1)
-     'BSID'  u32  groupe de retour (239.193.x.y)
-     'BAST'  u8   type du flux de retour
-     'BASM'  u8   mode du flux de retour
-     'LPID'  u32  canal (copie de PSID)
+  'ADVT'  u8   1 = full advertisement, 2 = short advertisement (keepalive)
+  'TERM'  message 'INDI': the terminal
+     'ADVV'  u32  advertisement version (changes when the source list changes)
+     'HWID'  u16  terminal identifier (low 16 bits of its IP address)
+     'INIP'  u32  terminal IP address
+     'UDPC'  u16  control port (4000)
+     'NUMS'  u16  advertised source count
+     'ATRN'  string[32]  terminal name (full advertisement only)
+  'S001' … 'S240'  message 'INDI': one source per slot (full advertisement only)
+     'PSID'  u32  Livewire channel
+     'SHAB'  u8   shareable source
+     'FSID'  u32  forward-stream group (239.192.x.y)
+     'FAST'  u8   forward-stream type: 2 L24 stereo, 3 L16 stereo, 4 surround
+     'FASM'  u8   forward-stream mode (1)
+     'BSID'  u32  return group (239.193.x.y)
+     'BAST'  u8   return-stream type
+     'BASM'  u8   return-stream mode
+     'LPID'  u32  channel (copy of PSID)
      'STPL'  u8   0
-     'PSNM'  chaîne[16]  nom de la source
-     'LABL'  chaîne[10]  libellé (facultatif)
+     'PSNM'  string[16]  source name
+     'LABL'  string[10]  label (optional)
 ```
 
-Mentions : structure et étiquettes observées ; types des chaînes (3) observés ; sens de `SHAB`, `FASM`, `BAST`, `BASM`, `STPL` : hypothèse.
+Evidence: structure, tags, and string types (3) observed; meanings of `SHAB`, `FASM`, `BAST`, `BASM`, and `STPL` are hypotheses.
 
-- Une annonce complète contient au plus **8 sources par datagramme** ; au-delà, elle est envoyée en pages successives avec la même `ADVV`.
-- L'annonce courte a la même enveloppe `NEST`, avec `ADVT = 2`, un `TERM` sans `ATRN` et aucune source.
-- Une étiquette de source est `S` suivi de trois chiffres ASCII (emplacement 1 à 240).
-- Les noms sont en ASCII : OpenLW remplace les lettres accentuées (« François » → « Francois ») et complète par des zéros.
+- A full advertisement contains at most **8 sources per datagram**; larger lists are sent in successive pages with the same `ADVV`.
+- A short advertisement uses the same `NEST` envelope, with `ADVT = 2`, a `TERM` without `ATRN`, and no sources.
+- A source tag is `S` followed by three ASCII digits (slot 1–240).
+- Names use ASCII: OpenLW replaces accented letters (“François” → “Francois”) and pads with zeros.
 
-### Valeurs choisies par OpenLW
+### Values chosen by OpenLW
 
-- `ADVV` : heure Unix (secondes) au démarrage de la session d'annonce. Elle change donc à chaque modification des sources annoncées, ce qui fait relire la liste aux autres appareils.
-- `BAST = 0`, `BASM = 1` : OpenLW ne fournit pas de flux de retour.
+- `ADVV`: Unix time in seconds at advertisement-session startup. It therefore changes whenever the advertised sources change, prompting other devices to reread the list.
+- `BAST = 0`, `BASM = 1`: OpenLW provides no return stream.
 - `SHAB = 0`, `FASM = 1`, `STPL = 0`.
 
-## Cadence d'émission d'OpenLW
+## OpenLW transmission timing
 
-| Événement | Délai |
+| Event | Delay |
 |---|---|
-| Annonce complète | au démarrage, puis 1 s ± 0,5 s plus tard |
-| Annonce courte | toutes les 20 s ± 5 s |
-| Annonce complète périodique | après 8 annonces courtes |
-| Pages d'une annonce complète | 100 ms ± 50 ms entre deux pages |
+| Full advertisement | At startup, then 1 s ± 0.5 s later |
+| Short advertisement | Every 20 s ± 5 s |
+| Periodic full advertisement | After 8 short advertisements |
+| Full-advertisement pages | 100 ms ± 50 ms between pages |
 
-Observé sur un appareil Livewire : annonce courte environ toutes les 10 s.
+Observed on a Livewire device: short advertisement approximately every 10 s.
 
-## Découverte
+## Discovery
 
-- Un terminal est identifié par son adresse IP (`INIP`).
-- Une annonce complète avec une nouvelle `ADVV` remplace la liste des sources du terminal ; les pages d'une même `ADVV` s'additionnent.
-- Une annonce courte rafraîchit seulement le terminal.
-- Un terminal muet depuis 75 s (trois annonces courtes manquées) est retiré.
-- **Requête d'annonce complète** (Choix OpenLW) : quand une annonce courte arrive d'un terminal dont la liste n'est pas connue, OpenLW lui envoie en unicast, sur son port `UDPC`, au plus une fois toutes les 5 s :
+- A terminal is identified by its IP address (`INIP`).
+- A full advertisement with a new `ADVV` replaces the terminal's source list; pages sharing an `ADVV` accumulate.
+- A short advertisement refreshes only the terminal.
+- A terminal silent for 75 s (three missed short advertisements) is removed.
+- **Full-advertisement request** (OpenLW choice): when a short advertisement arrives from a terminal whose source list is unknown, OpenLW sends this unicast request to its `UDPC` port at most once every 5 s:
 
 ```
-enveloppe : 03 00 02 07 | séquence | 00 × 8
-message 'READ', 1 entrée : 'ADVD' u8 = 1
+envelope: 03 00 02 07 | sequence | 00 × 8
+message 'READ', 1 entry: 'ADVD' u8 = 1
 ```
 
-La réponse des appareils à cette requête n'est pas établie ([open-questions.md](open-questions.md)). À défaut, la liste arrive avec la prochaine annonce complète périodique.
+Device responses to this request are not established ([open-questions.md](open-questions.md)). Otherwise, the list arrives with the next periodic full advertisement.
 
-## Autre message observé
+## Other observed message
 
-Certains appareils envoient aussi, environ toutes les 10 s, un message `ADVT = 3` : `TERM` réduit à `HWID`, puis une entrée `S001` avec `PSID`, une étiquette `BUSY` (u64) et deux entrées d'étiquettes `0xFFFFFFFF` et `0xFFFFFFFE` (u64). Sens : hypothèse (occupation de la source). OpenLW l'ignore.
+Some devices also send an `ADVT = 3` message approximately every 10 s: `TERM` reduced to `HWID`, followed by an `S001` entry with `PSID`, a `BUSY` tag (u64), and two entries tagged `0xFFFFFFFF` and `0xFFFFFFFE` (u64). Meaning: hypothesis (source occupancy). OpenLW ignores it.
 
-Vecteurs : [vectors/adv_packets.json](vectors/adv_packets.json). Implémentations : `daemon/lw-proto/src/{envelope,tlv,adv}.rs`, `tools/lw/advcodec.py`. Dissecteur : `tools/wireshark/livewire.lua`.
+Vectors: [vectors/adv_packets.json](vectors/adv_packets.json). Implementations: `daemon/lw-proto/src/{envelope,tlv,adv}.rs`, `tools/lw/advcodec.py`. Dissector: `tools/wireshark/livewire.lua`.

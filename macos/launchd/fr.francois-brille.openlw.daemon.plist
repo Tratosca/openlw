@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  LaunchDaemon du service réseau Livewire, posé par l'installeur (macos/installer/build-pkg.sh) :
+  Livewire network service LaunchDaemon, installed by the package (macos/installer/build-pkg.sh) :
     /Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist   (root:wheel, 644)
-    /Library/Application Support/OpenLW/lw-daemon        (binaire universel)
-    /Library/Application Support/OpenLW/lw-daemon.json   (réglages, modifiés par OpenLW)
-  Le nom MachServices est celui que le plugin HAL déclare dans AudioServerPlugIn_MachServices (ADR 0005),
-  que OpenLW et `lw-daemon ctl` interrogent.
+    /Library/Application Support/OpenLW/lw-daemon        (universal binary)
+    /Library/Application Support/OpenLW/lw-daemon.json   (settings, modified by OpenLW)
+  MachServices name is declared by the HAL plugin in AudioServerPlugIn_MachServices (ADR 0005),
+  and queried by OpenLW and `lw-daemon ctl`.
 -->
 <plist version="1.0">
 <dict>

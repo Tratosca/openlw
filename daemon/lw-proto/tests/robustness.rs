@@ -1,7 +1,7 @@
-//! Robustesse des décodeurs face à des entrées hostiles (substitut de `cargo-fuzz` en stable).
+//! Decoder robustness against hostile input (`cargo-fuzz` substitute on stable).
 //!
-//! Entrées aléatoires et mutations de paquets valides : aucun décodeur ne doit paniquer.
-//! Générateur déterministe (xorshift) : un échec est reproductible.
+//! Random inputs and mutations of valid packets: no decoder may panic.
+//! Deterministic generator (xorshift): failures are reproducible.
 
 #![allow(clippy::indexing_slicing)]
 
@@ -108,7 +108,7 @@ fn mutated_valid_packets_never_panic() {
                         buf.insert(i, rng.next() as u8);
                     }
                     _ if buf.len() > 2 => {
-                        // Longueurs u16 hostiles.
+                        // Hostile u16 lengths.
                         let i = rng.below(buf.len() - 1);
                         buf[i] = 0xFF;
                         buf[i + 1] = 0xFF;
@@ -123,6 +123,6 @@ fn mutated_valid_packets_never_panic() {
 
 #[test]
 fn hostile_count_does_not_allocate_wildly() {
-    // count = 65535 annoncé sur un message de 6 octets : refus rapide, pas d'allocation géante.
+    // count = 65535 in a six-byte message: fast rejection, no huge allocation.
     assert!(TlvMsg::decode(b"NEST\xFF\xFF").is_err());
 }

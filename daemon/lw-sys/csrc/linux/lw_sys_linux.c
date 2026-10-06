@@ -1,6 +1,6 @@
 /*
- * Couche C du daemon OpenLW, Linux. Le daemon tourne en service systemd utilisateur et sert lui-même
- * les nœuds PipeWire : la région partagée reste locale au processus.
+ * OpenLW daemon C layer, Linux. Daemon runs as a user systemd service and serves
+ * PipeWire nodes itself: the shared region remains process-local.
  */
 #define _GNU_SOURCE
 
@@ -14,11 +14,11 @@
 #include <sys/mman.h>
 #include <time.h>
 
-/* ---------- Temps réel ---------- */
+/* ---------- Real-time ---------- */
 
-/* Priorité SCHED_FIFO modeste, sous celle des threads de PipeWire (88 par défaut) : le thread réseau
- * ne doit pas préempter le graphe audio. Exige CAP_SYS_NICE ou une limite RLIMIT_RTPRIO suffisante
- * (groupe pipewire ou audio, limits.d) ; sinon EPERM et le thread reste en temps partagé. */
+/* Modest SCHED_FIFO priority below PipeWire threads (default 88): network thread
+ * must not preempt the audio graph. Requires CAP_SYS_NICE or sufficient RLIMIT_RTPRIO
+ * (pipewire/audio group, limits.d); otherwise EPERM and thread remains time-shared. */
 #define LW_RT_PRIORITY 70
 
 int lw_rt_promote(uint64_t period_ns, uint64_t computation_ns, uint64_t constraint_ns) {
@@ -45,7 +45,7 @@ void lw_sleep_ns(uint64_t ns) {
     }
 }
 
-/* ---------- Journal ---------- */
+/* ---------- Logging ---------- */
 
 void lw_log(int level, const char *category, const char *message) {
     (void)level;
@@ -53,7 +53,7 @@ void lw_log(int level, const char *category, const char *message) {
     (void)message;
 }
 
-/* ---------- Horloge hôte : CLOCK_MONOTONIC en nanosecondes ---------- */
+/* ---------- Host clock: CLOCK_MONOTONIC in nanoseconds ---------- */
 
 uint64_t lw_host_time(void) {
     struct timespec t;
@@ -71,7 +71,7 @@ void lw_host_clock_info(lw_host_clock *clock) {
     clock->ns_denom = 1;
 }
 
-/* ---------- Région partagée (locale au processus) ---------- */
+/* ---------- Shared region (process-local) ---------- */
 
 void *lw_shm_alloc(size_t size, void **handle) {
     *handle = NULL;

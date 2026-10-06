@@ -1,16 +1,16 @@
 /*
- * Couche C du daemon OpenLW, Windows (10 22H2 et plus, x64 et ARM64). Le daemon tourne en service ;
- * les clients (app, pilote audio, `lw-daemon ctl`) le joignent par un tube nommé local.
+ * OpenLW daemon C layer, Windows (10 22H2 and later, x64/ARM64). Daemon runs as a service;
+ * clients (app, audio driver, `lw-daemon ctl`) connect through a local named pipe.
  *
- * Sécurité du tube :
- * - DACL : SYSTEM et Administrateurs en contrôle total ; utilisateurs authentifiés en lecture et
- *   écriture de données seulement, sans FILE_CREATE_PIPE_INSTANCE (pas de prise de nom par un tiers).
- * - Premier exemplaire créé avec FILE_FLAG_FIRST_PIPE_INSTANCE, connexions distantes refusées.
- * - L'appelant est identifié par son jeton (impersonation au niveau Identification) : seuls les
- *   administrateurs en session élevée, LocalSystem et les membres du groupe d'édition modifient.
+ * Pipe security:
+ * - DACL: SYSTEM/Administrators full control; authenticated users may read and
+ * write data only, without FILE_CREATE_PIPE_INSTANCE (no third-party name takeover).
+ * - First instance uses FILE_FLAG_FIRST_PIPE_INSTANCE; remote connections rejected.
+ * - Caller identified through its token (Identification-level impersonation): only elevated
+ * administrators, LocalSystem, and edit-group members may modify configuration.
  *
- * DSCP : Windows ignore IP_TOS ; le marquage passe par qWAVE (QOSSetOutgoingDSCPValue), réservé aux
- * administrateurs et aux services.
+ * DSCP: Windows ignores IP_TOS; marking uses qWAVE (QOSSetOutgoingDSCPValue), restricted to
+ * administrators and services.
  */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -41,7 +41,7 @@
 #define LW_TLS _Thread_local
 #endif
 
-/* ---------- Conversions UTF-8 ↔ UTF-16 ---------- */
+/* ---------- UTF-8 ↔ UTF-16 conversions ---------- */
 
 static wchar_t *to_wide(const char *s) {
     if (s == NULL) {
@@ -68,7 +68,7 @@ static void to_utf8(const wchar_t *w, char *out, size_t cap) {
     }
 }
 
-/* ---------- Temps réel ---------- */
+/* ---------- Real-time ---------- */
 
 int lw_rt_promote(uint64_t period_ns, uint64_t computation_ns, uint64_t constraint_ns) {
     (void)period_ns;
@@ -82,7 +82,7 @@ int lw_rt_promote(uint64_t period_ns, uint64_t computation_ns, uint64_t constrai
     if (!AvSetMmThreadPriority(h, AVRT_PRIORITY_HIGH)) {
         return (int)GetLastError();
     }
-    /* Le handle MMCSS reste associé au thread jusqu'à sa fin. */
+    /* MMCSS handle remains associated with the thread until termination. */
     return 0;
 }
 
@@ -90,12 +90,12 @@ void lw_sleep_ns(uint64_t ns) {
     static LW_TLS HANDLE timer = NULL;
     if (timer == NULL) {
         timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-        if (timer == NULL) { /* systèmes sans minuteur haute résolution */
+        if (timer == NULL) { /* Systems without a high-resolution timer */
             timer = CreateWaitableTimerExW(NULL, NULL, 0, TIMER_ALL_ACCESS);
         }
     }
     LARGE_INTEGER due;
-    due.QuadPart = -(LONGLONG)((ns + 99) / 100); /* relatif, en unités de 100 ns */
+    due.QuadPart = -(LONGLONG)((ns + 99) / 100); /* Relative, in 100 ns units */
     if (timer == NULL || !SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) {
         Sleep((DWORD)((ns + 999999) / 1000000));
         return;
@@ -103,7 +103,7 @@ void lw_sleep_ns(uint64_t ns) {
     WaitForSingleObject(timer, INFINITE);
 }
 
-/* ---------- Journal ---------- */
+/* ---------- Logging ---------- */
 
 void lw_log(int level, const char *category, const char *message) {
     char line[2048];
@@ -114,7 +114,7 @@ void lw_log(int level, const char *category, const char *message) {
     }
     OutputDebugStringW(w);
     if (level >= 2) {
-        /* Source « OpenLW » déclarée par l'installeur ; sans elle, l'événement reste lisible. */
+        /* “OpenLW” source declared by installer; events remain readable without it. */
         static HANDLE source = NULL;
         if (source == NULL) {
             source = RegisterEventSourceW(NULL, L"OpenLW");
@@ -128,7 +128,7 @@ void lw_log(int level, const char *category, const char *message) {
     free(w);
 }
 
-/* ---------- Horloge hôte : QueryPerformanceCounter ---------- */
+/* ---------- Host clock: QueryPerformanceCounter ---------- */
 
 static uint64_t qpc_frequency(void) {
     static uint64_t freq = 0;
@@ -157,7 +157,7 @@ void lw_host_clock_info(lw_host_clock *clock) {
     clock->ns_denom = qpc_frequency();
 }
 
-/* ---------- Région partagée : section anonyme, dupliquée vers chaque client ---------- */
+/* ---------- Shared region: anonymous section duplicated into each client ---------- */
 
 void *lw_shm_alloc(size_t size, void **handle) {
     *handle = NULL;
@@ -172,7 +172,7 @@ void *lw_shm_alloc(size_t size, void **handle) {
         return NULL;
     }
     *handle = h;
-    return base; /* pages d'une section neuve : déjà à zéro */
+    return base; /* New section pages are already zeroed */
 }
 
 void *lw_shm_map(void *handle, size_t *size) {
@@ -246,7 +246,7 @@ int lw_process_alive(uint32_t pid, char *name, size_t cap) {
     return alive;
 }
 
-/* ---------- DSCP par qWAVE ---------- */
+/* ---------- DSCP through qWAVE ---------- */
 
 typedef struct {
     HANDLE qos;
@@ -304,12 +304,12 @@ void lw_qos_close(void *flow) {
     free(f);
 }
 
-/* ---------- Tube nommé : serveur ---------- */
+/* ---------- Named pipe: server ---------- */
 
 #define PIPE_BUF_BYTES 65536u
 #define MAX_REQUEST_BYTES (1u << 20)
-/* SYSTEM et Administrateurs : GA ; utilisateurs authentifiés : FILE_GENERIC_READ | FILE_WRITE_DATA |
- * FILE_WRITE_ATTRIBUTES (0x12018b), sans FILE_APPEND_DATA (= FILE_CREATE_PIPE_INSTANCE). */
+/* SYSTEM/Administrators: GA; authenticated users: FILE_GENERIC_READ | FILE_WRITE_DATA |
+ * FILE_WRITE_ATTRIBUTES (0x12018b), without FILE_APPEND_DATA (= FILE_CREATE_PIPE_INSTANCE). */
 #define PIPE_SDDL L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12018b;;;AU)"
 
 struct lw_pipe_server {
@@ -317,12 +317,12 @@ struct lw_pipe_server {
     lw_pipe_handler_fn handler;
     lw_pipe_free_fn free_response;
     void *ctx;
-    PSID edit_sid; /* groupe d'édition, ou NULL */
+    PSID edit_sid; /* Edit group, or NULL */
     PSECURITY_DESCRIPTOR sd;
     SECURITY_ATTRIBUTES sa;
-    HANDLE stop;       /* événement manuel : arrêt demandé */
-    HANDLE idle;       /* événement manuel : aucune connexion active */
-    HANDLE first;      /* premier exemplaire, créé au démarrage */
+    HANDLE stop;       /* Manual event: stop requested */
+    HANDLE idle;       /* Manual event: no active connections */
+    HANDLE first;      /* First instance, created at startup */
     HANDLE accept_thread;
     volatile LONG active;
 };
@@ -410,7 +410,7 @@ static void identify(struct lw_pipe_server *s, HANDLE pipe, lw_caller *c) {
     CloseHandle(token);
 }
 
-/* Attend la fin d'une E/S recouvrante ou l'arrêt. Retourne 1 si terminée (octets dans *n), 0 sinon. */
+/* Wait for overlapped I/O completion or stop. Return 1 if completed (bytes in *n), otherwise 0. */
 static int wait_io(struct lw_pipe_server *s, HANDLE pipe, OVERLAPPED *ov, BOOL started, DWORD *n) {
     if (!started && GetLastError() != ERROR_IO_PENDING) {
         return 0;
@@ -454,7 +454,7 @@ static DWORD WINAPI conn_main(LPVOID arg) {
     while (ov.hEvent != NULL && buf != NULL) {
         if (cap - len < 2048) {
             if (cap >= MAX_REQUEST_BYTES) {
-                break; /* requête démesurée : connexion fermée */
+                break; /* Oversized request: close connection */
             }
             char *bigger = (char *)realloc(buf, cap * 2);
             if (bigger == NULL) {
@@ -467,7 +467,7 @@ static DWORD WINAPI conn_main(LPVOID arg) {
         ResetEvent(ov.hEvent);
         BOOL ok = ReadFile(pipe, buf + len, (DWORD)(cap - len - 1), NULL, &ov);
         if (!wait_io(s, pipe, &ov, ok, &n) || n == 0) {
-            break; /* fin de connexion, erreur ou arrêt */
+            break; /* Connection ended, error, or stop */
         }
         len += n;
         int alive = 1;
@@ -614,8 +614,8 @@ lw_pipe_server *lw_pipe_server_start(const char *name, const char *edit_group, l
     s->sa.nLength = sizeof s->sa;
     s->sa.lpSecurityDescriptor = s->sd;
     s->sa.bInheritHandle = FALSE;
-    /* Nom déjà servi ? Vérification sans consommer d'instance (en plus de FILE_FLAG_FIRST_PIPE_INSTANCE,
-     * que tous les environnements n'appliquent pas). */
+    /* Name already served? Check without consuming an instance (in addition to FILE_FLAG_FIRST_PIPE_INSTANCE,
+     * which is not enforced by every environment). */
     if (WaitNamedPipeW(s->path, NMPWAIT_NOWAIT) || GetLastError() != ERROR_FILE_NOT_FOUND) {
         server_free(s);
         return NULL;
@@ -645,7 +645,7 @@ void lw_pipe_server_stop(lw_pipe_server *s) {
     server_free(s);
 }
 
-/* ---------- Tube nommé : client ---------- */
+/* ---------- Named pipe: client ---------- */
 
 struct lw_pipe_client {
     HANDLE pipe;
@@ -660,14 +660,14 @@ lw_pipe_client *lw_pipe_client_connect(const char *name, uint32_t timeout_ms, co
         *error = "nom de tube invalide";
         return NULL;
     }
-    /* Droits limités à ceux que la DACL accorde aux utilisateurs ; le serveur ne peut qu'identifier
-     * le client, pas agir en son nom. */
+    /* Permissions limited to those granted to users by DACL; server can only identify
+     * client, not act on its behalf. */
     DWORD access = GENERIC_READ | FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES;
     DWORD flags = SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION;
     HANDLE h = INVALID_HANDLE_VALUE;
     DWORD err = 0;
     ULONGLONG deadline = GetTickCount64() + timeout_ms;
-    /* Toutes les instances occupées : on attend la suivante, plusieurs clients peuvent se la disputer. */
+    /* All instances busy: wait for the next; multiple clients may contend for it. */
     for (;;) {
         h = CreateFileW(path, access, 0, NULL, OPEN_EXISTING, flags, NULL);
         err = GetLastError();

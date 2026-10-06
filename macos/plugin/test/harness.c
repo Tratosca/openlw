@@ -1,13 +1,13 @@
 /*
- * Banc d'essai du plugin HAL, sans installation ni coreaudiod.
+ * HAL plugin harness, without installation or coreaudiod.
  *
- * Joue deux rôles dans un même processus :
- *  - « coreaudiod » : charge le bundle par CFPlugIn (fabrique déclarée dans Info.plist), obtient
- *    l'interface AudioServerPlugInDriverInterface, interroge les propriétés, lance l'IO et simule des
- *    cycles ReadInput / WriteMix ;
- *  - « daemon » : crée la région partagée (lw_shm) et un service XPC anonyme qui la remet au plugin.
+ * Acts in two roles within one process:
+ *  - “coreaudiod”: loads bundle through CFPlugIn (factory in Info.plist), obtains
+ * AudioServerPlugInDriverInterface, queries properties, starts I/O, and simulates
+ * ReadInput / WriteMix cycles;
+ *  - “daemon”: creates shared region (lw_shm) and anonymous XPC service providing it to plugin.
  *
- * Usage : harness build/OpenLW.driver     (code de sortie ≠ 0 en cas d'échec)
+ * Usage: harness build/OpenLW.driver     (nonzero exit code on failure)
  */
 #include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -34,7 +34,7 @@ static int gFailures = 0;
         printf("\n");                                                                                                  \
     } while (0)
 
-/* ---------- Hôte simulé ---------- */
+/* ---------- Simulated host ---------- */
 
 static UInt32 gPropertyChanges = 0;
 static OSStatus HostPropertiesChanged(AudioServerPlugInHostRef h, AudioObjectID o, UInt32 n,
@@ -65,12 +65,12 @@ static OSStatus HostRequestConfigChange(AudioServerPlugInHostRef h, AudioObjectI
 static AudioServerPlugInHostInterface gHostInterface = {HostPropertiesChanged, HostCopyFromStorage, HostWriteToStorage,
                                                         HostDeleteFromStorage, HostRequestConfigChange};
 
-/* ---------- « Daemon » simulé ---------- */
+/* ---------- Simulated “daemon” ---------- */
 
-/* Géométrie annoncée par le daemon simulé (commande "geometry", et génération dans "attach"). */
+/* Geometry advertised by simulated daemon ("geometry" command, generation in "attach"). */
 static unsigned long long gGen = 1;
 static unsigned gTo = 2, gFrom = 2;
-/* Fragment JSON des noms ajouté à la réponse "geometry" (vide : pas de noms). */
+/* Names JSON fragment added to "geometry" response (empty: no names). */
 static const char *gNames = "";
 
 static char *handler(const char *req, uint32_t uid, void *ctx) {
@@ -88,7 +88,7 @@ static void free_resp(char *p) {
     free(p);
 }
 
-/* ---------- Aides ---------- */
+/* ---------- Helpers ---------- */
 
 static AudioServerPlugInDriverInterface **gDrv;
 #define DRV (*gDrv)
@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
     memset(&cycle_info, 0, sizeof cycle_info);
 
     printf("IO sans daemon\n");
-    /* Service simulé qui ne fournit aucune région (le vrai daemon peut tourner sur la machine de test). */
+    /* Mock service providing no region (real daemon may run on test machine). */
     void (*use_endpoint)(void *) =
         CFBundleGetFunctionPointerForName(CFPlugInGetBundle(plugin), CFSTR("lw_plugin_test_use_endpoint"));
     CHECK(use_endpoint != NULL, "hook de test exporté");
@@ -229,8 +229,8 @@ int main(int argc, char **argv) {
     CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (attachement)");
     CHECK(get_u32(2, kAudioDevicePropertyDeviceIsRunning, kAudioObjectPropertyScopeGlobal) == 1, "périphérique en marche");
 
-    /* Réseau → applications : le daemon écrit, le plugin restitue en ReadInput. Le daemon garde
-     * 256 trames d'avance (marge d'amorçage du plugin) : le bloc lu est celui écrit 256 trames plus tôt. */
+    /* Network → applications: daemon writes, plugin returns in ReadInput. Daemon maintains
+     * 256-frame lead (plugin priming margin): read block was written 256 frames earlier. */
     float *src = calloc(512 * ch, sizeof(float));
     float *ahead = calloc(512 * ch, sizeof(float));
 #define SIG(n, c) ((float)sin(0.01 * (double)(n)) * (float)((c) + 1) / 8.0f)
@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, buf, NULL);
         DRV->EndIOOperation(gDrv, 2, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info);
         same_in &= memcmp(buf, src, 512 * ch * sizeof(float)) == 0;
-        /* Applications → réseau : le plugin reçoit le mixage en WriteMix, le daemon le relit. */
+        /* Applications → network: plugin receives mix in WriteMix; daemon reads it back. */
         for (UInt32 i = 0; i < 512 * ch; i++) {
             src[i] = -src[i];
         }
@@ -271,7 +271,7 @@ int main(int argc, char **argv) {
     Float64 st0, st1;
     UInt64 ht0, ht1, seed;
     DRV->GetZeroTimeStamp(gDrv, 2, 1, &st0, &ht0, &seed);
-    usleep(400000); /* > 16384 trames à 48 kHz */
+    usleep(400000); /* > 16384 frames at 48 kHz */
     DRV->GetZeroTimeStamp(gDrv, 2, 1, &st1, &ht1, &seed);
     CHECK(st1 == st0 + 16384.0 && ht1 > ht0, "période 16384 trames, temps hôte croissant (%.0f → %.0f)", st0, st1);
     mach_timebase_info_data_t tb;
@@ -310,7 +310,7 @@ int main(int argc, char **argv) {
         six[i] = (float)i / 4096.0f;
     }
     lw_ring_write(region2, LW_FROM_NET, six, 512);
-    lw_ring_write(region2, LW_FROM_NET, six, 256); /* marge d'amorçage */
+    lw_ring_write(region2, LW_FROM_NET, six, 256); /* Priming margin */
     DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, back, NULL);
     CHECK(memcmp(six, back, sizeof six) == 0, "6 entrées restituées depuis la nouvelle région");
     poll();
@@ -368,7 +368,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < 640 * C; i++) {
             few[i] = 0.75f;
         }
-        lw_ring_write(region2, LW_FROM_NET, few, 639); /* 512 + 127 : sous la marge de 128 */
+        lw_ring_write(region2, LW_FROM_NET, few, 639); /* 512 + 127: below the 128-frame margin */
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got, NULL);
         CHECK(got[0] == 0.0f, "512 + 127 trames : pas encore amorcé");
         lw_ring_write(region2, LW_FROM_NET, few, 1);
@@ -384,7 +384,7 @@ int main(int argc, char **argv) {
     {
         enum { B = 4096, C = 6 };
         static float blk[B * C], wr[48 * C];
-        /* Audio ancien laissé par une IO arrêtée : 7000 trames de valeur -1. */
+        /* Stale audio left by stopped I/O: 7000 frames of -1. */
         for (int i = 0; i < 7000; i++) {
             for (int c = 0; c < C; c++) {
                 wr[c] = -1.0f;
@@ -392,7 +392,7 @@ int main(int argc, char **argv) {
             lw_ring_write(region2, LW_FROM_NET, wr, 1);
         }
         CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO");
-        /* Le daemon écrit 48 trames par ms (rampe sur le canal 1) ; l'hôte lit un bloc quand il est dû. */
+        /* Daemon writes 48 frames/ms (ramp on channel 1); host reads a block when due. */
         uint64_t written = 0, reads = 0, silent_blocks = 0, stale = 0, breaks = 0;
         float expect = -1.0f;
         for (int ms = 0; ms < 3000; ms++) {
@@ -401,7 +401,7 @@ int main(int argc, char **argv) {
                     wr[i * C + c] = c == 0 ? (float)(written + (uint64_t)i) : 0.5f;
                 }
             }
-            /* Lecture du bloc pendant l'écriture : comme l'hôte, sans attendre une frontière de tick. */
+            /* Read block during writing: like host, without waiting for a tick boundary. */
             lw_ring_write(region2, LW_FROM_NET, wr, 24);
             if (written + 24 >= 4400 + reads * B) {
                 DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, B, &cycle_info, blk, NULL);
@@ -424,7 +424,7 @@ int main(int argc, char **argv) {
         CHECK(reads >= 34 && silent_blocks == 0, "%llu blocs lus, aucun bloc silencieux", (unsigned long long)reads);
         CHECK(stale == 0, "audio ancien jeté au démarrage (%llu trames anciennes lues)", (unsigned long long)stale);
         CHECK(breaks == 0, "rampe continue d'un bloc à l'autre (%llu ruptures)", (unsigned long long)breaks);
-        /* Manque : le daemon s'arrête 200 ms ; silence, puis reprise propre. */
+        /* Underrun: daemon stops for 200 ms; silence, then clean resumption. */
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, B, &cycle_info, blk, NULL);
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, B, &cycle_info, blk, NULL);
         int zero = 1;
@@ -484,7 +484,7 @@ int main(int argc, char **argv) {
         CHECK(f6.mChannelsPerFrame == 6 && f8.mChannelsPerFrame == 4, "formats : %u entrées, %u sorties",
               f6.mChannelsPerFrame, f8.mChannelsPerFrame);
 
-        /* IO séparées : lecture sur OpenLW In, écriture sur OpenLW Out. */
+        /* Separate I/O: read on OpenLW In, write on OpenLW Out. */
         CHECK(DRV->StartIO(gDrv, 5, 1) == 0 && DRV->StartIO(gDrv, 7, 2) == 0, "StartIO des deux périphériques");
         static float six[1024 * 6], back[512 * 6], four[512 * 4], got4[512 * 4];
         for (int i = 0; i < 1024 * 6; i++) {
@@ -502,7 +502,7 @@ int main(int argc, char **argv) {
         CHECK(DRV->DoIOOperation(gDrv, 5, 8, 1, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, four, NULL) != 0,
               "flux d'un autre périphérique refusé");
 
-        /* Nombre de canaux modifié : une demande par périphérique, appliquée sens par sens. */
+        /* Channel count changed: one request per device, applied per direction. */
         UInt32 req = gConfigRequests;
         gGen = 3, gTo = 2, gFrom = 2;
         poll();

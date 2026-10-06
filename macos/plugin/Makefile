@@ -1,9 +1,9 @@
-# Plugin HAL OpenLW : bundle universel (x86_64 10.13, arm64 11.0).
-#   make            construit build/OpenLW.driver (signature ad hoc)
-#   make test       banc d'essai : charge le bundle comme coreaudiod (CFPlugIn) et vérifie la chaîne
-#   make check-min  affiche le plancher OS de chaque tranche
-#   make install    copie dans /Library/Audio/Plug-Ins/HAL (sudo) et redémarre coreaudiod
-#   make uninstall  retire le bundle (sudo) et redémarre coreaudiod
+# OpenLW HAL plugin: universal bundle (x86_64 10.13, arm64 11.0).
+#   make            build build/OpenLW.driver (ad hoc signing)
+#   make test       harness: load bundle like coreaudiod (CFPlugIn) and verify the pipeline
+#   make check-min  show minimum OS for each slice
+#   make install    copy to /Library/Audio/Plug-Ins/HAL (sudo), restart coreaudiod
+#   make uninstall  remove bundle (sudo), restart coreaudiod
 
 NAME     := OpenLW
 BUNDLE   := build/$(NAME).driver

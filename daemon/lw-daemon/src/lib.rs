@@ -1,6 +1,6 @@
-//! Service réseau d'OpenLW : flux RTP Livewire / AES67 émis et reçus sur l'interface choisie,
-//! annonce et découverte des sources, périphérique virtuel partagé avec le client audio (ADR 0005),
-//! canal de contrôle et supervision (patch à chaud, choix de l'interface).
+//! OpenLW network service: Livewire / AES67 RTP streams sent and received on the selected interface,
+//! source advertisement/discovery, virtual device shared with the audio client (ADR 0005),
+//! control channel and supervision (live patching, interface selection).
 
 pub mod advertise;
 pub mod bus;
@@ -23,11 +23,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Drapeau d'arrêt partagé entre les threads.
+/// Stop flag shared between threads.
 #[derive(Clone, Default)]
 pub struct Stop {
     own: Arc<AtomicBool>,
-    /// Drapeaux des arrêts parents : l'arrêt d'un parent arrête aussi celui-ci.
+    /// Parent stop flags: stopping a parent also stops this child.
     parents: Vec<Arc<AtomicBool>>,
 }
 
@@ -36,7 +36,7 @@ impl Stop {
         Self::default()
     }
 
-    /// Arrêt enfant : demandé seul, ou avec n'importe lequel de ses parents.
+    /// Child stop: requested independently or with any parent.
     pub fn child(&self) -> Self {
         let mut parents = self.parents.clone();
         parents.push(self.own.clone());
@@ -54,7 +54,7 @@ impl Stop {
         self.own.load(Ordering::Relaxed) || self.parents.iter().any(|p| p.load(Ordering::Relaxed))
     }
 
-    /// Arrêt automatique après `d` (thread détaché).
+    /// Automatic stop after `d` (detached thread).
     pub fn after(&self, d: Duration) {
         let me = self.clone();
         std::thread::spawn(move || {
@@ -71,7 +71,7 @@ impl Stop {
     }
 }
 
-/// Générateur pseudo-aléatoire (xorshift) pour la gigue des annonces ; pas d'usage cryptographique.
+/// Pseudo-random generator (xorshift) for advertisement jitter; not for cryptographic use.
 pub(crate) struct Jitter(u64);
 
 impl Jitter {
@@ -83,7 +83,7 @@ impl Jitter {
         Self(t | 1)
     }
 
-    /// Valeur uniforme dans [-1, 1].
+    /// Uniform value in [-1, 1].
     pub(crate) fn unit(&mut self) -> f64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;

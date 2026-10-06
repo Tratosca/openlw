@@ -1,11 +1,11 @@
-//! Noms publiés par le périphérique : nom du périphérique et nom de chaque canal.
+//! Names published by the device: device name and each channel's name.
 //!
-//! - Canaux : « 2 - Studio A G » / « … D » pour une entrée patchée sur le canal Livewire 2 (nom
-//!   annoncé par le réseau, à défaut le numéro seul) ; « 4005 - STUDIO MAC G » pour une sortie diffusée.
-//!   Surround : suffixes 1 à 8. Canal non patché : nom vide (CoreAudio affiche son nom par défaut).
-//! - Périphériques : en présentation `duplex`, « OpenLW » (nom fixe). En présentation `split`,
-//!   « OpenLW In » et « OpenLW Out », ou, si `name_device_from_sources` est activé, « OpenLW In
-//!   (2 - Studio A, 21 - STUDIO A) » et « OpenLW Out (31 - Mac 1-2) » (ordre des canaux du périphérique).
+//! - Channels: currently “2 - Studio A G” / “… D” for an input patched to Livewire channel 2 (name
+//!   advertised on the network, falling back to the number); “4005 - STUDIO MAC G” for a transmitted output.
+//!   Surround: suffixes 1–8. Unpatched channel: empty name (CoreAudio displays its default name).
+//! - Devices: `duplex` layout uses “OpenLW” (fixed name). With `split` layout,
+//!   “OpenLW In” and “OpenLW Out”, or, if `name_device_from_sources` is enabled, “OpenLW In
+//!   (2 - Studio A, 21 - STUDIO A)” and “OpenLW Out (31 - Mac 1-2)” (device channel order).
 
 use std::collections::BTreeMap;
 
@@ -13,23 +13,23 @@ use serde::Serialize;
 
 use crate::config::{Config, Layout};
 
-/// Noms de base des périphériques (macos/plugin/src/OpenLWPlugIn.c).
+/// Base device names (macos/plugin/src/OpenLWPlugIn.c).
 pub const DEVICE_NAME: &str = "OpenLW";
 pub const INPUT_DEVICE_NAME: &str = "OpenLW In";
 pub const OUTPUT_DEVICE_NAME: &str = "OpenLW Out";
 
-/// Noms calculés pour le plugin.
+/// Names computed for the plugin.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Labels {
-    /// Présentation en deux périphériques.
+    /// Two-device layout.
     pub split: bool,
-    /// Nom du périphérique duplex.
+    /// Duplex device name.
     pub name: String,
     pub input_device_name: String,
     pub output_device_name: String,
-    /// Un nom par entrée du périphérique (index 0 = entrée 1).
+    /// One name per device input (index 0 = input 1).
     pub input_names: Vec<String>,
-    /// Un nom par sortie du périphérique.
+    /// One name per device output.
     pub output_names: Vec<String>,
 }
 
@@ -48,7 +48,7 @@ fn label(channel: u16, name: Option<&str>) -> String {
     }
 }
 
-/// Calcule les noms de `cfg` ; `announced` : nom annoncé de chaque canal Livewire découvert.
+/// Compute names from `cfg`; `announced`: advertised name of each discovered Livewire channel.
 pub fn compute(cfg: &Config, announced: &BTreeMap<u32, String>) -> Labels {
     let dev = cfg.device_config();
     let mut input_names = vec![String::new(); dev.channels_from_net as usize];

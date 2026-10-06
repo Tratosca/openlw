@@ -1,6 +1,6 @@
 #!/bin/sh
-# Construit le daemon (binaire universel signé ad hoc), le plugin HAL et l'app. Sans sudo.
-# Sorties : build/lw-daemon, macos/plugin/build/OpenLW.driver, macos/app/build/OpenLW.app
+# Build daemon (ad hoc signed universal binary), HAL plugin, app. No sudo.
+# Outputs: build/lw-daemon, macos/plugin/build/OpenLW.driver, macos/app/build/OpenLW.app
 set -eu
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)

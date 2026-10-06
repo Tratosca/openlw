@@ -1,7 +1,7 @@
-# Pilote audio Windows d'OpenLW (DLL COM in-process, interface ASIO), GPLv3.
-#   windows/driver/fetch-sdk.ps1 (ou .sh)       SDK ASIO dans sdk/
-#   cmake -S windows/driver -B build/driver -A ARM64   (ou x64), puis cmake --build build/driver --config Release
-# Compilation croisée (tests sous Wine) : -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw-aarch64.cmake
+# OpenLW Windows audio driver (in-process COM DLL, ASIO interface), GPLv3.
+#   windows/driver/fetch-sdk.ps1 (or .sh)       ASIO SDK in sdk/
+#   cmake -S windows/driver -B build/driver -A ARM64   (or x64), then cmake --build build/driver --config Release
+# Cross-compilation (Wine tests): -DCMAKE_TOOLCHAIN_FILE=cmake/llvm-mingw-aarch64.cmake
 cmake_minimum_required(VERSION 3.20)
 project(OpenLWDriver LANGUAGES C CXX)
 
@@ -15,7 +15,7 @@ if(NOT EXISTS "${ASIOSDK}/common/iasiodrv.h")
 endif()
 set(LWSYS "${CMAKE_CURRENT_SOURCE_DIR}/../../daemon/lw-sys/csrc")
 
-# Couche système et région partagée d'OpenLW (Apache-2.0), compilées dans le pilote.
+# OpenLW system layer/shared region (Apache-2.0), compiled into driver.
 add_library(lwsys STATIC "${LWSYS}/lw_shm.c" "${LWSYS}/windows/lw_sys_win.c")
 target_include_directories(lwsys PUBLIC "${LWSYS}")
 target_compile_definitions(lwsys PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -34,7 +34,7 @@ else()
     target_link_options(OpenLWDriver PRIVATE -static)
 endif()
 
-# Hôte de test : charge le pilote comme un logiciel ASIO et vérifie la chaîne audio.
+# Test host: load driver as an ASIO application and verify audio pipeline.
 add_executable(openlw-driver-test test/host.cpp)
 target_include_directories(openlw-driver-test PRIVATE "${ASIOSDK}/common")
 target_compile_definitions(openlw-driver-test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)

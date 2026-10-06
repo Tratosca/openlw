@@ -1,10 +1,10 @@
-//! `lw-daemon` : outil et daemon Livewire / AES67.
+//! `lw-daemon`: Livewire / AES67 tool and daemon.
 //!
 //!     lw-daemon ifaces
 //!     lw-daemon send --iface en7 --channel 4001 --format standard [--advertise --name "MAC 1"]
 //!     lw-daemon recv --iface en7 --channel 1
 //!     lw-daemon run --config lw-daemon.json [--control [ENDPOINT]] [--init-config] [--log-file F]
-//!     lw-daemon service              (Windows, lancé par le gestionnaire de services)
+//!     lw-daemon service              (Windows, started by the Service Control Manager)
 //!     lw-daemon ctl status [--endpoint ENDPOINT]
 
 use std::net::Ipv4Addr;
@@ -30,12 +30,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Liste les interfaces IPv4 (nom système, nom convivial, adresse).
+    /// List IPv4 interfaces (system name, friendly name, address).
     Ifaces {
         #[arg(long)]
         json: bool,
     },
-    /// Émet un flux de test (sinusoïde) vers un canal Livewire.
+    /// Transmit a test stream (sine wave) to a Livewire channel.
     Send {
         #[arg(long)]
         iface: String,
@@ -43,7 +43,7 @@ enum Cmd {
         channel: u16,
         #[arg(long, value_enum, default_value = "standard")]
         format: CliFormat,
-        /// Durée en secondes (0 = sans fin).
+        /// Duration in seconds (0 = indefinite).
         #[arg(long, default_value_t = 0.0)]
         seconds: f64,
         #[arg(long, default_value_t = 997.0)]
@@ -52,19 +52,19 @@ enum Cmd {
         level: f64,
         #[arg(long, default_value_t = 96)]
         pt: u8,
-        /// Octet TOS (184 = EF, 136 = AF41).
+        /// TOS byte (184 = EF, 136 = AF41).
         #[arg(long, default_value_t = 0xB8)]
         tos: u32,
-        /// Annonce aussi la source (ADV) pour qu'elle apparaisse sur les appareils Livewire.
+        /// Also advertise the source (ADV) so it appears on Livewire devices.
         #[arg(long)]
         advertise: bool,
         #[arg(long, default_value = "MAC TEST")]
         name: String,
-        /// Thread d'émission à priorité normale (comparaison avec le temps réel).
+        /// Normal-priority transmit thread (comparison with real-time scheduling).
         #[arg(long)]
         no_rt: bool,
     },
-    /// Reçoit un flux et affiche les statistiques chaque seconde.
+    /// Receive a stream and display statistics every second.
     Recv {
         #[arg(long)]
         iface: String,
@@ -81,28 +81,28 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Lance le daemon selon un fichier de configuration.
+    /// Run the daemon using a configuration file.
     Run {
         #[arg(long)]
         config: PathBuf,
         #[arg(long, default_value_t = 0.0)]
         seconds: f64,
-        /// Publie le canal de contrôle : sans valeur, celui du service installé (XPC sous macOS,
-        /// socket Unix sous Linux, tube nommé sous Windows) ; sinon `unix:CHEMIN`, `pipe:NOM`, `mach:NOM`.
+        /// Publish the control channel: without a value, use the installed service endpoint (XPC on macOS,
+        /// Unix socket on Linux, named pipe on Windows); otherwise `unix:PATH`, `pipe:NAME`, `mach:NAME`.
         #[arg(long, num_args = 0..=1, default_missing_value = "service")]
         control: Option<String>,
-        /// Ancienne forme de `--control mach:NOM` (plist launchd).
+        /// Legacy form of `--control mach:NAME` (launchd plist).
         #[arg(long, num_args = 0..=1, default_missing_value = lw_sys::ctl::SERVICE_NAME, hide = true)]
         xpc: Option<String>,
-        /// Crée le fichier de configuration par défaut s'il n'existe pas.
+        /// Create the default configuration file if absent.
         #[arg(long)]
         init_config: bool,
-        /// Copie aussi le journal dans ce fichier.
+        /// Also copy logs to this file.
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
-    /// Service Windows, lancé par le gestionnaire de services : configuration et journal dans
-    /// %ProgramData%\OpenLW, canal de contrôle par tube nommé.
+    /// Windows service, started by the Service Control Manager: configuration and logs in
+    /// %ProgramData%\OpenLW, named-pipe control channel.
     #[cfg(windows)]
     Service {
         #[arg(long)]
@@ -110,27 +110,27 @@ enum Cmd {
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
-    /// Écoute les annonces Livewire et liste les sources du réseau.
+    /// Listen to Livewire advertisements and list network sources.
     Discover {
         #[arg(long)]
         iface: String,
-        /// Durée d'écoute ; une annonce complète peut mettre 2 à 3 min si le terminal ignore la requête.
+        /// Listening duration; full advertisements may take 2–3 min if the terminal ignores the request.
         #[arg(long, default_value_t = 30.0)]
         seconds: f64,
         #[arg(long)]
         json: bool,
     },
-    /// Interroge ou repatche un daemon en cours, par le canal de contrôle.
+    /// Query or repatch a running daemon through the control channel.
     Ctl {
         #[command(subcommand)]
         action: CtlCmd,
-        /// Point d'accès : `service` (défaut), `unix:CHEMIN`, `pipe:NOM`, `mach:NOM`, `mach-user:NOM`.
+        /// Endpoint: `service` (default), `unix:PATH`, `pipe:NAME`, `mach:NAME`, `mach-user:NAME`.
         #[arg(long, global = true, default_value = "service")]
         endpoint: String,
-        /// macOS : nom du service Mach (remplace `--endpoint`).
+        /// macOS: Mach service name (overrides `--endpoint`).
         #[arg(long, global = true)]
         service: Option<String>,
-        /// macOS : service du domaine utilisateur (LaunchAgent) plutôt que système (LaunchDaemon).
+        /// macOS: user-domain service (LaunchAgent) rather than system-domain service (LaunchDaemon).
         #[arg(long, global = true)]
         user: bool,
     },
@@ -138,13 +138,13 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum CtlCmd {
-    /// État du daemon, des flux et du périphérique.
+    /// Daemon, stream, and device status.
     Status,
-    /// Sources Livewire découvertes sur le réseau.
+    /// Livewire sources discovered on the network.
     Sources,
-    /// Configuration courante.
+    /// Current configuration.
     Config,
-    /// Patche un canal Livewire (ou un groupe AES67) sur des entrées du périphérique.
+    /// Patch a Livewire channel (or AES67 group) to device inputs.
     PatchIn {
         #[arg(long, conflicts_with = "group")]
         channel: Option<u16>,
@@ -154,18 +154,18 @@ enum CtlCmd {
         port: u16,
         #[arg(long, value_enum, default_value = "stereo")]
         kind: CliKind,
-        /// Entrées du périphérique, ex. 1,2.
+        /// Device inputs, e.g. 1,2.
         #[arg(long, value_delimiter = ',', required = true)]
         to: Vec<u16>,
     },
-    /// Libère des entrées du périphérique.
+    /// Release device inputs.
     UnpatchIn {
         #[arg(long, value_delimiter = ',', required = true)]
         to: Vec<u16>,
     },
-    /// Émet des sorties du périphérique sur un canal Livewire.
+    /// Transmit device outputs on a Livewire channel.
     PatchOut {
-        /// Sorties du périphérique, ex. 1,2.
+        /// Device outputs, e.g. 1,2.
         #[arg(long, value_delimiter = ',', required = true)]
         from: Vec<u16>,
         #[arg(long)]
@@ -175,42 +175,42 @@ enum CtlCmd {
         #[arg(long, value_enum, default_value = "standard")]
         format: CliFormat,
     },
-    /// Arrête l'émission d'un canal.
+    /// Stop transmitting a channel.
     UnpatchOut {
         #[arg(long)]
         channel: u16,
     },
-    /// Change l'interface réseau Livewire : nom BSD, nom convivial ou « auto ».
+    /// Change Livewire network interface: BSD name, friendly name, or “auto”.
     SetIface { iface: String },
-    /// Nombre de canaux du périphérique dans chaque sens (1 à 32).
+    /// Device channel count per direction (1–32).
     SetChannels {
         #[arg(long)]
         to_net: u32,
         #[arg(long)]
         from_net: u32,
     },
-    /// Présentation dans macOS : duplex (un périphérique) ou split (OpenLW In / OpenLW Out).
+    /// macOS layout: duplex (one device) or split (OpenLW In / OpenLW Out).
     SetLayout { layout: String },
-    /// En présentation split, nomme les périphériques d'après les canaux patchés.
+    /// With split layout, name devices after patched channels.
     SetNaming {
         #[arg(action = clap::ArgAction::Set)]
         enabled: bool,
     },
-    /// Réglages avancés : nom annoncé, latence de réception, priorité réseau.
+    /// Advanced settings: advertised name, receive latency, network priority.
     SetAdvanced {
-        /// Nom annoncé (vide : nom de l'ordinateur).
+        /// Advertised name (empty: computer name).
         #[arg(long)]
         name: Option<String>,
-        /// low, normal ou safe.
+        /// low, normal, or safe.
         #[arg(long)]
         latency: Option<String>,
-        /// DSCP des flux audio (46 = EF, 34 = AF41, 0 = aucune).
+        /// Audio-stream DSCP (46 = EF, 34 = AF41, 0 = none).
         #[arg(long)]
         dscp: Option<u8>,
     },
-    /// Interfaces réseau, et celles où Livewire est entendu.
+    /// Network interfaces, including those receiving Livewire.
     Ifaces,
-    /// Géométrie du périphérique (nombre de canaux, génération).
+    /// Device geometry (channel count, generation).
     Geometry,
 }
 
@@ -254,7 +254,7 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // Aussi dans le journal du système et le fichier journal (service sans stderr).
+            // Also in system log and log file (service without stderr).
             lw_daemon::error!("erreur : {e}");
             ExitCode::FAILURE
         }
@@ -579,7 +579,7 @@ fn run(cli: Cli) -> Res {
     }
 }
 
-/// Nom du service Windows (gestionnaire de services, journal des événements).
+/// Windows service name (Service Control Manager, Event Log).
 #[cfg(windows)]
 const WINDOWS_SERVICE: &str = "OpenLW";
 

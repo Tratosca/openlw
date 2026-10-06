@@ -1,18 +1,18 @@
 /*
- * Région partagée daemon ↔ client audio (ADR 0005). Contrat unique : le plugin HAL (macOS), le
- * pilote Windows et le daemon (Rust, par FFI) compilent ce fichier et lw_shm.c. Aucune autre
- * définition de la disposition.
+ * Daemon ↔ audio client shared region (ADR 0005). Single contract: HAL plugin (macOS),
+ * Windows driver, and daemon (Rust through FFI) compile this file and lw_shm.c. No other
+ * layout definition.
  *
- * Disposition : [en-tête 4096 octets][anneau TO_NET][anneau FROM_NET], échantillons float32 entrelacés.
- *   TO_NET   : audio des applications → réseau. Producteur : client audio ; consommateur : daemon.
- *   FROM_NET : audio du réseau → applications. Producteur : daemon ; consommateur : client audio.
- * Chaque anneau est SPSC (un producteur, un consommateur), positions en trames sur 64 bits,
- * jamais remises à zéro ; index = position & (ring_frames - 1).
+ * Layout: [4096-byte header][TO_NET ring][FROM_NET ring], interleaved float32 samples.
+ *   TO_NET: application audio → network. Producer: audio client; consumer: daemon.
+ *   FROM_NET: network audio → applications. Producer: daemon; consumer: audio client.
+ * Each ring is SPSC (one producer, one consumer), with 64-bit frame positions,
+ * never reset; index = position & (ring_frames - 1).
  *
- * Règle temps réel : aucune fonction ne bloque, n'alloue ni n'appelle le système (utilisable dans
- * le thread IO de CoreAudio ou le rappel audio du pilote Windows).
+ * Real-time rule: no function blocks, allocates, or calls the system (usable in
+ * CoreAudio I/O thread or Windows driver audio callback).
  *
- * Compilateurs : Clang ou GCC (C11), MSVC (/std:c11 ou C++).
+ * Compilers: Clang/GCC (C11), MSVC (/std:c11 or C++).
  */
 #ifndef LW_SHM_H
 #define LW_SHM_H
@@ -32,15 +32,15 @@ extern "C" {
 
 enum lw_dir { LW_TO_NET = 0, LW_FROM_NET = 1 };
 
-/* Horloge hôte dans laquelle est exprimé clock_host_time. */
+/* Host clock in which clock_host_time is expressed. */
 enum lw_host_clock_id {
     LW_CLOCK_UNKNOWN = 0,
     LW_CLOCK_MACH = 1,      /* macOS : mach_absolute_time */
     LW_CLOCK_QPC = 2,       /* Windows : QueryPerformanceCounter */
-    LW_CLOCK_MONOTONIC = 3, /* Linux : CLOCK_MONOTONIC en nanosecondes */
+    LW_CLOCK_MONOTONIC = 3, /* Linux: CLOCK_MONOTONIC in nanoseconds */
 };
 
-/* Description de l'horloge hôte : durée en ns = ticks × ns_numer / ns_denom. */
+/* Host clock description: duration in ns = ticks × ns_numer / ns_denom. */
 typedef struct {
     uint32_t id; /* enum lw_host_clock_id */
     uint64_t ns_numer;
@@ -55,12 +55,12 @@ typedef struct {
 #define LW_ALIGN64 _Alignas(64)
 #endif
 
-/* Compteurs et positions d'un anneau ; producteur et consommateur sur des lignes de cache distinctes. */
+/* Ring counters/positions; producer and consumer on separate cache lines. */
 typedef struct {
-    LW_ALIGN64 uint64_t write_pos; /* écrit par le producteur (release) */
-    uint64_t overruns;             /* trames refusées faute de place (producteur) */
-    LW_ALIGN64 uint64_t read_pos;  /* écrit par le consommateur (release) */
-    uint64_t underruns;            /* trames manquantes complétées par du silence (consommateur) */
+    LW_ALIGN64 uint64_t write_pos; /* Written by producer (release) */
+    uint64_t overruns;             /* Frames rejected due to insufficient space (producer) */
+    LW_ALIGN64 uint64_t read_pos;  /* Written by consumer (release) */
+    uint64_t underruns;            /* Missing frames padded with silence (consumer) */
 } lw_ring_pos;
 
 typedef struct {
@@ -74,10 +74,10 @@ typedef struct {
     uint64_t total_bytes;
     uint64_t host_ns_numer;
     uint64_t host_ns_denom;
-    /* Horloge publiée par le daemon (seqlock) : à l'instant hôte host_time (horloge host_clock_id),
-     * la position d'échantillon vaut sample_time ; rate_scalar = durée réelle d'un échantillon /
-     * durée nominale (1.0 si l'horloge réseau = horloge hôte). */
-    LW_ALIGN64 uint32_t clock_seq; /* impair pendant l'écriture */
+    /* Daemon-published clock (seqlock): at host instant host_time (clock host_clock_id),
+     * sample position is sample_time; rate_scalar = actual sample duration /
+     * nominal duration (1.0 if network clock = host clock). */
+    LW_ALIGN64 uint32_t clock_seq; /* Odd while writing */
     uint32_t clock_valid;
     uint64_t clock_host_time;
     uint64_t clock_sample_time;
@@ -91,43 +91,43 @@ static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "en-tête trop grand
 _Static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "en-tête trop grand");
 #endif
 
-/* Taille totale d'une région ; 0 si les paramètres sont invalides
- * (ring_frames puissance de 2 dans [64, LW_SHM_MAX_RING_FRAMES], canaux dans [0, LW_SHM_MAX_CHANNELS]). */
+/* Total region size; zero if parameters are invalid
+ * (ring_frames power of two in [64, LW_SHM_MAX_RING_FRAMES], channels in [0, LW_SHM_MAX_CHANNELS]). */
 size_t lw_shm_size(uint32_t ring_frames, uint32_t channels_to_net, uint32_t channels_from_net);
 
-/* Initialise une région de lw_shm_size(...) octets (mise à zéro comprise). `clock` décrit l'horloge
- * de clock_host_time (NULL : inconnue). Retourne 0 si succès. */
+/* Initialize lw_shm_size(...) bytes including zeroing. `clock` describes the clock
+ * for clock_host_time (NULL: unknown). Return zero on success. */
 int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_frames, uint32_t channels_to_net,
                 uint32_t channels_from_net, const lw_host_clock *clock);
 
-/* Vérifie une région reçue (magie, version, tailles cohérentes avec `size`). Retourne 0 si valide. */
+/* Validate a received region (magic, version, sizes consistent with `size`). Return zero if valid. */
 int lw_shm_validate(const void *base, size_t size);
 
-/* Horloge hôte déclarée par le créateur de la région. */
+/* Host clock declared by the region creator. */
 void lw_shm_host_clock(const void *base, lw_host_clock *clock);
 
-/* Écrit jusqu'à `frames` trames entrelacées (canaux de l'anneau). Retourne le nombre écrit ;
- * le reste est compté en overruns. Réservé au producteur de l'anneau. */
+/* Write up to `frames` interleaved frames (ring channel count). Return count written;
+ * count remainder as overruns. Reserved for ring producer. */
 uint32_t lw_ring_write(void *base, int dir, const float *src, uint32_t frames);
 
-/* Lit exactement `frames` trames dans dst ; s'il en manque, complète par du silence et compte des
- * underruns. Retourne le nombre de trames réellement lues. Réservé au consommateur. */
+/* Read exactly `frames` frames into dst; pad missing frames with silence and count
+ * underruns. Return actual frame count read. Reserved for consumer. */
 uint32_t lw_ring_read(void *base, int dir, float *dst, uint32_t frames);
 
-/* Jette jusqu'à `frames` trames parmi les plus anciennes (rattrapage de latence). Retourne le nombre
- * jeté. Réservé au consommateur. */
+/* Discard up to `frames` oldest frames (latency catch-up). Return discarded
+ * count. Reserved for consumer. */
 uint32_t lw_ring_skip(void *base, int dir, uint32_t frames);
 
-/* Trames disponibles à la lecture (côté consommateur) et place libre (côté producteur). */
+/* Readable frames (consumer side) and free space (producer side). */
 uint32_t lw_ring_readable(const void *base, int dir);
 uint32_t lw_ring_writable(const void *base, int dir);
 
-/* Compteurs d'un anneau. */
+/* Ring counters. */
 void lw_ring_counters(const void *base, int dir, uint64_t *write_pos, uint64_t *read_pos, uint64_t *overruns,
                       uint64_t *underruns);
 
-/* Horloge : publication (daemon, un seul écrivain) et lecture cohérente (client). lw_clock_read
- * retourne 0 si une valeur valide a été lue, -1 si aucune horloge n'est encore publiée. */
+/* Clock: publication (daemon, single writer) and coherent reading (client). lw_clock_read
+ * returns zero if a valid value was read, -1 if no clock is published yet. */
 void lw_clock_publish(void *base, uint64_t host_time, uint64_t sample_time, double rate_scalar);
 int lw_clock_read(const void *base, uint64_t *host_time, uint64_t *sample_time, double *rate_scalar);
 

@@ -1,19 +1,19 @@
-//! Lecture et écriture big-endian bornées, communes aux décodeurs.
+//! Bounded big-endian reading/writing shared by decoders.
 
 use std::fmt;
 
-/// Erreur de décodage ou d'encodage.
+/// Decoding or encoding error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
-    /// Données plus courtes que nécessaire.
+    /// Data shorter than required.
     Truncated {
         what: &'static str,
         need: usize,
         have: usize,
     },
-    /// Valeur hors de ce que le format autorise.
+    /// Value outside the format's allowed range.
     Invalid(&'static str),
-    /// Valeur trop grande pour être encodée.
+    /// Value too large to encode.
     TooLong(&'static str),
 }
 
@@ -32,7 +32,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Curseur de lecture qui ne dépasse jamais la fin du tampon.
+/// Read cursor that never exceeds the buffer end.
 pub(crate) struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
@@ -95,7 +95,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Lit `N` octets à `offset`, sans paniquer.
+/// Read `N` bytes at `offset` without panicking.
 pub(crate) fn at<const N: usize>(
     buf: &[u8],
     offset: usize,

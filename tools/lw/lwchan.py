@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Conversion canal Livewire <-> groupe multicast (docs/protocol/01-channels.md).
+"""Livewire channel <-> multicast group conversion (docs/protocol/01-channels.md).
 
     python3 lwchan.py 101            -> 239.192.0.101 (stereo)
     python3 lwchan.py 5 --kind surround
-    python3 lwchan.py 239.196.0.5    -> canal 5, surround
+    python3 lwchan.py 239.196.0.5    -> channel 5, surround
 """
 import argparse
 import ipaddress
 import sys
 
 CHANNEL_MIN = 1
-CHANNEL_MAX = 0x7FFE  # 0x7FFF est reserve
+CHANNEL_MAX = 0x7FFE  # 0x7FFF is reserved
 
 PREFIXES = {
     "stereo": 0xEFC00000,    # Standard, AES67, Livestream
     "backfeed": 0xEFC10000,  # "To Source"
-    "surround": 0xEFC40000,  # 8 canaux
+    "surround": 0xEFC40000,  # 8 channels
 }
 KINDS = {prefix: kind for kind, prefix in PREFIXES.items()}
 
 
 def channel_to_group(channel, kind="stereo"):
-    """Retourne le groupe multicast (str) d'un canal."""
+    """Return a channel multicast group (str)."""
     if not CHANNEL_MIN <= channel <= CHANNEL_MAX:
         raise ValueError(f"canal hors plage {CHANNEL_MIN}..{CHANNEL_MAX} : {channel}")
     if kind not in PREFIXES:
@@ -30,7 +30,7 @@ def channel_to_group(channel, kind="stereo"):
 
 
 def group_to_channel(group):
-    """Retourne (canal, type) d'un groupe, ou None si le groupe n'est pas un groupe audio Livewire."""
+    """Return (channel, type) for a group, or None if not a Livewire audio group."""
     value = int(ipaddress.IPv4Address(group))
     kind = KINDS.get(value & 0xFFFF8000)
     channel = value & 0x7FFF

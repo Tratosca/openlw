@@ -1,4 +1,4 @@
-//! En-tête Envelope de 16 octets qui précède un TlvMsg (`docs/protocol/03-advertisement.md`).
+//! 16-byte Envelope header preceding a TlvMsg (`docs/protocol/03-advertisement.md`).
 
 use crate::bytes::Reader;
 use crate::tlv::TlvMsg;
@@ -9,12 +9,12 @@ pub const ENVELOPE_VERSION: u8 = 7;
 pub const TLV_VERSION: u8 = 2;
 pub const LAYER_TLV: u8 = 3;
 
-/// Type de message Envelope.
+/// Envelope message type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MsgType {
-    /// Sans acquittement (annonces multicast).
+    /// Without acknowledgment (multicast advertisements).
     Datagram,
-    /// Fiable : retransmis jusqu'à acquittement.
+    /// Reliable: retransmit until acknowledged.
     Message,
     Ack,
     Nack,
@@ -80,7 +80,7 @@ impl Header {
         out.extend_from_slice(&self.lock_tid.to_be_bytes());
     }
 
-    /// Décode et valide l'en-tête (version Envelope 7 exigée, comme `CEnvelopeLayer1Base::ProcessMessage`).
+    /// Decode and validate header (Envelope version 7 required, like `CEnvelopeLayer1Base::ProcessMessage`).
     pub fn parse(buf: &[u8]) -> Result<Self, Error> {
         let mut r = Reader::new(buf, "en-tête Envelope");
         let [layer, msg_type, tlv_version, version] = r.array()?;
@@ -99,7 +99,7 @@ impl Header {
     }
 }
 
-/// Datagramme complet : en-tête + TlvMsg.
+/// Complete datagram: header + TlvMsg.
 pub fn encode(header: &Header, msg: &TlvMsg) -> Result<Vec<u8>, Error> {
     let mut out = Vec::with_capacity(HEADER_LEN + 256);
     header.write(&mut out);

@@ -1,5 +1,5 @@
-# Tests Windows ARM64 sans machine Windows, sans émulation sur un hôte arm64 (Apple Silicon,
-# Raspberry Pi, runner Linux arm64) : Rust (aarch64-pc-windows-gnullvm), llvm-mingw et Wine natif.
+# Windows ARM64 tests without Windows hardware, without emulation on an arm64 host (Apple Silicon,
+# Raspberry Pi, Linux arm64 runner): Rust (aarch64-pc-windows-gnullvm), llvm-mingw, native Wine.
 #
 #   docker build --platform linux/arm64 -t openlw-wine-arm64 -f tools/ci/wine-arm64.Dockerfile tools/ci
 FROM rust:1-trixie

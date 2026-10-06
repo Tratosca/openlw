@@ -1,7 +1,7 @@
-# Service OpenLW, unité systemd utilisateur : le daemon sert lui-même les nœuds PipeWire de la
-# session (ADR 0009). Installée dans /usr/lib/systemd/user/ ; activation :
+# OpenLW user systemd service: daemon serves the session's PipeWire nodes
+# (ADR 0009). Installed in /usr/lib/systemd/user/; enable with:
 #   systemctl --user enable --now openlw.service
-# Sans session ouverte (machine dédiée) : loginctl enable-linger <utilisateur>.
+# Without an active session (dedicated machine): loginctl enable-linger <user>.
 [Unit]
 Description=OpenLW : audio Livewire et AES67
 After=pipewire.service
@@ -11,8 +11,8 @@ Wants=pipewire.service
 ExecStart=/usr/bin/lw-daemon run --config %E/openlw/lw-daemon.json --init-config --control
 Restart=on-failure
 RestartSec=2
-# Temps réel (SCHED_FIFO) : limite accordée par le groupe pipewire ou audio (limits.d) ; sinon le
-# daemon tourne en temps partagé et le signale dans le journal.
+# Real-time (SCHED_FIFO): limit granted through pipewire/audio group (limits.d); otherwise
+# daemon uses time-sharing and reports it in the log.
 LimitRTPRIO=70
 
 [Install]

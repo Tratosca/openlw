@@ -1,42 +1,42 @@
-# Installeur OpenLW
+# OpenLW installer
 
-`macos/installer/build-pkg.sh` produit `build/OpenLW-<version>.pkg` : un paquet unique, Intel et Apple Silicon, macOS 10.13 et plus.
+`macos/installer/build-pkg.sh` produces `build/OpenLW-<version>.pkg`: one package for Intel and Apple Silicon, macOS 10.13 and later.
 
 ```sh
 macos/scripts/build-all.sh
 macos/installer/build-pkg.sh
-# signé : INSTALLER_SIGN_ID="Developer ID Installer: …" macos/installer/build-pkg.sh
+# Signed: INSTALLER_SIGN_ID="Developer ID Installer: …" macos/installer/build-pkg.sh
 ```
 
-## Fichiers posés
+## Installed files
 
-| Chemin | Rôle |
+| Path | Purpose |
 |---|---|
-| `/Library/Audio/Plug-Ins/HAL/OpenLW.driver` | périphérique audio « OpenLW » |
-| `/Library/Application Support/OpenLW/lw-daemon` | service réseau |
-| `/Library/Application Support/OpenLW/lw-daemon.json` | réglages, créés depuis `lw-daemon.default.json` s'ils n'existent pas |
-| `/Library/Application Support/OpenLW/uninstall.sh` | désinstalleur (menu de OpenLW) |
-| `/Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist` | démarrage du service au boot |
-| `/Applications/OpenLW.app` | app de réglage |
-| `/Library/Logs/OpenLW/` | journal d'erreurs du service |
+| `/Library/Audio/Plug-Ins/HAL/OpenLW.driver` | “OpenLW” audio device |
+| `/Library/Application Support/OpenLW/lw-daemon` | Network service |
+| `/Library/Application Support/OpenLW/lw-daemon.json` | Settings, created from `lw-daemon.default.json` if absent |
+| `/Library/Application Support/OpenLW/uninstall.sh` | Uninstaller (OpenLW menu) |
+| `/Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist` | Service startup at boot |
+| `/Applications/OpenLW.app` | Configuration app |
+| `/Library/Logs/OpenLW/` | Service error log |
 
-Identifiant du paquet : `fr.francois-brille.openlw`. Bundles non déplaçables et toujours remplacés.
+Package identifier: `fr.francois-brille.openlw`. Bundles are non-relocatable and always replaced.
 
 ## Scripts
 
-- `preinstall` : arrête le service en place. Retire aussi les versions de développement antérieures au nom OpenLW.
-- `postinstall` : crée les réglages par défaut s'ils manquent, démarre le service, redémarre `coreaudiod` pour charger le périphérique (coupure du son de quelques secondes).
+- `preinstall`: stops the existing service. Also removes development versions predating the OpenLW name.
+- `postinstall`: creates default settings if absent, starts the service, and restarts `coreaudiod` to load the device (a few seconds of audio interruption).
 
-Réglages par défaut : interface automatique, annonce des sorties activée, 2 canaux dans chaque sens, nom annoncé = nom de l'ordinateur.
+Defaults: automatic interface selection, output advertisements enabled, two channels per direction, advertised name = computer name.
 
-## Vérifier un paquet
+## Verify a package
 
 ```sh
 pkgutil --payload-files build/OpenLW-*.pkg
 pkgutil --expand build/OpenLW-*.pkg /tmp/lwpkg && cat /tmp/lwpkg/Distribution
 ```
 
-## Reste à faire
+## Pending work
 
-- Signature Developer ID Application de l'app, du plugin et du service (runtime renforcé), puis notarisation (`xcrun notarytool submit … --wait`, `xcrun stapler staple`).
-- Installation réelle à valider sur ce Mac, puis sur 10.13 (non testé). Vérifier que les entrées `._*` du paquet (attribut `com.apple.provenance`) ne laissent aucun fichier sur le disque.
+- Developer ID Application signing of the app, plugin, and service (hardened runtime), followed by notarization (`xcrun notarytool submit … --wait`, `xcrun stapler staple`).
+- Validate actual installation on this Mac, then on 10.13 (untested). Check that package `._*` entries (`com.apple.provenance` attribute) leave no files on disk.

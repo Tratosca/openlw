@@ -1,5 +1,5 @@
-//! Patch de bout en bout sur l'interface de bouclage : découverte/patch par la commande de contrôle, rechargement de
-//! session, audio réseau → entrées du périphérique et sorties du périphérique → réseau.
+//! End-to-end patch on loopback: discovery/patching through the control command, session
+//! reload, network audio → device inputs and device outputs → network.
 
 #![allow(clippy::indexing_slicing)]
 
@@ -62,7 +62,7 @@ fn patch_network_to_device_and_back() {
         old.stop();
     };
 
-    // Terminal simulé : canal 21, Standard, 1 kHz à −12 dBFS.
+    // Simulated terminal: channel 21, Standard, 1 kHz at −12 dBFS.
     let omnia_stop = Stop::new();
     let omnia = {
         let (lo, s) = (lo.clone(), omnia_stop.clone());
@@ -71,7 +71,7 @@ fn patch_network_to_device_and_back() {
         std::thread::spawn(move || tx::run(&lo, &stream, TxOptions::default(), &s).unwrap())
     };
 
-    // Appelant non autorisé : refusé.
+    // Unauthorized caller: rejected.
     let denied: Value = serde_json::from_str(&shared.handle(
         r#"{"cmd":"patch_input","channel":21,"device_channels":[3,4]}"#,
         &Caller {
@@ -86,7 +86,7 @@ fn patch_network_to_device_and_back() {
         .unwrap()
         .contains(lw_sys::ctl::edit_policy()));
 
-    // Patch : canal 21 → entrées 3-4.
+    // Patch: channel 21 → inputs 3–4.
     let r: Value = serde_json::from_str(&shared.handle(
         r#"{"cmd":"patch_input","channel":21,"device_channels":[3,4]}"#,
         &Caller::trusted("test"),
@@ -95,7 +95,7 @@ fn patch_network_to_device_and_back() {
     assert_eq!(r["ok"], true, "{r}");
     reload(&mut session);
 
-    // Faux plugin : lit l'anneau réseau → applications au rythme réel.
+    // Mock plugin: read network → applications ring at real-time pace.
     let mut from_net = dev.region.consumer(Dir::FromNet).unwrap();
     let mut peaks = [0f32; 8];
     let mut buf = vec![0f32; 8 * 512];
@@ -126,7 +126,7 @@ fn patch_network_to_device_and_back() {
     assert_eq!(st.inputs.len(), 1);
     assert!(st.inputs[0].primed && st.inputs[0].device_channels == vec![3, 4]);
 
-    // Patch : sorties 1-2 → canal 4005 (Standard).
+    // Patch: outputs 1–2 → channel 4005 (Standard).
     let r: Value = serde_json::from_str(&shared.handle(
         r#"{"cmd":"patch_output","channel":4005,"name":"MAC 1","format":"standard","device_channels":[1,2]}"#,
         &Caller::trusted("test"),
@@ -135,7 +135,7 @@ fn patch_network_to_device_and_back() {
     assert_eq!(r["ok"], true, "{r}");
     reload(&mut session);
 
-    // Récepteur indépendant du canal 4005.
+    // Independent receiver for channel 4005.
     let rx_stop = Stop::new();
     let receiver = {
         let (lo, s) = (lo.clone(), rx_stop.clone());
@@ -153,7 +153,7 @@ fn patch_network_to_device_and_back() {
             .unwrap()
         })
     };
-    // Faux plugin : joue 1,5 s de 1 kHz à −6 dBFS sur les sorties 1-2, par blocs de 512 trames.
+    // Mock plugin: play 1.5 s of 1 kHz at −6 dBFS on outputs 1–2, in 512-frame blocks.
     let mut to_net = dev.region.producer(Dir::ToNet).unwrap();
     let amp = 10f32.powf(-6.0 / 20.0);
     let t0 = Instant::now();
@@ -181,7 +181,7 @@ fn patch_network_to_device_and_back() {
         stats.payload_sizes.keys().copied().collect::<Vec<_>>(),
         vec![1440]
     );
-    // Crête du dernier intervalle (signal établi) : −6 dBFS.
+    // Last interval peak (established signal): −6 dBFS.
     assert!(
         (stats.peak_dbfs + 6.0).abs() < 0.2,
         "crête {}",
@@ -195,7 +195,7 @@ fn patch_network_to_device_and_back() {
     dev.thread.join().unwrap();
 }
 
-/// Patcher et dépatcher des entrées à répétition ne coupe pas un flux émis (patch à chaud).
+/// Repeated input patch/unpatch operations do not interrupt a transmitted stream (live patching).
 #[test]
 fn input_changes_do_not_interrupt_emission() {
     let lo = iface::list()
@@ -216,7 +216,7 @@ fn input_changes_do_not_interrupt_emission() {
     .unwrap();
     let routes = dev.routes_handle();
     let shared = Shared::new(Some(&lo), 0);
-    // Sortie 1-2 émise sur le canal 4011 ; on écoute ce flux pendant toute la séquence.
+    // Outputs 1–2 transmitted on channel 4011; listen throughout the sequence.
     let base = r#"{"iface":"lo0","advertise":false,"device":{"channels_to_net":2,"channels_from_net":4},
         "sources":[{"channel":4011,"name":"MAC","format":"standard","device_channels":[1,2]}]"#;
     let cfg = |dest: &str| -> Config {

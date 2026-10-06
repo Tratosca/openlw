@@ -1,18 +1,18 @@
 OpenLW
 Copyright 2026 François Brille (Tratosca)
 
-Ce produit est distribué sous la licence Apache, version 2.0 (fichier LICENSE).
+This product is distributed under the Apache License, version 2.0 (LICENSE file).
 
-Livewire, Livewire+ et Axia sont des marques de TLS Corp. (Telos Alliance).
-OpenLW est un projet indépendant : il n'est ni affilié à TLS Corp., ni approuvé
-ou soutenu par elle. Ces noms ne sont employés que pour indiquer la compatibilité
-avec le protocole Livewire.
+Livewire, Livewire+, and Axia are trademarks of TLS Corp. (Telos Alliance).
+OpenLW is an independent project: it is neither affiliated with nor endorsed
+or supported by TLS Corp. These names are used only to indicate compatibility
+with the Livewire protocol.
 
-OpenLW contient du code écrit pour ce projet. Il ne contient aucun code, binaire ou
-document de TLS Corp.
+OpenLW contains code written for this project. It contains no TLS Corp. code,
+binaries, or documents.
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.
-Le pilote Windows d'OpenLW (windows/driver) est construit avec le SDK ASIO de
-Steinberg Media Technologies GmbH, utilisé sous la licence GPL version 3 ; ce
-pilote est distribué sous la licence GPL version 3. Le reste d'OpenLW est sous
-licence Apache, version 2.0.
+OpenLW's Windows driver (windows/driver) is built with the ASIO SDK from
+Steinberg Media Technologies GmbH, used under GPL version 3; the driver is
+distributed under GPL version 3. The rest of OpenLW is licensed under Apache
+License 2.0.

@@ -1,52 +1,52 @@
-// Fenêtre principale : liaison au réseau Livewire, grille de patch des entrées, sorties diffusées.
-// Le service réseau (LaunchDaemon) n'apparaît pas : l'app parle de réseau, de canaux et du périphérique.
-// Relevé de l'état à 5 Hz ; sources, configuration, interfaces et périphériques du Mac toutes les 2 s.
+// Main window: Livewire network connection, input patch matrix, transmitted outputs.
+// Network service (LaunchDaemon) is hidden: app presents network, channels, and device.
+// Poll status at 5 Hz; sources, configuration, interfaces, and Mac devices every 2 s.
 
 import AppKit
 
 final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWindowDelegate {
     private let client: DaemonClient
 
-    // Dernier état connu.
+    // Last known state.
     private var config = DaemonConfig()
     private var configLoaded = false
     private var meters = DeviceMeters()
     private var discovered: [DiscoveredSource] = []
     private var ifaces: [Iface] = []
-    /// Canaux saisis à la main, mémorisés entre deux lancements.
+    /// Manually entered channels, persisted between launches.
     private var manual: [DiscoveredSource] = MainWindowController.loadManual() {
         didSet { saveManual() }
     }
     private var reachable = false
     private var link = LinkStatus()
-    /// Interface de la session en cours (pour la pré-écoute).
+    /// Active session interface (for preview).
     private var statusIface: String { link.searching ? "" : link.iface }
     private var statusIP: String { link.searching ? "" : link.ipv4 }
 
-    // Pré-écoute : une source à la fois, repérée par canal et type (l'ordre des lignes change).
+    // Preview: one source at a time, identified by channel/type (row order changes).
     private let listener = Listener()
     private var listening: (channel: Int, kind: String)?
     private var busy: Set<String> = []
 
-    // En-tête.
+    // Header.
     private let stateDot = NSView()
     private let stateLabel = NSTextField(labelWithString: "Connexion au service OpenLW…")
     private let ifacePopup = NSPopUpButton()
     private let advertiseCheck = NSButton(checkboxWithTitle: "Annoncer les sorties sur le réseau", target: nil, action: nil)
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
 
-    // Nombre de canaux Livewire dans chaque sens (paires du périphérique, 1 à 16).
+    // Livewire channels per direction (device pairs, 1–16).
     static let maxPairs = 16
     private let inCount = NSPopUpButton()
     private let outCount = NSPopUpButton()
 
-    // Entrée et sortie par défaut du Mac.
+    // Mac default input/output.
     private let macInputLabel = NSTextField(labelWithString: "")
     private let macOutputLabel = NSTextField(labelWithString: "")
     private let useInput = NSButton(title: "Utiliser OpenLW", target: nil, action: nil)
     private let useOutput = NSButton(title: "Utiliser OpenLW", target: nil, action: nil)
 
-    // Entrées.
+    // Inputs.
     private let namingCheck = NSButton(checkboxWithTitle: "Nommer les périphériques d'après les canaux patchés, par exemple « OpenLW In (2 - Studio A) »",
                                        target: nil, action: nil)
     private let layoutPopup = NSPopUpButton()
@@ -56,11 +56,11 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     private let manualChannel = NSTextField()
     private let manualKind = NSPopUpButton()
 
-    // Sorties.
+    // Outputs.
     private let outputStack = NSStackView()
     private var outputRows: [OutputRow] = []
 
-    // Réglages avancés.
+    // Advanced settings.
     private let advancedToggle = NSButton()
     private let advancedBody = NSStackView()
     private let terminalField = NSTextField()
@@ -361,7 +361,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         mutate(["cmd": "set_advanced", "dscp": dscp])
     }
 
-    /// Ligne « nombre de canaux » d'un panneau, avec le périphérique par défaut du Mac dans ce sens.
+    /// Panel channel-count row with Mac's default device for that direction.
     private func countControls(_ popup: NSPopUpButton, label: String, unit: String, macLabel: NSTextField,
                                use: NSButton, useAction: Selector) -> NSStackView {
         let title = NSTextField(labelWithString: label)
@@ -404,7 +404,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         outputRows.forEach(outputStack.addArrangedSubview)
     }
 
-    // MARK: - Relevés
+    // MARK: - Polling
 
     func start() {
         window?.delegate = self
@@ -419,8 +419,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     private var shownOnce = false
 
-    /// Première activation : pas de champ actif (macOS ferait défiler jusqu'au premier champ de saisie,
-    /// le nom annoncé, en bas de la fenêtre) ; affichage depuis le haut.
+    /// First activation: no active field (macOS would scroll to first text field,
+    /// the advertised name at window bottom); display from top.
     func windowDidBecomeKey(_ notification: Notification) {
         guard !shownOnce else { return }
         shownOnce = true
@@ -428,7 +428,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         (window?.contentView?.subviews.first as? NSScrollView)?.documentView?.scroll(.zero)
     }
 
-    /// Envoie `request` sauf si une requête de même nature est déjà en cours.
+    /// Send `request` unless a request of the same type is already active.
     private func poll(_ key: String, _ request: [String: Any], _ handle: @escaping ([String: Any]) -> Void) {
         guard !busy.contains(key) else { return }
         busy.insert(key)
@@ -441,7 +441,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             case .failure(.unreachable):
                 self.setReachable(false)
             case .failure:
-                break // commande absente d'un daemon plus ancien : l'information reste vide
+                break // Command absent on older daemon: information remains empty
             }
         }
     }
@@ -453,7 +453,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             self.meters = DeviceMeters(status)
             let next = LinkStatus(status)
             if self.listening != nil && (next.iface != self.link.iface || next.ipv4 != self.link.ipv4 || next.searching) {
-                self.stopListening() // l'interface a changé : l'abonnement n'est plus valable
+                self.stopListening() // Interface changed: membership no longer valid
             }
             let changed = next.searching != self.link.searching || next.iface != self.link.iface || next.auto != self.link.auto
             self.link = next
@@ -490,7 +490,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         }
     }
 
-    /// Ligne d'état : interface utilisée, ou recherche du réseau.
+    /// Status line: active interface or network search.
     private func showLink() {
         if link.searching {
             stateDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
@@ -505,7 +505,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             + (link.auto ? " · interface choisie automatiquement" : "")
     }
 
-    /// Entrée et sortie par défaut du Mac, et boutons pour y mettre « OpenLW ».
+    /// Mac default input/output and buttons to select “OpenLW”.
     private func updateMacDevices() {
         for (input, label, button) in [(true, macInputLabel, useInput), (false, macOutputLabel, useOutput)] {
             let lw = MacAudio.livewireDevice(input: input)
@@ -516,7 +516,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         }
     }
 
-    // MARK: - Mise à jour de l'affichage
+    // MARK: - Display updates
 
     private func applyConfig(_ c: DaemonConfig) {
         let pairsChanged = !configLoaded || c.channelsToNet != config.channelsToNet
@@ -532,7 +532,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         if let i = Self.dscps.firstIndex(where: { $0.0 << 2 == c.tos }) {
             dscpPopup.selectItem(at: i)
         } else {
-            dscpPopup.select(nil) // valeur hors liste (config modifiée à la main)
+            dscpPopup.select(nil) // Value outside list (manually edited configuration)
         }
         if pairsChanged {
             rebuildOutputRows(pairs: max(1, c.channelsToNet / 2))
@@ -547,7 +547,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         updateGrid()
     }
 
-    /// Menu : « Automatique », puis les interfaces Ethernet (et l'interface configurée si elle n'en est pas).
+    /// Menu: automatic selection, then Ethernet interfaces (plus configured interface if not Ethernet).
     private func updateIfacePopup() {
         let auto = config.autoIface
         let autoTitle: String
@@ -580,7 +580,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         }
     }
 
-    /// Lignes de la grille : sources découvertes, puis flux configurés non annoncés, puis saisies.
+    /// Matrix rows: discovered sources, configured unadvertised streams, then manual entries.
     private var gridRows: [GridRow] = []
 
     private func patchedColumn(channel: Int, kind: String) -> Int? {
@@ -630,7 +630,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     // MARK: - Actions
 
-    /// Requête de modification ; la configuration renvoyée remplace l'état affiché.
+    /// Modification request; returned configuration replaces displayed state.
     private func mutate(_ request: [String: Any]) {
         client.call(request) { [weak self] result in
             guard let self = self else { return }
@@ -729,7 +729,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
                 "device_channels": Array(first..<(first + width))])
     }
 
-    /// Retire une ligne saisie ou non annoncée ; libère ses entrées si elle est patchée.
+    /// Remove manual/unadvertised row; release inputs if patched.
     private func removeRow(_ row: Int) {
         guard row < gridRows.count else { return }
         let s = gridRows[row].source
@@ -739,7 +739,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         manual.removeAll { $0.channel == s.channel && $0.patchKind == s.patchKind }
         if let p = config.inputs.first(where: { $0.channel == s.channel && $0.kind == s.patchKind }) {
             if p.deviceChannels.isEmpty {
-                updateGrid() // flux reçu sans patch : disparaîtra au prochain relevé
+                updateGrid() // Unpatched received stream: disappears at next poll
             } else {
                 mutate(["cmd": "unpatch_input", "device_channels": p.deviceChannels])
             }
@@ -776,7 +776,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         listen(to: s)
     }
 
-    /// Écoute `s` sur la sortie audio par défaut du Mac.
+    /// Preview `s` on Mac's default audio output.
     func listen(to s: DiscoveredSource) {
         guard !statusIface.isEmpty, !statusIP.isEmpty else {
             show(.refused("le Mac n'est pas encore relié au réseau Livewire. Choisissez l'interface, puis réessayez."))
@@ -823,7 +823,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             self?.mutate(["cmd": "patch_output", "channel": ch, "name": row.name, "format": row.format,
                           "device_channels": row.pair])
         }
-        // Changement de canal : arrêter d'abord l'ancien flux de cette paire.
+        // Channel change: stop this pair's old stream first.
         if let p = previous, p.channel != ch {
             client.call(["cmd": "unpatch_output", "channel": p.channel]) { [weak self] result in
                 if case .failure(let e) = result { self?.show(e) } else { send() }
@@ -834,12 +834,12 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 }
 
-/// Vue de document retournée (contenu ancré en haut du défilement).
+/// Flipped document view (content anchored at scroll top).
 final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// Ligne de sortie : paire du Mac, vumètre, canal, nom, format, diffusion.
+/// Output row: Mac pair, meter, channel, name, format, transmission.
 final class OutputRow: NSStackView, NSTextFieldDelegate {
     let pair: [Int]
     let meter = MeterView()
@@ -899,7 +899,7 @@ final class OutputRow: NSStackView, NSTextFieldDelegate {
         return fr.delegate === channelField || fr.delegate === nameField
     }
 
-    /// Affiche l'état configuré, sauf pendant une saisie.
+    /// Display configured state, except during editing.
     func show(_ patch: OutputPatch?) {
         guard !editing else { return }
         emitCheck.state = patch == nil ? .off : .on

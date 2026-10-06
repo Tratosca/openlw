@@ -1,38 +1,38 @@
 /*
- * Plugin HAL (AudioServerPlugIn) du driver Livewire / AES67 pour macOS.
+ * HAL plugin (AudioServerPlugIn) for macOS Livewire / AES67 driver.
  *
- * Objets, selon la présentation choisie dans l'app (réponse "geometry", "layout") :
- * - un périphérique duplex « OpenLW » (2) avec un flux d'entrée « depuis le réseau » (3) et un flux de
- *   sortie « vers le réseau » (4) ;
- * - ou deux périphériques : « OpenLW In » (5, flux d'entrée 6) et « OpenLW Out » (7, flux de
- *   sortie 8). Chaque périphérique a sa propre horloge d'IO ; ils partagent la région du daemon.
- * Le changement de présentation modifie la liste des périphériques du plugin (PropertiesChanged).
- * Format unique : float32 entrelacé, 48 kHz (Livewire).
+ * Objects according to app-selected layout ("geometry" response, "layout"):
+ * - one duplex “OpenLW” device (2), with “from network” input stream (3) and
+ * “to network” output stream (4);
+ * - or two devices: “OpenLW In” (5, input stream 6) and “OpenLW Out” (7, output
+ * stream 8). Each device has its own I/O clock; they share the daemon region.
+ * Layout changes modify plugin device list (PropertiesChanged).
+ * Single format: interleaved float32, 48 kHz (Livewire).
  *
- * Audio : échangé avec le daemon (lw-daemon) par la région partagée de daemon/lw-sys/csrc/lw_shm.h,
- * obtenue au premier StartIO par XPC (requête "attach", service Mach fr.francois-brille.openlw.daemon,
- * déclaré dans AudioServerPlugIn_MachServices). Sans daemon, le périphérique reste présent et silencieux.
+ * Audio: exchanged with lw-daemon through daemon/lw-sys/csrc/lw_shm.h shared region,
+ * obtained at first StartIO through XPC ("attach", Mach service fr.francois-brille.openlw.daemon,
+ * declared in AudioServerPlugIn_MachServices). Without daemon, device remains present and silent.
  *
- * Nombre de canaux : fixé par le daemon (réglage de l'app). Une file de surveillance interroge
- * "geometry" toutes les 2 s ; si le nombre de canaux ou la génération de la région change, elle demande
- * un changement de configuration à l'hôte. PerformDeviceConfigurationChange détache la région et
- * applique les nouveaux nombres ; l'hôte relit les propriétés et le StartIO suivant se rattache.
- * La même file rattache la région si l'IO tourne sans elle (daemon démarré après l'application).
+ * Channel count: set by daemon (app setting). Monitoring queue polls
+ * "geometry" every 2 s; if channel count or region generation changes, requests
+ * host configuration change. PerformDeviceConfigurationChange detaches region and
+ * applies new counts; host rereads properties, next StartIO reattaches.
+ * Same queue attaches region if I/O runs without it (daemon started after application).
  *
- * Noms : la réponse "geometry" porte aussi le nom des périphériques (« OpenLW », ou « OpenLW In
- * (2 - Studio A) » si l'option est activée dans l'app) et le nom de chaque canal (« 2 - Studio A G »).
- * Un changement est signalé à l'hôte (PropertiesChanged), sans changement de configuration.
+ * Names: "geometry" also contains device names (“OpenLW”, or “OpenLW In
+ * (2 - Studio A)” if enabled in app) and channel names (currently “2 - Studio A G”).
+ * Changes notify host (PropertiesChanged) without configuration change.
  *
- * Latence d'entrée : bornée ici, côté lecteur, car seul le plugin connaît la taille de bloc demandée par
- * l'hôte (512 à 4096 trames et plus). Le daemon remplit l'anneau tant qu'il y a de la place. Avant chaque
- * lecture de N trames, le plugin attend d'en avoir N + marge (amorçage, silence en attendant), puis jette
- * l'excédent au-delà de N + 2 × marge (audio en retard, IO redémarrée). La marge suit le préréglage de
- * latence choisi dans l'app (réponse "geometry", "input_margin" : 128, 256 ou 512 trames).
+ * Input latency: bounded here on reader side, because only plugin knows host-requested
+ * block size (512–4096 frames and beyond). Daemon fills ring while space remains. Before each
+ * N-frame read, plugin waits for N + margin (priming, silence while waiting), then discards
+ * excess beyond N + 2 × margin (late audio, restarted I/O). Margin follows
+ * app latency preset ("geometry" response, "input_margin": 128, 256, or 512 frames).
  *
- * Règles temps réel (GetZeroTimeStamp, Begin/Do/EndIOOperation) : ni verrou, ni allocation, ni appel
- * système bloquant ; la région est publiée par un pointeur atomique.
+ * Real-time rules (GetZeroTimeStamp, Begin/Do/EndIOOperation): no locks, allocations, or blocking
+ * system calls; region published through atomic pointer.
  *
- * Plancher : macOS 10.13 (x86_64), 11.0 (arm64). Aucun symbole postérieur n'est utilisé.
+ * Minimum: macOS 10.13 (x86_64), 11.0 (arm64). No newer symbols used.
  */
 #include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -47,7 +47,7 @@
 #include "lw_shm.h"
 #include "lw_sys.h"
 
-/* ---------- Constantes ---------- */
+/* ---------- Constants ---------- */
 
 #define LW_BUNDLE_ID "fr.francois-brille.openlw.driver"
 #define LW_SERVICE "fr.francois-brille.openlw.daemon"
@@ -59,8 +59,8 @@
 #define LW_ZERO_TS_PERIOD 16384u
 #define LW_DEFAULT_CHANNELS 2u
 #define LW_MONITOR_PERIOD_NS (2ull * NSEC_PER_SEC)
-/* Marge de l'anneau d'entrée au-delà d'un bloc : absorbe le cadencement du daemon (1 ms) et celui de l'hôte.
- * Valeur par défaut, remplacée par celle du daemon (préréglage de latence), bornée à [64, 2048]. */
+/* Input-ring margin beyond one block: absorb daemon pacing (1 ms) and host pacing.
+ * Default replaced by daemon value (latency preset), bounded to [64, 2048]. */
 #define LW_IN_MARGIN 256u
 static _Atomic uint32_t gInMargin = LW_IN_MARGIN;
 #define LW_ELEMENT_MAIN 0u /* kAudioObjectPropertyElementMain (12.0+) == Master */
@@ -68,15 +68,15 @@ static _Atomic uint32_t gInMargin = LW_IN_MARGIN;
 enum {
     kObj_PlugIn = kAudioObjectPlugInObject,
     kObj_Device = 2,     /* duplex */
-    kObj_StreamIn = 3,   /* réseau → applications (entrée) */
-    kObj_StreamOut = 4,  /* applications → réseau (sortie) */
+    kObj_StreamIn = 3,   /* Network → applications (input) */
+    kObj_StreamOut = 4,  /* Applications → network (output) */
     kObj_DevIn = 5,      /* « OpenLW In » */
     kObj_StreamIn2 = 6,
     kObj_DevOut = 7,     /* « OpenLW Out » */
     kObj_StreamOut2 = 8,
 };
 
-/* Index de périphérique (0 duplex, 1 entrée, 2 sortie), ou -1. */
+/* Device index (0 duplex, 1 input, 2 output), or -1. */
 static int dev_index(AudioObjectID id) {
     return id == kObj_Device ? 0 : id == kObj_DevIn ? 1 : id == kObj_DevOut ? 2 : -1;
 }
@@ -95,45 +95,45 @@ static AudioObjectID stream_owner(AudioObjectID id) {
     return id == kObj_StreamIn2 ? kObj_DevIn : id == kObj_StreamOut2 ? kObj_DevOut : kObj_Device;
 }
 
-/* ---------- État ---------- */
+/* ---------- State ---------- */
 
 static AudioServerPlugInHostRef gHost = NULL;
 static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
 static UInt32 gRefCount = 0;
-static UInt32 gChannelsIn = LW_DEFAULT_CHANNELS;  /* depuis le réseau */
-static UInt32 gChannelsOut = LW_DEFAULT_CHANNELS; /* vers le réseau */
+static UInt32 gChannelsIn = LW_DEFAULT_CHANNELS;  /* From network */
+static UInt32 gChannelsOut = LW_DEFAULT_CHANNELS; /* To network */
 static Float64 gHostTicksPerFrame = 0;
 
-/* Horloge et IO de chaque périphérique (index dev_index). */
+/* Each device's clock and I/O (dev_index index). */
 typedef struct {
     UInt32 io;
     UInt64 anchor;
     UInt64 count;
 } lw_dev_state;
 static lw_dev_state gDev[3];
-/* Présentation : 0 un périphérique duplex, 1 deux périphériques (protégé par gLock). */
+/* Layout: 0 one duplex device, 1 two devices (protected by gLock). */
 static int gSplit = 0;
 
 static UInt32 io_running_locked(void) {
     return gDev[0].io + gDev[1].io + gDev[2].io;
 }
 
-/* Région partagée active (ou NULL) : lue sans verrou par le thread IO. */
+/* Active shared region (or NULL): read lock-free by I/O thread. */
 static _Atomic(void *) gRegion = NULL;
 static size_t gRegionSize = 0;
 static void *gShmemObject = NULL;
 static lw_client *gClient = NULL;
-/* Point d'accès XPC de test (banc d'essai dans le même processus) ; NULL en production. */
+/* Test XPC endpoint (same-process harness); NULL in production. */
 static void *gTestEndpoint = NULL;
-/* Banc d'essai : la minuterie de surveillance ne fait rien, le banc appelle lw_plugin_test_poll. */
+/* Harness: monitoring timer is inert; harness calls lw_plugin_test_poll. */
 static int gTestMode = 0;
 
-/* Surveillance de la géométrie (file série dédiée, hors temps réel). */
+/* Geometry monitoring (dedicated serial queue, outside real-time). */
 static dispatch_queue_t gMonitorQueue = NULL;
 static dispatch_source_t gMonitorTimer = NULL;
 static lw_client *gMonClient = NULL;
 static uint64_t gAttachedGeneration = 0;
-/* Noms publiés (protégés par gLock ; NULL = nom par défaut). */
+/* Published names (protected by gLock; NULL = default name). */
 #define LW_NAME_BYTES 512
 static CFStringRef gDeviceName = NULL;
 static CFStringRef gInDevName = NULL;
@@ -141,9 +141,9 @@ static CFStringRef gOutDevName = NULL;
 static CFStringRef gInNames[LW_SHM_MAX_CHANNELS];
 static CFStringRef gOutNames[LW_SHM_MAX_CHANNELS];
 
-/* Entrée amorcée (thread IO ; remis à zéro au démarrage de l'IO et au rattachement). */
+/* Input primed (I/O thread; reset at I/O start and attachment). */
 static _Atomic int gInPrimed = 0;
-/* Changement de configuration demandé, par périphérique (bit = dev_index). */
+/* Requested configuration change per device (bit = dev_index). */
 static int gChangeRequested = 0;
 static UInt32 gPendingIn = LW_DEFAULT_CHANNELS;
 static UInt32 gPendingOut = LW_DEFAULT_CHANNELS;
@@ -152,9 +152,9 @@ static void plog(int level, const char *msg) {
     lw_log(level, "plugin", msg);
 }
 
-/* ---------- Connexion au daemon (hors temps réel) ---------- */
+/* ---------- Daemon connection (outside real-time) ---------- */
 
-/* Lit l'entier qui suit "key": dans une réponse JSON du daemon (format connu, sans imbrication ambiguë). */
+/* Read integer following "key": in daemon JSON response (known format, no ambiguous nesting). */
 static int json_u64(const char *json, const char *key, uint64_t *out) {
     char pat[64];
     snprintf(pat, sizeof pat, "\"%s\":", key);
@@ -175,8 +175,8 @@ static int json_u64(const char *json, const char *key, uint64_t *out) {
     return 0;
 }
 
-/* Chaîne JSON commençant juste après son guillemet ouvrant, copiée en UTF-8 dans out (tronquée à cap).
- * Retourne la position qui suit le guillemet fermant, ou NULL si la chaîne est mal formée. */
+/* JSON string starting just after opening quote, copied as UTF-8 into out (truncated to cap).
+ * Return position after closing quote, or NULL if malformed. */
 static const char *json_parse_str(const char *p, char *out, size_t cap) {
     size_t n = 0;
     while (*p && *p != '"') {
@@ -202,7 +202,7 @@ static const char *json_parse_str(const char *p, char *out, size_t cap) {
                         return NULL;
                     }
                 }
-                /* serde n'échappe que les caractères de contrôle : plan multilingue de base suffisant. */
+                /* serde escapes only control characters: basic multilingual plane suffices. */
                 unsigned char u[3];
                 int k = 0;
                 if (v < 0x80) {
@@ -237,12 +237,12 @@ static const char *json_parse_str(const char *p, char *out, size_t cap) {
     return p + 1;
 }
 
-/* Chaîne CF (retenue) ; NULL si vide ou invalide (UTF-8 tronqué). */
+/* Retained CF string; NULL if empty or invalid (truncated UTF-8). */
 static CFStringRef cf_name(const char *s) {
     return *s ? CFStringCreateWithCString(NULL, s, kCFStringEncodingUTF8) : NULL;
 }
 
-/* Valeur chaîne de "key" ; NULL si absente. */
+/* String value for "key"; NULL if absent. */
 static CFStringRef json_name(const char *json, const char *key) {
     char pat[64], buf[LW_NAME_BYTES];
     snprintf(pat, sizeof pat, "\"%s\":\"", key);
@@ -253,7 +253,7 @@ static CFStringRef json_name(const char *json, const char *key) {
     return cf_name(buf);
 }
 
-/* Tableau de chaînes de "key" dans dst[max] (entrées non lues : NULL). */
+/* String array for "key" into dst[max] (unread entries: NULL). */
 static void json_names(const char *json, const char *key, CFStringRef *dst, size_t max) {
     char pat[64], buf[LW_NAME_BYTES];
     memset(dst, 0, max * sizeof *dst);
@@ -290,8 +290,8 @@ static void replace_name(CFStringRef *slot, CFStringRef v) {
     }
 }
 
-/* Remplace les noms publiés ; retourne un masque : 1 nom du duplex, 2 canaux d'entrée, 4 canaux de
- * sortie, 8 nom de « OpenLW In », 16 nom de « OpenLW Out ». */
+/* Replace published names; return mask: 1 duplex name, 2 input channels, 4 output
+ * channels, 8 “OpenLW In” name, 16 “OpenLW Out” name. */
 static int set_names_locked(CFStringRef name, CFStringRef in_dev, CFStringRef out_dev, CFStringRef *in,
                             CFStringRef *out) {
     int changed = 0;
@@ -312,8 +312,8 @@ static int set_names_locked(CFStringRef name, CFStringRef in_dev, CFStringRef ou
     return changed;
 }
 
-/* Région détachée, démappée seulement au détachement suivant : avec deux périphériques, l'IO de
- * l'un peut encore lire la région quand l'autre la détache (changement de configuration). */
+/* Detached region, unmapped only on next detach: with two devices, one device's I/O
+ * may still read the region when the other detaches it (configuration change). */
 static void *gStaleRegion = NULL;
 static size_t gStaleSize = 0;
 static void *gStaleObject = NULL;
@@ -372,7 +372,7 @@ static void attach_locked(void) {
     if (base != NULL && lw_shm_validate(base, size) == 0) {
         lw_shm_host_clock(base, &clock);
     }
-    /* L'horloge publiée doit être en ticks mach_absolute_time, base de GetZeroTimeStamp. */
+    /* Published clock must use mach_absolute_time ticks, GetZeroTimeStamp's timebase. */
     if (base == NULL || clock.id != LW_CLOCK_MACH) {
         plog(3, "région partagée invalide (magie, version, taille ou horloge hôte)");
         lw_shm_unmap(base, size);
@@ -383,7 +383,7 @@ static void attach_locked(void) {
     const lw_shm_header *h = (const lw_shm_header *)base;
     if (h->channels[LW_TO_NET] != gChannelsOut || h->channels[LW_FROM_NET] != gChannelsIn ||
         h->sample_rate != (uint32_t)LW_SAMPLE_RATE) {
-        /* Nombre de canaux changé côté daemon : la surveillance demandera le changement de configuration. */
+        /* Daemon channel count changed: monitor will request configuration change. */
         plog(3, "géométrie de la région différente de celle du périphérique (canaux ou fréquence)");
         lw_shm_unmap(base, size);
         lw_xpc_release(obj);
@@ -398,7 +398,7 @@ static void attach_locked(void) {
     plog(2, "région partagée du daemon attachée");
 }
 
-/* Une interrogation de la géométrie ; demande un changement de configuration si besoin. */
+/* One geometry query; request configuration change if needed. */
 static void monitor_tick(void) {
     pthread_mutex_lock(&gLock);
     if (gMonClient == NULL) {
@@ -412,7 +412,7 @@ static void monitor_tick(void) {
     const char *err = NULL;
     char *reply = lw_xpc_call(client, "{\"cmd\":\"geometry\"}", &err);
     if (reply == NULL) {
-        /* Daemon absent ou redémarré : nouvelle connexion au prochain passage. */
+        /* Daemon absent/restarted: reconnect on next poll. */
         pthread_mutex_lock(&gLock);
         if (gMonClient == client) {
             lw_xpc_client_close(gMonClient);
@@ -443,7 +443,7 @@ static void monitor_tick(void) {
     if (!ok) {
         return;
     }
-    int request = 0; /* périphériques pour lesquels demander un changement de configuration */
+    int request = 0; /* Devices requiring configuration-change requests */
     pthread_mutex_lock(&gLock);
     AudioServerPlugInHostRef host = gHost;
     int relayout = split != gSplit;
@@ -453,7 +453,7 @@ static void monitor_tick(void) {
     int change = (UInt32)to != gChannelsOut || (UInt32)from != gChannelsIn || (attached && gen != gAttachedGeneration);
     int published = gSplit ? (2 | 4) : 1;
     if (change) {
-        /* La géométrie la plus récente l'emporte, même si une demande est déjà en attente. */
+        /* Most recent geometry wins, even with a pending request. */
         gPendingOut = (UInt32)to;
         gPendingIn = (UInt32)from;
         request = published & ~gChangeRequested;
@@ -519,7 +519,7 @@ static void monitor_start(void) {
     dispatch_resume(gMonitorTimer);
 }
 
-/* Hook de test : force un point d'accès XPC (banc d'essai) et coupe la minuterie de surveillance. */
+/* Test hook: force XPC endpoint (harness) and disable monitoring timer. */
 __attribute__((visibility("default"))) void lw_plugin_test_use_endpoint(void *endpoint) {
     pthread_mutex_lock(&gLock);
     gTestMode = 1;
@@ -532,7 +532,7 @@ __attribute__((visibility("default"))) void lw_plugin_test_use_endpoint(void *en
     pthread_mutex_unlock(&gLock);
 }
 
-/* Hook de test : une interrogation de la géométrie, synchrone. */
+/* Test hook: one synchronous geometry query. */
 __attribute__((visibility("default"))) void lw_plugin_test_poll(void) {
     if (gMonitorQueue) {
         dispatch_sync(gMonitorQueue, ^{
@@ -543,7 +543,7 @@ __attribute__((visibility("default"))) void lw_plugin_test_poll(void) {
     }
 }
 
-/* ---------- Utilitaires de propriétés ---------- */
+/* ---------- Property utilities ---------- */
 
 #define REQUIRE_SIZE(n)                                                                                                \
     do {                                                                                                               \
@@ -574,12 +574,12 @@ static UInt32 stream_channels(AudioObjectID id) {
     return is_stream_in(id) ? gChannelsIn : gChannelsOut;
 }
 
-/* Périphérique publié dans la présentation courante (verrou pris par l'appelant ou lecture tolérée). */
+/* Device published in current layout (caller holds lock or read is tolerated). */
 static Boolean dev_published(AudioObjectID id) {
     return gSplit ? (id == kObj_DevIn || id == kObj_DevOut) : id == kObj_Device;
 }
 
-/* Nom de canal d'un périphérique : portée qu'il possède, élément 1..nombre de canaux. */
+/* Device channel name: owned scope, element 1..channel count. */
 static Boolean element_name_valid(AudioObjectID dev, const AudioObjectPropertyAddress *a) {
     UInt32 n = a->mScope == kAudioObjectPropertyScopeInput && dev_has_in(dev)     ? gChannelsIn
                : a->mScope == kAudioObjectPropertyScopeOutput && dev_has_out(dev) ? gChannelsOut
@@ -587,7 +587,7 @@ static Boolean element_name_valid(AudioObjectID dev, const AudioObjectPropertyAd
     return a->mElement >= 1 && a->mElement <= n && a->mElement <= LW_SHM_MAX_CHANNELS;
 }
 
-/* Flux d'un périphérique pour une portée (global : tous). */
+/* Device streams for scope (global: all). */
 static UInt32 dev_streams(AudioObjectID dev, AudioObjectPropertyScope scope, AudioObjectID ids[2]) {
     UInt32 n = 0;
     if (dev_stream_in(dev) && (scope == kAudioObjectPropertyScopeGlobal || scope == kAudioObjectPropertyScopeInput)) {
@@ -599,7 +599,7 @@ static UInt32 dev_streams(AudioObjectID dev, AudioObjectPropertyScope scope, Aud
     return n;
 }
 
-/* Périphériques publiés par le plugin. */
+/* Devices published by plugin. */
 static UInt32 published_devices(AudioObjectID ids[2]) {
     pthread_mutex_lock(&gLock);
     UInt32 n = 0;
@@ -688,7 +688,7 @@ static UInt32 plist_channels(CFBundleRef bundle, CFStringRef key) {
     return LW_DEFAULT_CHANNELS;
 }
 
-/* Fabrique déclarée dans CFPlugInFactories. */
+/* Factory declared in CFPlugInFactories. */
 __attribute__((visibility("default"))) void *LW_Create(CFAllocatorRef allocator, CFUUIDRef requestedType) {
     (void)allocator;
     if (!CFEqual(requestedType, kAudioServerPlugInTypeUUID)) {
@@ -737,7 +737,7 @@ static ULONG LW_Release(void *inDriver) {
     return n;
 }
 
-/* ---------- Opérations du plugin ---------- */
+/* ---------- Plugin operations ---------- */
 
 static OSStatus LW_Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPlugInHostRef inHost) {
     if (inDriver != gDriverRef) {
@@ -776,9 +776,9 @@ static OSStatus LW_RemoveDeviceClient(AudioServerPlugInDriverRef d, AudioObjectI
     return (d == gDriverRef && dev_index(id) >= 0) ? kAudioHardwareNoError : kAudioHardwareBadObjectError;
 }
 
-/* Appelé par l'hôte, IO de ce périphérique arrêtée : il applique la nouvelle géométrie de ses sens
- * (duplex : les deux), et la région est détachée (rattachée au StartIO suivant). L'autre périphérique
- * (présentation en deux) peut tourner encore : la région détachée n'est démappée que plus tard. */
+/* Host calls with this device's I/O stopped: apply new geometry for its directions
+ * (both for duplex), detach region (reattach at next StartIO). Other device
+ * (two-device layout) may still run: detached region is unmapped later. */
 static OSStatus LW_PerformConfigChange(AudioServerPlugInDriverRef d, AudioObjectID id, UInt64 a, void *i) {
     (void)a, (void)i;
     int idx = dev_index(id);
@@ -796,7 +796,7 @@ static OSStatus LW_PerformConfigChange(AudioServerPlugInDriverRef d, AudioObject
             gChannelsIn = gPendingIn;
         }
         if (io_running_locked() > 0) {
-            attach_locked(); /* hôte qui n'arrête pas l'IO, ou autre périphérique en marche */
+            attach_locked(); /* Host that does not stop I/O, or other running device */
         }
     }
     pthread_mutex_unlock(&gLock);
@@ -811,12 +811,12 @@ static OSStatus LW_AbortConfigChange(AudioServerPlugInDriverRef d, AudioObjectID
         return kAudioHardwareBadObjectError;
     }
     pthread_mutex_lock(&gLock);
-    gChangeRequested &= ~(1 << idx); /* nouvelle demande au prochain passage de la surveillance */
+    gChangeRequested &= ~(1 << idx); /* New request on next monitoring poll */
     pthread_mutex_unlock(&gLock);
     return kAudioHardwareNoError;
 }
 
-/* ---------- Propriétés ---------- */
+/* ---------- Properties ---------- */
 
 static Boolean LW_HasProperty(AudioServerPlugInDriverRef d, AudioObjectID id, pid_t pid, const AudioObjectPropertyAddress *a) {
     if (d != gDriverRef || a == NULL) {
@@ -831,7 +831,7 @@ static OSStatus LW_IsPropertySettable(AudioServerPlugInDriverRef d, AudioObjectI
     if (!LW_HasProperty(d, id, pid, a) || out == NULL) {
         return kAudioHardwareUnknownPropertyError;
     }
-    /* Tout est en lecture seule : un seul format, une seule fréquence. */
+    /* Everything read-only: one format, one sample rate. */
     *out = false;
     return kAudioHardwareNoError;
 }
@@ -957,7 +957,7 @@ static OSStatus put_u32(UInt32 v, UInt32 inDataSize, UInt32 *outDataSize, void *
 
 static OSStatus put_str(CFStringRef s, UInt32 inDataSize, UInt32 *outDataSize, void *outData) {
     REQUIRE_SIZE(sizeof(CFStringRef));
-    *(CFStringRef *)outData = s; /* chaîne constante : l'appelant la libère, CFSTR survit */
+    *(CFStringRef *)outData = s; /* Constant string: caller releases it; CFSTR survives */
     CFRetain(s);
     *outDataSize = sizeof(CFStringRef);
     return kAudioHardwareNoError;
@@ -1178,7 +1178,7 @@ static OSStatus LW_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
     if (d != gDriverRef || a == NULL) {
         return kAudioHardwareBadObjectError;
     }
-    /* Accepte de « fixer » les seules valeurs supportées (certains hôtes le font systématiquement). */
+    /* Accept “setting” only supported values (some hosts do this systematically). */
     if (dev_index(id) >= 0 && a->mSelector == kAudioDevicePropertyNominalSampleRate && inDataSize == sizeof(Float64) &&
         *(const Float64 *)inData == LW_SAMPLE_RATE) {
         return kAudioHardwareNoError;
@@ -1207,8 +1207,8 @@ static OSStatus LW_StartIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt3
         gDev[idx].anchor = mach_absolute_time();
         attach_locked();
         if (dev_has_in(id)) {
-            /* IO d'entrée arrêtée jusqu'ici : l'anneau d'entrée contient de l'audio ancien (le daemon
-             * l'a rempli puis a cessé d'écrire). Il est vidé ; l'amorçage attend de l'audio frais. */
+            /* Input I/O previously stopped: input ring contains stale audio (daemon
+             * filled it then stopped writing). Drain it; priming waits for fresh audio. */
             atomic_store(&gInPrimed, 0);
             void *region = atomic_load(&gRegion);
             if (region) {
@@ -1235,8 +1235,8 @@ static OSStatus LW_StopIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32
     return kAudioHardwareNoError;
 }
 
-/* Horloge du périphérique : horloge hôte à 48 kHz nominal. Asservissement sur l'horloge réseau
- * (rate_scalar de la région) : à venir, quand le daemon suivra PTP ou l'horloge Livewire. */
+/* Device clock: nominal 48 kHz host clock. Network-clock synchronization
+ * (region rate_scalar): future work when daemon follows PTP or Livewire clock. */
 static OSStatus LW_GetZeroTimeStamp(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client, Float64 *st,
                                     UInt64 *ht, UInt64 *seed) {
     (void)client;
@@ -1294,10 +1294,10 @@ static OSStatus LW_DoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id,
         }
         if (region && primed) {
             if (avail > keep + margin) {
-                lw_ring_skip(region, LW_FROM_NET, avail - keep); /* audio en retard : on rattrape */
+                lw_ring_skip(region, LW_FROM_NET, avail - keep); /* Late audio: catch up */
             }
             if (lw_ring_read(region, LW_FROM_NET, (float *)main, frames) < frames) {
-                atomic_store_explicit(&gInPrimed, 0, memory_order_relaxed); /* manque : réamorçage */
+                atomic_store_explicit(&gInPrimed, 0, memory_order_relaxed); /* Underrun: reprime */
             }
         } else {
             memset(main, 0, (size_t)frames * gChannelsIn * sizeof(float));

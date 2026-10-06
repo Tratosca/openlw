@@ -1,4 +1,4 @@
-# Compilation croisée avec llvm-mingw (tests sous Wine) : Windows aarch64.
+# Cross-compile with llvm-mingw (Wine tests): Windows aarch64.
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR aarch64)
 set(CMAKE_C_COMPILER aarch64-w64-mingw32-clang)

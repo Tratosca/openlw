@@ -1,11 +1,11 @@
-//! Région partagée daemon ↔ client audio : enveloppes sûres autour de `csrc/lw_shm.c`.
+//! Daemon ↔ audio client shared region: safe wrappers around `csrc/lw_shm.c`.
 //!
-//! La disposition et la logique (anneaux SPSC, seqlock d'horloge) n'existent qu'en C : le plugin HAL
-//! et le pilote Windows compilent le même fichier. Partage : objet `xpc_shmem` (macOS), section
-//! dupliquée dans le processus client (Windows) ; sous Linux, la région reste dans le daemon, qui sert
-//! lui-même les nœuds PipeWire. Ici, on garantit côté Rust un seul producteur et un seul consommateur
-//! par anneau et par processus : les extrémités ([`Producer`], [`Consumer`], [`ClockWriter`]) ne sont
-//! pas clonables et ne s'obtiennent qu'une fois.
+//! Layout and logic (SPSC rings, clock seqlock) exist only in C: HAL plugin
+//! and Windows driver compile the same file. Sharing: `xpc_shmem` object (macOS), section
+//! duplicated into client process (Windows); on Linux, region remains in the daemon, which serves
+//! PipeWire nodes itself. Rust guarantees one producer and one consumer
+//! per ring per process: endpoints ([`Producer`], [`Consumer`], [`ClockWriter`]) cannot be
+//! cloned and can be obtained only once.
 
 use std::ffi::{c_int, c_void};
 use std::fmt;
@@ -14,16 +14,16 @@ use std::sync::Arc;
 
 use crate::ffi;
 
-/// Sens d'un anneau.
+/// Ring direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dir {
-    /// Applications → réseau (producteur : plugin ; consommateur : daemon).
+    /// Applications → network (producer: plugin; consumer: daemon).
     ToNet = 0,
-    /// Réseau → applications (producteur : daemon ; consommateur : plugin).
+    /// Network → applications (producer: daemon; consumer: plugin).
     FromNet = 1,
 }
 
-/// Erreur de région partagée.
+/// Shared-region error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(pub &'static str);
 
@@ -35,12 +35,12 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Objet de partage reçu d'un serveur : `xpc_shmem` retenu (macOS) ou handle de section (Windows).
-/// Libéré au `drop` s'il n'est pas mappé.
+/// Server-provided sharing object: retained `xpc_shmem` (macOS) or section handle (Windows).
+/// Freed on `drop` if unmapped.
 pub struct SharedObject(*mut c_void);
 
-// SAFETY: un objet XPC retenu ou un handle Windows peut être transféré et libéré depuis n'importe
-// quel thread.
+// SAFETY: a retained XPC object or Windows handle can be transferred and released from any
+// thread.
 unsafe impl Send for SharedObject {}
 
 impl SharedObject {
@@ -49,8 +49,8 @@ impl SharedObject {
         (!p.is_null()).then_some(Self(p))
     }
 
-    /// Handle de section reçu du daemon (champ `shmem.handle` de la réponse à `attach`), déjà
-    /// dupliqué dans ce processus par le daemon. Le mappage vérifie la région.
+    /// Section handle from daemon (`shmem.handle` in `attach` response), already
+    /// duplicated into this process by daemon. Mapping validates region.
     #[cfg(windows)]
     pub fn from_handle_value(value: u64) -> Option<Self> {
         Self::from_raw(usize::try_from(value).ok()? as *mut c_void)
@@ -59,7 +59,7 @@ impl SharedObject {
 
 impl Drop for SharedObject {
     fn drop(&mut self) {
-        // SAFETY: objet retenu ou handle possédé par cette valeur, libéré une seule fois.
+        // SAFETY: retained object or handle owned by this value, released once.
         unsafe { ffi::lw_shm_release(self.0) };
     }
 }
@@ -67,20 +67,20 @@ impl Drop for SharedObject {
 struct Inner {
     base: *mut c_void,
     size: usize,
-    /// Objet de partage (créateur) ou objet reçu (client), libéré au drop ; NULL sous Linux.
+    /// Creator sharing object or received client object, released on drop; NULL on Linux.
     handle: *mut c_void,
 }
 
-// SAFETY: la mémoire n'est accédée que par les fonctions C, atomiques pour les positions ; le partage
-// des données audio est sérialisé par le protocole SPSC, que l'API garantit (une extrémité par rôle).
+// SAFETY: memory accessed only through C functions, atomic for positions; audio-data
+// sharing serialized by SPSC protocol guaranteed by API (one endpoint per role).
 unsafe impl Send for Inner {}
-// SAFETY: idem ; les méthodes en lecture seule (`readable`, `counters`, `clock_read`) sont atomiques.
+// SAFETY: likewise; read-only methods (`readable`, `counters`, `clock_read`) are atomic.
 unsafe impl Sync for Inner {}
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        // SAFETY: `base`/`size` proviennent d'un mappage réussi, démappé une seule fois ; `handle` est
-        // possédé par cette région.
+        // SAFETY: `base`/`size` come from successful mapping, unmapped once; `handle` is
+        // owned by this region.
         unsafe {
             ffi::lw_shm_unmap(self.base, self.size);
             ffi::lw_shm_release(self.handle);
@@ -88,47 +88,47 @@ impl Drop for Inner {
     }
 }
 
-/// Région partagée mappée. Les extrémités s'obtiennent une fois chacune.
+/// Mapped shared region. Each endpoint obtainable once.
 pub struct Region {
     inner: Arc<Inner>,
     taken: [AtomicBool; 5],
 }
 
-/// Paramètres lus dans l'en-tête.
+/// Parameters read from header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Geometry {
-    /// Fréquence d'échantillonnage (Hz).
+    /// Sample rate (Hz).
     pub sample_rate: u32,
-    /// Taille de chaque anneau en trames (puissance de 2).
+    /// Ring size in frames (power of two).
     pub ring_frames: u32,
-    /// Canaux de l'anneau applications → réseau.
+    /// Applications → network ring channels.
     pub channels_to_net: u32,
-    /// Canaux de l'anneau réseau → applications.
+    /// Network → applications ring channels.
     pub channels_from_net: u32,
 }
 
-/// Compteurs d'un anneau.
+/// Ring counters.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Counters {
-    /// Position d'écriture (trames, croissante).
+    /// Write position (frames, increasing).
     pub write_pos: u64,
-    /// Position de lecture (trames, croissante).
+    /// Read position (frames, increasing).
     pub read_pos: u64,
-    /// Trames refusées faute de place.
+    /// Frames rejected due to insufficient space.
     pub overruns: u64,
-    /// Trames manquantes complétées par du silence.
+    /// Missing frames padded with silence.
     pub underruns: u64,
 }
 
 impl Region {
-    /// Crée une région (côté daemon) : anneaux de `ring_frames` trames (puissance de 2).
+    /// Create region (daemon side): rings of `ring_frames` frames (power of two).
     pub fn create(
         sample_rate: u32,
         ring_frames: u32,
         channels_to_net: u32,
         channels_from_net: u32,
     ) -> Result<Self, Error> {
-        // SAFETY: fonction C pure.
+        // SAFETY: pure C function.
         let size = unsafe { ffi::lw_shm_size(ring_frames, channels_to_net, channels_from_net) };
         if size == 0 {
             return Err(Error(
@@ -136,15 +136,15 @@ impl Region {
             ));
         }
         let mut handle: *mut c_void = std::ptr::null_mut();
-        // SAFETY: `handle` est un pointeur de sortie valide ; la couche C alloue `size` octets.
+        // SAFETY: `handle` is a valid output pointer; C layer allocates `size` bytes.
         let base = unsafe { ffi::lw_shm_alloc(size, &mut handle) };
         if base.is_null() {
             return Err(Error("allocation de la région partagée impossible"));
         }
         let mut clock = ffi::HostClock::default();
-        // SAFETY: pointeur de sortie valide.
+        // SAFETY: valid output pointer.
         unsafe { ffi::lw_host_clock_info(&mut clock) };
-        // SAFETY: `base` pointe vers `size` octets fraîchement mappés, non partagés à ce stade.
+        // SAFETY: `base` points to `size` freshly mapped bytes, not yet shared.
         let rc = unsafe {
             ffi::lw_shm_init(
                 base,
@@ -163,18 +163,18 @@ impl Region {
         Ok(region)
     }
 
-    /// Mappe une région reçue du daemon (côté client, ou test) et la valide.
+    /// Map and validate region received from daemon (client side or test).
     pub fn map(object: SharedObject) -> Result<Self, Error> {
         let mut size = 0usize;
-        // SAFETY: `object.0` est un objet de partage possédé ; `size` est un pointeur de sortie valide.
+        // SAFETY: `object.0` is an owned sharing object; `size` is a valid output pointer.
         let base = unsafe { ffi::lw_shm_map(object.0, &mut size) };
         if base.is_null() {
             return Err(Error("mappage de la région impossible"));
         }
         let obj = object.0;
-        std::mem::forget(object); // la propriété de l'objet passe à `Inner`
+        std::mem::forget(object); // Object ownership transfers to `Inner`
         let region = Self::wrap(base, size, obj);
-        // SAFETY: `base` pointe vers `size` octets mappés.
+        // SAFETY: `base` points to `size` mapped bytes.
         if unsafe { ffi::lw_shm_validate(base, size) } != 0 {
             return Err(Error("région invalide (magie, version ou taille)"));
         }
@@ -193,34 +193,34 @@ impl Region {
         self.inner.handle
     }
 
-    /// Duplique la section dans le processus `pid` ; renvoie la valeur du handle dans ce processus.
+    /// Duplicate section into process `pid`; return handle value in that process.
     #[cfg(windows)]
     pub fn share_with(&self, pid: u32) -> Option<u64> {
-        // SAFETY: `handle` est la section de cette région, valide tant qu'elle vit.
+        // SAFETY: `handle` is this region's section, valid for its lifetime.
         let h = unsafe { ffi::lw_shm_share_with(self.inner.handle, pid) };
         (h != 0).then_some(h)
     }
 
-    /// Horloge hôte déclarée dans l'en-tête : (identifiant `lw_host_clock_id`, numérateur,
-    /// dénominateur de la conversion en ns).
+    /// Header-declared host clock: (`lw_host_clock_id` identifier, numerator,
+    /// denominator for conversion to ns).
     pub fn host_clock(&self) -> (u32, u64, u64) {
         let mut c = ffi::HostClock::default();
-        // SAFETY: région valide ; pointeur de sortie valide.
+        // SAFETY: valid region; valid output pointer.
         unsafe { ffi::lw_shm_host_clock(self.inner.base, &mut c) };
         (c.id, c.ns_numer, c.ns_denom)
     }
 
-    /// Taille de la région en octets.
+    /// Region size in bytes.
     pub fn size(&self) -> usize {
         self.inner.size
     }
 
-    /// Géométrie lue dans l'en-tête.
+    /// Geometry read from header.
     pub fn geometry(&self) -> Geometry {
-        // Lecture des champs immuables après initialisation (écrits avant la magie, publiée en release).
+        // Read fields immutable after initialization (written before release-published magic).
         let base = self.inner.base.cast::<u32>();
-        // SAFETY: l'en-tête fait 4096 octets ; offsets fixés par lw_shm_header : sample_rate @12,
-        // ring_frames @16, channels @20 et @24 (u32 alignés).
+        // SAFETY: header is 4096 bytes; lw_shm_header fixes offsets: sample_rate @12,
+        // ring_frames @16, channels @20/@24 (aligned u32 values).
         unsafe {
             Geometry {
                 sample_rate: base.add(3).read_volatile(),
@@ -231,7 +231,7 @@ impl Region {
         }
     }
 
-    /// Nombre de canaux de l'anneau `dir`.
+    /// Channel count for ring `dir`.
     pub fn channels(&self, dir: Dir) -> u32 {
         let g = self.geometry();
         match dir {
@@ -240,22 +240,22 @@ impl Region {
         }
     }
 
-    /// Trames lisibles dans l'anneau `dir`.
+    /// Readable frames in ring `dir`.
     pub fn readable(&self, dir: Dir) -> u32 {
-        // SAFETY: région valide ; lecture atomique.
+        // SAFETY: valid region; atomic read.
         unsafe { ffi::lw_ring_readable(self.inner.base, dir as c_int) }
     }
 
-    /// Place libre (trames) dans l'anneau `dir`.
+    /// Free space (frames) in ring `dir`.
     pub fn writable(&self, dir: Dir) -> u32 {
-        // SAFETY: région valide ; lecture atomique.
+        // SAFETY: valid region; atomic read.
         unsafe { ffi::lw_ring_writable(self.inner.base, dir as c_int) }
     }
 
-    /// Positions et compteurs de l'anneau `dir`.
+    /// Ring `dir` positions and counters.
     pub fn counters(&self, dir: Dir) -> Counters {
         let mut c = Counters::default();
-        // SAFETY: région valide ; pointeurs de sortie valides.
+        // SAFETY: valid region; valid output pointers.
         unsafe {
             ffi::lw_ring_counters(
                 self.inner.base,
@@ -269,10 +269,10 @@ impl Region {
         c
     }
 
-    /// Lecture cohérente de l'horloge publiée : (temps hôte brut, position d'échantillon, rapport).
+    /// Coherent published-clock read: (raw host time, sample position, ratio).
     pub fn clock(&self) -> Option<(u64, u64, f64)> {
         let (mut h, mut s, mut r) = (0u64, 0u64, 0f64);
-        // SAFETY: région valide ; pointeurs de sortie valides.
+        // SAFETY: valid region; valid output pointers.
         let rc = unsafe { ffi::lw_clock_read(self.inner.base, &mut h, &mut s, &mut r) };
         (rc == 0).then_some((h, s, r))
     }
@@ -286,7 +286,7 @@ impl Region {
         }
     }
 
-    /// Producteur de l'anneau `dir` (une seule fois par région).
+    /// Producer for ring `dir` (once per region).
     pub fn producer(&self, dir: Dir) -> Result<Producer, Error> {
         self.take(dir as usize * 2)?;
         Ok(Producer {
@@ -296,7 +296,7 @@ impl Region {
         })
     }
 
-    /// Consommateur de l'anneau `dir` (une seule fois par région).
+    /// Consumer for ring `dir` (once per region).
     pub fn consumer(&self, dir: Dir) -> Result<Consumer, Error> {
         self.take(dir as usize * 2 + 1)?;
         Ok(Consumer {
@@ -306,7 +306,7 @@ impl Region {
         })
     }
 
-    /// Écrivain de l'horloge (daemon, une seule fois).
+    /// Clock writer (daemon, once).
     pub fn clock_writer(&self) -> Result<ClockWriter, Error> {
         self.take(4)?;
         Ok(ClockWriter {
@@ -326,7 +326,7 @@ fn frames_of(len: usize, channels: u32) -> Result<u32, Error> {
     u32::try_from(len / ch).map_err(|_| Error("trop de trames"))
 }
 
-/// Producteur d'un anneau.
+/// Ring producer.
 pub struct Producer {
     inner: Arc<Inner>,
     dir: Dir,
@@ -334,16 +334,16 @@ pub struct Producer {
 }
 
 impl Producer {
-    /// Nombre de canaux par trame.
+    /// Channels per frame.
     pub fn channels(&self) -> u32 {
         self.channels
     }
 
-    /// Écrit des trames entrelacées ; renvoie le nombre de trames acceptées (le reste compte en overruns).
+    /// Write interleaved frames; return accepted count (remainder counts as overruns).
     pub fn write(&mut self, interleaved: &[f32]) -> Result<u32, Error> {
         let frames = frames_of(interleaved.len(), self.channels)?;
-        // SAFETY: producteur unique de cet anneau (garanti par `Region::producer`) ; `interleaved`
-        // contient `frames × channels` échantillons.
+        // SAFETY: unique producer for this ring (guaranteed by `Region::producer`); `interleaved`
+        // contains `frames × channels` samples.
         Ok(unsafe {
             ffi::lw_ring_write(
                 self.inner.base,
@@ -355,7 +355,7 @@ impl Producer {
     }
 }
 
-/// Consommateur d'un anneau.
+/// Ring consumer.
 pub struct Consumer {
     inner: Arc<Inner>,
     dir: Dir,
@@ -363,37 +363,37 @@ pub struct Consumer {
 }
 
 impl Consumer {
-    /// Nombre de canaux par trame.
+    /// Channels per frame.
     pub fn channels(&self) -> u32 {
         self.channels
     }
 
-    /// Trames lisibles.
+    /// Readable frames.
     pub fn readable(&self) -> u32 {
-        // SAFETY: région valide ; lecture atomique.
+        // SAFETY: valid region; atomic read.
         unsafe { ffi::lw_ring_readable(self.inner.base, self.dir as c_int) }
     }
 
-    /// Remplit `out` (trames entrelacées) ; complète par du silence s'il manque des trames.
-    /// Renvoie le nombre de trames réellement lues.
+    /// Fill `out` (interleaved frames); pad missing frames with silence.
+    /// Return actual frame count read.
     pub fn read(&mut self, out: &mut [f32]) -> Result<u32, Error> {
         let frames = frames_of(out.len(), self.channels)?;
-        // SAFETY: consommateur unique de cet anneau ; `out` peut recevoir `frames × channels` échantillons.
+        // SAFETY: unique consumer for this ring; `out` can hold `frames × channels` samples.
         Ok(unsafe {
             ffi::lw_ring_read(self.inner.base, self.dir as c_int, out.as_mut_ptr(), frames)
         })
     }
 }
 
-/// Écrivain de l'horloge partagée.
+/// Shared-clock writer.
 pub struct ClockWriter {
     inner: Arc<Inner>,
 }
 
 impl ClockWriter {
-    /// Publie : à l'instant hôte `host_time` (brut, [`crate::rt::host_time`]), la position vaut `sample_time`.
+    /// Publish: at raw host instant `host_time` ([`crate::rt::host_time`]), position is `sample_time`.
     pub fn publish(&mut self, host_time: u64, sample_time: u64, rate_scalar: f64) {
-        // SAFETY: écrivain unique (garanti par `Region::clock_writer`).
+        // SAFETY: unique writer (guaranteed by `Region::clock_writer`).
         unsafe { ffi::lw_clock_publish(self.inner.base, host_time, sample_time, rate_scalar) };
     }
 }
@@ -452,11 +452,11 @@ mod tests {
             assert_eq!(out, block, "contenu identique après rebouclage");
             next += 80.0;
         }
-        // Débordement : 64 trames de place, 100 demandées.
+        // Overrun: 64 frames free, 100 requested.
         let big = vec![1f32; 2 * 100];
         assert_eq!(p.write(&big).unwrap(), 64);
         assert_eq!(r.counters(Dir::FromNet).overruns, 36);
-        // Sous-alimentation : 64 lisibles, 70 demandées → 6 trames de silence.
+        // Underrun: 64 readable, 70 requested → six silent frames.
         let mut out = vec![9f32; 2 * 70];
         assert_eq!(c.read(&mut out).unwrap(), 64);
         assert_eq!(r.counters(Dir::FromNet).underruns, 6);
@@ -479,7 +479,7 @@ mod tests {
         assert!(numer > 0 && denom > 0);
     }
 
-    /// Le daemon crée, le client mappe l'objet de partage : deux adresses, même mémoire.
+    /// Daemon creates, client maps sharing object: two addresses, same memory.
     #[cfg(target_os = "macos")]
     fn second_mapping(daemon: &Region) -> Region {
         let server =
@@ -518,7 +518,7 @@ mod tests {
                 n += w;
                 if w < k {
                     std::thread::yield_now();
-                    // Les trames refusées sont comptées en overrun : on renvoie la suite, pas le reste.
+                    // Rejected frames count as overrun: send subsequent data, not the remainder.
                     let lost = k - w;
                     n += lost;
                 }

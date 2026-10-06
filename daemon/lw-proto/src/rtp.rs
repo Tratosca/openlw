@@ -1,4 +1,4 @@
-//! RTP (RFC 3550) et charge L24/L16 (`docs/protocol/02-rtp-audio.md`).
+//! RTP (RFC 3550) and L24/L16 payload (`docs/protocol/02-rtp-audio.md`).
 
 use std::net::Ipv4Addr;
 
@@ -8,7 +8,7 @@ use crate::Error;
 
 pub const HEADER_LEN: usize = 12;
 
-/// En-tête RTP décodé ; `payload` désigne la charge, hors CSRC, extension et bourrage.
+/// Decoded RTP header; `payload` excludes CSRC, extension, and padding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Packet<'a> {
     pub marker: bool,
@@ -17,7 +17,7 @@ pub struct Packet<'a> {
     pub timestamp: u32,
     pub ssrc: u32,
     pub csrc: Vec<u32>,
-    /// (profil, données) de l'extension d'en-tête, si présente.
+    /// Header-extension (profile, data), if present.
     pub extension: Option<(u16, &'a [u8])>,
     pub payload: &'a [u8],
 }
@@ -71,7 +71,7 @@ impl<'a> Packet<'a> {
     }
 }
 
-/// Écrit un en-tête RTP de 12 octets (V=2, sans CSRC ni extension).
+/// Write a 12-byte RTP header (V=2, no CSRC or extension).
 pub fn write_header(
     out: &mut Vec<u8>,
     payload_type: u8,
@@ -87,25 +87,25 @@ pub fn write_header(
     out.extend_from_slice(&ssrc.to_be_bytes());
 }
 
-/// SSRC choisi par OpenLW : les 4 octets de l'adresse de destination (unique par flux, stable).
+/// OpenLW SSRC choice: four destination-address bytes (unique per stream, stable).
 pub fn ssrc_from_group(group: Ipv4Addr) -> u32 {
     u32::from(group)
 }
 
-/// Échantillon 24 bits signé (dans un i32) → 3 octets big-endian. Les valeurs hors plage sont saturées.
+/// Signed 24-bit sample (in i32) → three big-endian bytes. Out-of-range values saturate.
 pub fn put_l24(out: &mut Vec<u8>, sample: i32) {
     let s = sample.clamp(-(1 << 23), (1 << 23) - 1);
     let [_, b1, b2, b3] = s.to_be_bytes();
     out.extend_from_slice(&[b1, b2, b3]);
 }
 
-/// 3 octets big-endian → échantillon 24 bits signé.
+/// Three big-endian bytes → signed 24-bit sample.
 pub fn get_l24(b: [u8; 3]) -> i32 {
     i32::from_be_bytes([b[0], b[1], b[2], 0]) >> 8
 }
 
-/// Décode une charge L24 entrelacée vers `out` (échantillons 24 bits dans des i32).
-/// Retourne le nombre d'échantillons écrits ; un octet de queue incomplet est ignoré.
+/// Decode interleaved L24 payload into `out` (24-bit samples in i32 values).
+/// Return sample count written; ignore an incomplete trailing sample.
 pub fn decode_l24(payload: &[u8], out: &mut Vec<i32>) -> usize {
     let before = out.len();
     out.extend(
@@ -117,7 +117,7 @@ pub fn decode_l24(payload: &[u8], out: &mut Vec<i32>) -> usize {
     out.len() - before
 }
 
-/// Paquetiseur : découpe un flux entrelacé en paquets RTP L24 au format donné.
+/// Packetizer: split an interleaved stream into L24 RTP packets in the given format.
 #[derive(Debug, Clone)]
 pub struct Packetizer {
     format: StreamFormat,
@@ -148,17 +148,17 @@ impl Packetizer {
         self.format
     }
 
-    /// Nombre d'échantillons entrelacés attendus par paquet (trames × canaux).
+    /// Expected interleaved sample count per packet (frames × channels).
     pub fn samples_needed(&self) -> usize {
         self.format.samples_per_packet() as usize * usize::from(self.format.channels())
     }
 
-    /// Repositionne le timestamp (resynchronisation sur une horloge média, AES67).
+    /// Reposition timestamp (media-clock resynchronization, AES67).
     pub fn set_timestamp(&mut self, timestamp: u32) {
         self.timestamp = timestamp;
     }
 
-    /// Construit le paquet suivant à partir de `samples` (exactement `samples_needed()` valeurs).
+    /// Build next packet from `samples` (exactly `samples_needed()` values).
     pub fn packet(&mut self, samples: &[i32], out: &mut Vec<u8>) -> Result<(), Error> {
         if samples.len() != self.samples_needed() {
             return Err(Error::Invalid("nombre d'échantillons du paquet"));
@@ -228,7 +228,7 @@ mod tests {
         let pkt = Packet::parse(&buf).unwrap();
         assert_eq!(pkt.extension, Some((0xFA1A, &[1u8, 2, 3, 4][..])));
         assert_eq!(pkt.payload, &[9]);
-        buf[23] = 9; // bourrage plus long que la charge
+        buf[23] = 9; // Padding longer than payload
         assert!(Packet::parse(&buf).is_err());
     }
 }

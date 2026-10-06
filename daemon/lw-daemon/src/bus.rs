@@ -1,11 +1,11 @@
-//! Bus audio entre threads du daemon : file SPSC sans verrou d'échantillons float32 entrelacés,
-//! en Rust sûr (échantillons stockés en `AtomicU32`), et lecteur à tampon de gigue.
+//! Audio bus between daemon threads: lock-free SPSC queue of interleaved float32 samples,
+//! in safe Rust (samples stored in `AtomicU32`), with a jitter-buffer reader.
 //!
-//! Usage : flux RTP reçu → bus → entrées du périphérique ; sorties du périphérique → bus → flux émis.
-//! Les deux extrémités tournent sur des horloges différentes (émetteur distant contre horloge hôte) :
-//! le [`JitterReader`] se pré-remplit, glisse (jette l'excédent) quand l'écart dépasse le seuil haut et
-//! repart en pré-remplissage après un manque. C'est un rattrapage par glissement, pas un
-//! rééchantillonnage : il produit un saut audible rare, jusqu'à l'asservissement d'horloge (ADR 0003).
+//! Usage: received RTP → bus → device inputs; device outputs → bus → transmitted stream.
+//! The endpoints follow different clocks (remote transmitter versus host clock):
+//! the [`JitterReader`] primes, slips (discards excess) above the high threshold, and
+//! restarts priming after an underrun. This compensates through slips rather than
+//! resampling: occasional audible jumps until clock synchronization is implemented (ADR 0003).
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -13,38 +13,38 @@ use std::sync::Arc;
 struct Shared {
     samples: Box<[AtomicU32]>,
     channels: usize,
-    capacity: usize, // en trames
+    capacity: usize, // In frames
     write: AtomicUsize,
     read: AtomicUsize,
     overruns: AtomicU64,
     underruns: AtomicU64,
     slips: AtomicU64,
-    /// Tampon de gigue amorcé : porté par le bus pour survivre au remplacement du lecteur.
+    /// Jitter buffer primed: stored on the bus to survive reader replacement.
     primed: AtomicBool,
 }
 
-/// Compteurs d'un bus.
+/// Bus counters.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct BusCounters {
     pub written: u64,
     pub read: u64,
     pub overruns: u64,
     pub underruns: u64,
-    /// Trames jetées par le glissement (dérive de l'émetteur).
+    /// Frames discarded by slips (transmitter drift).
     pub slips: u64,
 }
 
-/// Crée un bus de `capacity` trames de `channels` canaux.
+/// Create a bus with `capacity` frames and `channels` channels.
 pub fn bus(channels: usize, capacity: usize) -> (BusWriter, BusReader) {
     let p = port(channels, capacity);
     (p.writer(), p.reader())
 }
 
-/// Point d'attache d'un bus : fournit de nouvelles extrémités pour le même bus.
+/// Bus attachment point: provides new endpoints for the same bus.
 ///
-/// Sert au patch à chaud : la table de routes du périphérique est remplacée d'un bloc par son thread,
-/// qui abandonne l'ancienne extrémité avant d'utiliser la nouvelle. Invariant à respecter : à tout
-/// instant, au plus une extrémité d'écriture et une de lecture sont utilisées.
+/// Used for live patching: the device thread replaces the entire routing table,
+/// dropping the old endpoint before using the new one. Invariant: at any
+/// time, at most one writing endpoint and one reading endpoint are used.
 #[derive(Clone)]
 pub struct Port {
     s: Arc<Shared>,
@@ -64,7 +64,7 @@ impl Port {
     }
 }
 
-/// Crée un bus et renvoie son point d'attache.
+/// Create a bus and return its attachment point.
 pub fn port(channels: usize, capacity: usize) -> Port {
     let channels = channels.max(1);
     let capacity = capacity.max(1);
@@ -102,7 +102,7 @@ impl Shared {
     }
 }
 
-/// Extrémité d'écriture (unique).
+/// Unique writing endpoint.
 pub struct BusWriter {
     s: Arc<Shared>,
 }
@@ -112,7 +112,7 @@ impl BusWriter {
         self.s.channels
     }
 
-    /// Écrit des trames entrelacées ; renvoie le nombre accepté (le reste compte en débordement).
+    /// Write interleaved frames; return the accepted count (the remainder counts as overrun).
     pub fn push(&mut self, interleaved: &[f32]) -> usize {
         let ch = self.s.channels;
         let frames = interleaved.len() / ch;
@@ -141,7 +141,7 @@ impl BusWriter {
     }
 }
 
-/// Extrémité de lecture (unique).
+/// Unique reading endpoint.
 pub struct BusReader {
     s: Arc<Shared>,
 }
@@ -155,7 +155,7 @@ impl BusReader {
         self.s.available()
     }
 
-    /// Lit jusqu'à `out.len() / channels` trames ; complète par du silence et compte le manque.
+    /// Read up to `out.len() / channels` frames; pad with silence and count missing frames.
     pub fn pull(&mut self, out: &mut [f32]) -> usize {
         let ch = self.s.channels;
         let frames = out.len() / ch;
@@ -184,7 +184,7 @@ impl BusReader {
         n
     }
 
-    /// Jette `frames` trames (glissement).
+    /// Discard `frames` frames (slip).
     fn skip(&mut self, frames: usize) {
         let n = frames.min(self.s.available());
         let r = self.s.read.load(Ordering::Relaxed);
@@ -197,7 +197,7 @@ impl BusReader {
     }
 }
 
-/// Lecteur avec tampon de gigue : pré-remplissage à `target` trames, glissement au-delà de `high`.
+/// Jitter-buffer reader: prime to `target` frames, slip above `high`.
 pub struct JitterReader {
     reader: BusReader,
     target: usize,
@@ -229,8 +229,8 @@ impl JitterReader {
         self.reader.s.primed.store(on, Ordering::Relaxed);
     }
 
-    /// Remplit `out` : silence tant que le tampon n'est pas amorcé ; sinon données, avec
-    /// glissement si l'excédent dépasse `high` et réamorçage après un manque.
+    /// Fill `out`: silence until primed; otherwise data, with
+    /// slips if excess exceeds `high` and repriming after an underrun.
     pub fn pull(&mut self, out: &mut [f32]) {
         let avail = self.reader.available();
         if !self.primed() {
@@ -311,7 +311,7 @@ mod tests {
         let mut out = [0f32; 5];
         j.pull(&mut out);
         assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 4.0]);
-        // Patch à chaud : nouveau lecteur sur le même bus, sans réamorçage ni saut.
+        // Live patch: new reader on the same bus, without repriming or jumping.
         let mut j2 = JitterReader::new(p.reader(), 10, 100);
         assert!(j2.primed());
         j2.pull(&mut out);
@@ -332,12 +332,12 @@ mod tests {
         w.push(&[1.0; 60]);
         j.pull(&mut out);
         assert!(j.primed() && out.iter().all(|&v| v == 1.0));
-        // Émetteur trop rapide : 1000 trames en attente → glissement jusqu'à la cible.
+        // Transmitter too fast: 1000 queued frames → slip to target.
         w.push(&[2.0; 1000]);
         j.pull(&mut out);
         assert!(j.counters().slips > 0);
         assert!(j.reader.available() <= 100);
-        // Manque : réamorçage.
+        // Underrun: reprime.
         let mut big = [0f32; 480];
         j.pull(&mut big);
         assert!(!j.primed());

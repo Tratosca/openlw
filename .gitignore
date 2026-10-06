@@ -1,11 +1,11 @@
-# Produits de compilation
+# Build artifacts
 daemon/target/
 build/
 __pycache__/
 *.pyc
 .DS_Store
 
-# Captures réseau et fichiers tiers : jamais dans le dépôt
+# Network captures and third-party files: never commit to the repository
 *.pcap
 *.pcapng
 *.msi
@@ -14,5 +14,5 @@ __pycache__/
 *.dll
 *.sys
 
-# SDK ASIO, téléchargé par windows/driver/fetch-sdk.*
+# ASIO SDK, downloaded by windows/driver/fetch-sdk.*
 windows/driver/sdk/

@@ -1,10 +1,10 @@
-//! Découverte des sources Livewire : écoute des annonces (ADV) et annuaire (`docs/protocol/03-advertisement.md`).
+//! Livewire source discovery: advertisement listener (ADV) and directory (`docs/protocol/03-advertisement.md`).
 //!
-//! - Écoute 239.192.255.3:4001 sur l'interface choisie ; décode annonces complètes et courtes.
-//! - Une annonce complète arrive en pages de 8 sources : l'annuaire les cumule pour une même
-//!   version d'annonce (`ADVV`) et repart de zéro quand la version change.
-//! - Terminal entendu en keepalive sans annonce complète connue : requête `READ` vers `INIP:UDPC`, au plus une toutes les 5 s par terminal.
-//! - Terminal muet depuis 75 s (3 keepalives manqués) : retiré de l'annuaire.
+//! - Listen on 239.192.255.3:4001 through the selected interface; decode full and short advertisements.
+//! - Full advertisements arrive as eight-source pages: the directory accumulates them for a shared
+//!   advertisement version (`ADVV`) and starts afresh when the version changes.
+//! - Keepalive from a terminal without a known full advertisement: `READ` to `INIP:UDPC`, at most once per 5 s per terminal.
+//! - Terminal silent for 75 s (three missed keepalives): remove from directory.
 
 use std::collections::BTreeMap;
 use std::io;
@@ -21,25 +21,25 @@ use crate::iface::Iface;
 use crate::net::{rx_socket, tx_socket, TxOptions};
 use crate::Stop;
 
-/// Délai d'expiration d'un terminal silencieux.
+/// Silent-terminal expiry delay.
 pub const EXPIRY: Duration = Duration::from_secs(75);
-/// Intervalle minimal entre deux requêtes `READ` vers un même terminal.
+/// Minimum interval between `READ` requests to the same terminal.
 pub const REQUEST_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Source vue sur le réseau.
+/// Source observed on the network.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DiscoveredSource {
-    /// Canal Livewire (`PSID`).
+    /// Livewire channel (`PSID`).
     pub channel: u32,
     pub name: String,
-    /// Groupe du flux annoncé (`FSID`).
+    /// Advertised stream group (`FSID`).
     pub stream: String,
-    /// stereo, stereo-l16, surround ou code numérique.
+    /// stereo, stereo-l16, surround, or numeric code.
     pub kind: String,
     pub shareable: bool,
     pub terminal: String,
     pub terminal_ip: String,
-    /// Secondes depuis le dernier signe de vie du terminal.
+    /// Seconds since the terminal was last heard.
     pub age_s: u64,
 }
 
@@ -51,7 +51,7 @@ struct TerminalEntry {
     control_port: u16,
     last_heard: Instant,
     last_request: Option<Instant>,
-    /// Sources de la version d'annonce courante, par emplacement.
+    /// Current advertisement-version sources, by slot.
     sources: BTreeMap<u16, lw_proto::adv::Source>,
 }
 
@@ -61,17 +61,17 @@ impl TerminalEntry {
     }
 }
 
-/// Annuaire partagé.
+/// Shared directory.
 #[derive(Clone, Default)]
 pub struct Directory {
     inner: Arc<Mutex<BTreeMap<Ipv4Addr, TerminalEntry>>>,
 }
 
-/// Action demandée par l'annuaire après une annonce.
+/// Action requested by the directory after an advertisement.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Followup {
     None,
-    /// Envoyer une requête `READ` à ce terminal.
+    /// Send a `READ` request to this terminal.
     RequestFull(SocketAddrV4),
 }
 
@@ -80,7 +80,7 @@ impl Directory {
         Self::default()
     }
 
-    /// Intègre une annonce reçue à `now` ; indique s'il faut demander l'annonce complète.
+    /// Incorporate an advertisement received at `now`; indicate whether to request a full advertisement.
     pub fn ingest(&self, adv: &Advertisement, now: Instant) -> Followup {
         let mut map = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let t = &adv.terminal;
@@ -96,7 +96,7 @@ impl Directory {
         entry.last_heard = now;
         entry.control_port = t.control_port;
         if entry.advv != t.advv {
-            // Nouvelle version d'annonce : la liste précédente n'est plus valable.
+            // New advertisement version: previous list is no longer valid.
             entry.advv = t.advv;
             entry.sources.clear();
             entry.name = None;
@@ -121,13 +121,13 @@ impl Directory {
         Followup::None
     }
 
-    /// Retire les terminaux muets depuis plus de [`EXPIRY`].
+    /// Remove terminals silent longer than [`EXPIRY`].
     pub fn expire(&self, now: Instant) {
         let mut map = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         map.retain(|_, e| now.duration_since(e.last_heard) < EXPIRY);
     }
 
-    /// Sources connues, triées par canal.
+    /// Known sources, sorted by channel.
     pub fn sources(&self, now: Instant) -> Vec<DiscoveredSource> {
         let map = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         let mut out: Vec<DiscoveredSource> = map
@@ -154,7 +154,7 @@ impl Directory {
         out
     }
 
-    /// Terminaux entendus, y compris ceux dont la liste de sources n'est pas encore connue.
+    /// Heard terminals, including those whose source lists are not yet known.
     pub fn terminals(&self) -> Vec<(String, Option<String>, usize, u16)> {
         let map = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         map.iter()
@@ -163,12 +163,12 @@ impl Directory {
     }
 }
 
-/// Canal Livewire valide d'une source découverte (pour patcher).
+/// Valid Livewire channel of a discovered source (for patching).
 pub fn channel_of(s: &DiscoveredSource) -> Option<Channel> {
     u16::try_from(s.channel).ok().and_then(Channel::new)
 }
 
-/// Écoute les annonces jusqu'à l'arrêt.
+/// Listen for advertisements until stopped.
 pub fn run(iface: &Iface, directory: &Directory, stop: &Stop) -> io::Result<()> {
     let sock = rx_socket(iface, ADV_GROUP, ADV_PORT, Duration::from_millis(250))?;
     let req_sock: UdpSocket = tx_socket(
@@ -194,7 +194,7 @@ pub fn run(iface: &Iface, directory: &Directory, stop: &Stop) -> io::Result<()> 
                     continue;
                 };
                 if adv.terminal.ip == iface.ipv4 {
-                    continue; // nos propres annonces
+                    continue; // Our own advertisements
                 }
                 if let Followup::RequestFull(dest) = directory.ingest(&adv, Instant::now()) {
                     seq = seq.wrapping_add(1).max(1);
@@ -244,7 +244,7 @@ mod tests {
     fn pages_accumulate_and_short_triggers_request_once() {
         let d = Directory::new();
         let t0 = Instant::now();
-        // Keepalive d'un inconnu : demande d'annonce complète vers INIP:UDPC.
+        // Unknown terminal keepalive: request full advertisement from INIP:UDPC.
         let short = Advertisement {
             full: false,
             terminal: terminal(3, 10),
@@ -259,7 +259,7 @@ mod tests {
             Followup::None,
             "pas plus d'une requête par 5 s"
         );
-        // Deux pages (8 + 2 sources).
+        // Two pages (8 + 2 sources).
         let p1 = Advertisement {
             full: true,
             terminal: terminal(3, 10),
@@ -279,12 +279,12 @@ mod tests {
             (101, "STUDIO-A", "C")
         );
         assert_eq!(s[0].stream, "239.192.0.101");
-        // Liste complète : un keepalive ne redemande plus rien.
+        // Complete list: keepalives no longer request anything.
         assert_eq!(
             d.ingest(&short, t0 + Duration::from_secs(30)),
             Followup::None
         );
-        // Nouvelle version d'annonce : liste remise à zéro, nouvelle demande.
+        // New advertisement version: reset list, request again.
         let short4 = Advertisement {
             full: false,
             terminal: terminal(4, 10),

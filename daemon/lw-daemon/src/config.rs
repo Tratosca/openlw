@@ -1,6 +1,6 @@
-//! Configuration persistée du daemon (JSON) : NIC, sources émises, destinations reçues, annonce, QoS.
+//! Persisted daemon configuration (JSON): NIC, transmitted sources, received destinations, advertisements, QoS.
 //!
-//! Exemple :
+//! Example:
 //! ```json
 //! {
 //!   "iface": "auto",
@@ -12,8 +12,8 @@
 //! }
 //! ```
 //!
-//! `iface` : `auto` (défaut) choisit l'interface qui entend des annonces Livewire (voir `detect`) ;
-//! sinon nom BSD ou nom convivial. `terminal_name` vide : nom de l'ordinateur.
+//! `iface`: `auto` (default) selects the interface receiving Livewire advertisements (see `detect`);
+//! otherwise BSD or friendly name. Empty `terminal_name`: computer name.
 
 use std::net::Ipv4Addr;
 use std::path::Path;
@@ -64,21 +64,21 @@ impl From<Kind> for GroupKind {
     }
 }
 
-/// Préréglage de latence de réception : tampon de gigue du daemon et marge d'entrée du plugin.
+/// Receive-latency preset: daemon jitter buffer and plugin input margin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Latency {
-    /// ≈ 8 ms ajoutées : réseau dédié, sans autre trafic.
+    /// ≈ 8 ms added: dedicated network, no other traffic.
     Low,
-    /// ≈ 17 ms ajoutées.
+    /// ≈ 17 ms added.
     #[default]
     Normal,
-    /// ≈ 35 ms ajoutées : réseau partagé ou ordinateur chargé.
+    /// ≈ 35 ms added: shared network or loaded computer.
     Safe,
 }
 
 impl Latency {
-    /// Cible du tampon de gigue en réception (trames) : 6, 12 ou 24 ms.
+    /// Receive jitter-buffer target (frames): 6, 12, or 24 ms.
     pub fn rx_target(self) -> usize {
         match self {
             Latency::Low => 288,
@@ -87,7 +87,7 @@ impl Latency {
         }
     }
 
-    /// Marge d'entrée du plugin au-delà d'un bloc d'IO (trames) : 2,7, 5,3 ou 10,7 ms.
+    /// Plugin input margin beyond an I/O block (frames): 2.7, 5.3, or 10.7 ms.
     pub fn input_margin(self) -> u32 {
         match self {
             Latency::Low => 128,
@@ -96,7 +96,7 @@ impl Latency {
         }
     }
 
-    /// Réserve du tampon d'émission au-delà de deux paquets (trames).
+    /// Transmit-buffer reserve beyond two packets (frames).
     pub fn tx_cushion(self) -> usize {
         match self {
             Latency::Low => 256,
@@ -106,18 +106,18 @@ impl Latency {
     }
 }
 
-/// Présentation du périphérique dans macOS.
+/// Device layout in macOS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Layout {
-    /// Un périphérique « OpenLW », entrée et sortie, nom fixe.
+    /// One “OpenLW” input/output device, fixed name.
     #[default]
     Duplex,
-    /// Deux périphériques « OpenLW In » et « OpenLW Out », nommables d'après les canaux patchés.
+    /// Two devices, “OpenLW In” and “OpenLW Out”, optionally named after patched channels.
     Split,
 }
 
-/// Longueur maximale du nom annoncé (`ATRN`, 32 octets ASCII).
+/// Maximum advertised-name length (`ATRN`, 32 ASCII bytes).
 pub const MAX_TERMINAL_NAME: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,13 +131,13 @@ pub struct SourceConfig {
     pub tone_hz: f64,
     #[serde(default = "default_level")]
     pub level_dbfs: f64,
-    /// Sorties du périphérique (1-based) émises par ce flux, une par canal du flux (2 en stéréo,
-    /// 8 en surround). Absent : générateur de test.
+    /// Device outputs (1-based) transmitted by this stream, one per stream channel (two for stereo,
+    /// eight for surround). Absent: test generator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_channels: Option<Vec<u16>>,
 }
 
-/// Destination : un canal Livewire (et sa famille) ou un groupe explicite (SDP importé, AES67 tiers).
+/// Destination: a Livewire channel (and family) or an explicit group (imported SDP, third-party AES67).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DestinationConfig {
     #[serde(default)]
@@ -148,14 +148,14 @@ pub struct DestinationConfig {
     pub group: Option<Ipv4Addr>,
     #[serde(default = "default_port")]
     pub port: u16,
-    /// Entrées du périphérique (1-based) alimentées par ce flux, une par canal du flux.
-    /// Absent : réception pour statistiques seulement.
+    /// Device inputs (1-based) fed by this stream, one per stream channel.
+    /// Absent: receive for statistics only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_channels: Option<Vec<u16>>,
 }
 
 impl DestinationConfig {
-    /// Libellé lisible : « canal 12 » ou « 239.192.0.9:5004 ».
+    /// Readable label: “channel 12” or “239.192.0.9:5004”.
     pub fn label(&self) -> String {
         match (self.channel, self.group) {
             (Some(c), _) => format!("canal {c}"),
@@ -164,7 +164,7 @@ impl DestinationConfig {
         }
     }
 
-    /// Nombre de canaux du flux reçu (8 en surround, 2 sinon).
+    /// Received stream channel count (eight for surround, otherwise two).
     pub fn stream_channels(&self) -> usize {
         if self.kind == Kind::Surround {
             8
@@ -176,30 +176,30 @@ impl DestinationConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Nom BSD (enX) ou nom convivial de l'interface Livewire, ou [`AUTO_IFACE`].
+    /// Livewire interface BSD name (enX), friendly name, or [`AUTO_IFACE`].
     #[serde(default = "default_iface")]
     pub iface: String,
     #[serde(default = "default_terminal")]
     pub terminal_name: String,
     #[serde(default = "default_true")]
     pub advertise: bool,
-    /// Octet TOS des flux audio (DSCP × 4) ; 184 = EF.
+    /// Audio-stream TOS byte (DSCP × 4); 184 = EF.
     #[serde(default = "default_tos")]
     pub tos: u32,
-    /// Préréglage de latence de réception.
+    /// Receive-latency preset.
     #[serde(default)]
     pub latency: Latency,
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
     #[serde(default)]
     pub destinations: Vec<DestinationConfig>,
-    /// Périphérique virtuel partagé avec le client audio (activé par défaut avec `--control`).
+    /// Virtual device shared with the audio client (enabled by default with `--control`).
     #[serde(default)]
     pub device: Option<crate::device::DeviceConfig>,
-    /// Présentation du périphérique dans macOS.
+    /// Device layout in macOS.
     #[serde(default)]
     pub device_layout: Layout,
-    /// En présentation `split`, nomme les périphériques d'après les canaux patchés (voir [`crate::labels`]).
+    /// With `split` layout, name devices after patched channels (see [`crate::labels`]).
     #[serde(default)]
     pub name_device_from_sources: bool,
 }
@@ -223,22 +223,22 @@ fn default_iface() -> String {
     AUTO_IFACE.into()
 }
 
-/// Nom par défaut d'une source émise (patch de sortie sans nom).
+/// Default transmitted source name (unnamed output patch).
 pub const DEFAULT_SOURCE_NAME: &str = if cfg!(target_os = "macos") {
     "MAC"
 } else {
     "PC"
 };
 
-/// Valeur de `iface` pour le choix automatique de l'interface.
+/// `iface` value for automatic interface selection.
 pub const AUTO_IFACE: &str = "auto";
 
-/// Nombre maximal de canaux du périphérique dans chaque sens (16 canaux Livewire stéréo).
+/// Maximum device channel count per direction (16 stereo Livewire channels).
 pub const MAX_DEVICE_CHANNELS: u32 = 32;
 
-/// Nom de l'ordinateur, annoncé par défaut sur le réseau.
-/// macOS : Réglages Système > Général > Partage, à défaut le nom d'hôte ; Linux : nom convivial de
-/// `/etc/machine-info` (`hostnamectl --pretty`), à défaut le nom d'hôte ; Windows : nom NetBIOS.
+/// Computer name, advertised on the network by default.
+/// macOS: System Settings > General > Sharing, falling back to hostname; Linux: friendly name from
+/// `/etc/machine-info` (`hostnamectl --pretty`), falling back to hostname; Windows: NetBIOS name.
 pub fn computer_name() -> String {
     let clean = |s: String| Some(s.trim().to_string()).filter(|s| !s.is_empty());
     #[cfg(target_os = "macos")]
@@ -279,7 +279,7 @@ fn default_tos() -> u32 {
     0xB8
 }
 
-/// Erreur de configuration, avec un message destiné à l'utilisateur.
+/// Configuration error with a user-facing message.
 #[derive(Debug)]
 pub struct ConfigError(pub String);
 
@@ -292,10 +292,10 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl Config {
-    /// Configuration par défaut des installations (`daemon/lw-daemon.default.json`).
+    /// Default installation configuration (`daemon/lw-daemon.default.json`).
     pub const DEFAULT_JSON: &'static str = include_str!("../../lw-daemon.default.json");
 
-    /// Écrit la configuration par défaut dans `path` s'il n'existe pas (répertoires compris).
+    /// Write default configuration to `path` if absent (including directories).
     pub fn init_if_missing(path: &Path) -> Result<(), ConfigError> {
         if path.exists() {
             return Ok(());
@@ -316,8 +316,8 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Enregistre de façon atomique : écriture d'un fichier voisin, puis renommage (un arrêt brutal
-    /// laisse l'ancienne ou la nouvelle configuration, jamais un fichier tronqué).
+    /// Save atomically: write an adjacent file, then rename (a crash
+    /// leaves either the old or new configuration, never a truncated file).
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         let mut tmp = path.as_os_str().to_owned();
@@ -327,12 +327,12 @@ impl Config {
         std::fs::rename(&tmp, path)
     }
 
-    /// Choix automatique de l'interface ?
+    /// Automatic interface selection?
     pub fn auto_iface(&self) -> bool {
         self.iface.is_empty() || self.iface == AUTO_IFACE
     }
 
-    /// Nom annoncé du terminal.
+    /// Advertised terminal name.
     pub fn terminal(&self) -> String {
         if self.terminal_name.trim().is_empty() {
             computer_name()
@@ -341,7 +341,7 @@ impl Config {
         }
     }
 
-    /// Paramètres du périphérique virtuel (défaut : 2 canaux dans chaque sens).
+    /// Virtual device parameters (default: two channels per direction).
     pub fn device_config(&self) -> crate::device::DeviceConfig {
         self.device.clone().unwrap_or_default()
     }
@@ -407,7 +407,7 @@ impl Config {
         self.validate_patch()
     }
 
-    /// Patch : canaux du périphérique existants, nombre égal aux canaux du flux, entrées non partagées.
+    /// Patch: existing device channels, count matching the stream, unshared inputs.
     fn validate_patch(&self) -> Result<(), ConfigError> {
         let dev = self.device.clone().unwrap_or_default();
         for s in &self.sources {
@@ -473,7 +473,7 @@ impl Config {
             .collect()
     }
 
-    /// Sources à annoncer (le surround est annoncé `FAST=4`, le reste en stéréo L24).
+    /// Sources to advertise (surround advertises `FAST=4`, others L24 stereo).
     pub fn adv_sources(&self) -> Vec<Source> {
         self.sources
             .iter()
@@ -494,7 +494,7 @@ impl Config {
             .collect()
     }
 
-    /// Groupes à recevoir.
+    /// Groups to receive.
     pub fn rx_groups(&self) -> Vec<(Ipv4Addr, u16)> {
         self.destinations
             .iter()

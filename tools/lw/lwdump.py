@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Resume des protocoles de controle Livewire d'une capture : ADV (4000/4001), horloge (7000), PTP (319/320).
+"""Summarize captured Livewire control protocols: ADV (4000/4001), clock (7000), PTP (319/320).
 
     python3 lwdump.py capture.pcapng [--adv] [--clock] [--ptp] [--json]
 
-Sans option : les trois. Sert a renseigner Q6 (horloge), Q7 (PTP), Q8/Q9 (ADV, SAC).
+Without options: all three. Used to investigate Q6 (clock), Q7 (PTP), Q8/Q9 (ADV, SAC).
 """
 import argparse
 import collections
@@ -46,7 +46,7 @@ CLOCK_TYPES = {bytes.fromhex("0a00caba"): "A", bytes.fromhex("0b00caba"): "B"}
 
 
 def clock_packet(payload):
-    """Paquet d'horloge Livewire (docs/protocol/04-clock.md) : RTP + extension FA1A."""
+    """Livewire clock packet (docs/protocol/04-clock.md): RTP + FA1A extension."""
     out = {"len": len(payload), "hex": payload.hex()}
     if len(payload) >= 12 and payload[0] >> 6 == 2:
         b0, b1, seq, ts, ssrc = struct.unpack_from(">BBHII", payload, 0)

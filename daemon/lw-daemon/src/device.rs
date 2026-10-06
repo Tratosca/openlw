@@ -1,12 +1,12 @@
-//! Côté daemon du périphérique virtuel : région partagée avec le client audio (plugin HAL sous macOS,
-//! pilote audio sous Windows, nœuds PipeWire du daemon sous Linux ; ADR 0005).
+//! Daemon side of the virtual device: region shared with the audio client (HAL plugin on macOS,
+//! audio driver on Windows, daemon PipeWire nodes on Linux; ADR 0005).
 //!
-//! Un thread temps réel cadencé à 1 ms :
-//! - publie l'horloge dans la région (horloge hôte, rapport 1,0 tant qu'aucune horloge réseau n'asservit) ;
-//! - consomme l'anneau applications → réseau et mesure les crêtes par canal ;
-//! - en mode `loopback` (test), recopie cet audio dans l'anneau réseau → applications.
+//! A real-time thread running every 1 ms:
+//! - publishes the clock in the region (host clock, ratio 1.0 until network synchronization);
+//! - consumes the applications → network ring and measures per-channel peaks;
+//! - in `loopback` test mode, copies this audio to the network → applications ring.
 //!
-//! Le routage vers les flux RTP (grille de patch) viendra ensuite.
+//! Routing to RTP streams (patch matrix) will follow.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -17,20 +17,20 @@ use serde::{Deserialize, Serialize};
 use crate::bus::{BusCounters, BusWriter, JitterReader};
 use crate::Stop;
 
-/// Paramètres du périphérique virtuel.
+/// Virtual-device parameters.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeviceConfig {
-    /// Canaux de sortie des applications (vers le réseau).
+    /// Application output channels (to the network).
     #[serde(default = "default_channels")]
     pub channels_to_net: u32,
-    /// Canaux d'entrée des applications (depuis le réseau).
+    /// Application input channels (from the network).
     #[serde(default = "default_channels")]
     pub channels_from_net: u32,
-    /// Taille de chaque anneau en trames (puissance de 2) ; 8192 = 170 ms à 48 kHz.
+    /// Ring size in frames (power of two); 8192 = 170 ms at 48 kHz.
     #[serde(default = "default_ring")]
     pub ring_frames: u32,
-    /// Recopie la sortie des applications vers leur entrée (boucle interne, mode de test).
-    /// Mode de test : prioritaire sur les entrées patchées.
+    /// Copy application output to input (internal loopback, test mode).
+    /// Test mode: takes precedence over patched inputs.
     #[serde(default)]
     pub loopback: bool,
 }
@@ -53,65 +53,65 @@ impl Default for DeviceConfig {
     }
 }
 
-/// État du périphérique, exposé par XPC.
+/// Device state exposed through XPC.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DeviceStatus {
-    /// Numéro de la région partagée : change à chaque recréation (le plugin doit se rattacher).
+    /// Shared-region number: changes on recreation (plugin must reattach).
     pub generation: u64,
     pub channels_to_net: u32,
     pub channels_from_net: u32,
     pub ring_frames: u32,
     pub loopback: bool,
-    /// Position d'échantillon publiée dans l'horloge partagée.
+    /// Sample position published in the shared clock.
     pub clock_sample_time: u64,
     pub to_net_frames: u64,
     pub to_net_overruns: u64,
     pub from_net_frames: u64,
     pub from_net_overruns: u64,
     pub from_net_underruns: u64,
-    /// Crête par canal de l'audio des applications sur les 100 dernières ms (dBFS).
+    /// Per-channel application audio peak over the last 100 ms (dBFS).
     pub to_net_peak_dbfs: Vec<f64>,
-    /// Crête par entrée du périphérique (audio venu du réseau) sur les 100 dernières ms (dBFS).
+    /// Per-device-input peak (network audio) over the last 100 ms (dBFS).
     pub from_net_peak_dbfs: Vec<f64>,
-    /// Routes actives : canaux du périphérique (1-based) et compteurs de bus.
+    /// Active routes: device channels (1-based) and bus counters.
     pub outputs: Vec<RouteStatus>,
     pub inputs: Vec<RouteStatus>,
 }
 
-/// État d'une route.
+/// Route state.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RouteStatus {
     pub label: String,
-    /// Canaux du périphérique, numérotés à partir de 1 (comme dans la configuration).
+    /// Device channels numbered from 1 (as in configuration).
     pub device_channels: Vec<usize>,
-    /// Entrées : tampon de gigue amorcé (audio en cours).
+    /// Inputs: jitter buffer primed (audio active).
     pub primed: bool,
     pub bus: BusCounters,
 }
 
-/// Sorties du périphérique vers un flux émis.
+/// Device outputs to a transmitted stream.
 pub struct OutRoute {
     pub label: String,
-    /// Canaux du périphérique (0-based), dans l'ordre des canaux du flux.
+    /// Device channels (0-based), in stream channel order.
     pub device_channels: Vec<usize>,
     pub writer: BusWriter,
 }
 
-/// Flux reçu vers des entrées du périphérique.
+/// Received stream to device inputs.
 pub struct InRoute {
     pub label: String,
     pub device_channels: Vec<usize>,
     pub reader: JitterReader,
 }
 
-/// Table de routes, remplacée à chaud.
+/// Routing table, replaced live.
 #[derive(Default)]
 pub struct Routes {
     pub outputs: Vec<OutRoute>,
     pub inputs: Vec<InRoute>,
 }
 
-/// Périphérique en fonctionnement.
+/// Running device.
 pub struct Device {
     pub region: Arc<Region>,
     pub status: Arc<Mutex<DeviceStatus>>,
@@ -120,12 +120,12 @@ pub struct Device {
 }
 
 const SAMPLE_RATE: u32 = 48_000;
-/// Retard de lecture de l'anneau de sortie rattrapable d'un coup (trames) : absorbe le cadencement
-/// de l'hôte sans transmettre ses blocs en rafale aux flux émis.
+/// Output-ring read backlog recoverable at once (frames): absorbs host scheduling
+/// without forwarding host blocks in bursts to transmitted streams.
 const OUT_CARRY_MAX: usize = 512;
 const TICK: Duration = Duration::from_millis(1);
 
-/// Crée la région et lance le thread du périphérique.
+/// Create the region and start the device thread.
 pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Error> {
     let region = Arc::new(Region::create(
         SAMPLE_RATE,
@@ -162,7 +162,7 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
             let ring = reg.geometry().ring_frames as usize;
             let t0_host = lw_sys::rt::host_time();
             let t0_ns = lw_sys::rt::host_time_ns();
-            // Tampons préalloués : aucune allocation dans la boucle.
+            // Preallocated buffers: no allocations in the loop.
             let mut buf = vec![0f32; ch_in * ring];
             let mut out = vec![0f32; ch_out * ring];
             let mut scratch = vec![0f32; 8 * ring];
@@ -185,25 +185,25 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                     }
                     lw_sys::rt::sleep(left);
                 }
-                // Nouvelle table de routes (sans bloquer : un essai par tick).
+                // New routing table (nonblocking: one attempt per tick).
                 if let Ok(mut s) = slot.try_lock() {
                     if let Some(r) = s.take() {
                         routes = r;
                     }
                 }
-                // Horloge hôte libre : position = temps écoulé × 48 kHz.
+                // Free-running host clock: position = elapsed time × 48 kHz.
                 let now_host = lw_sys::rt::host_time();
                 let elapsed_ns = lw_sys::rt::host_time_ns().saturating_sub(t0_ns);
                 let sample = elapsed_ns * u64::from(SAMPLE_RATE) / 1_000_000_000;
                 if k % 10 == 0 {
                     clock.publish(now_host, sample, 1.0);
                 }
-                // 1. Audio des applications : crêtes, sorties patchées, boucle interne.
-                //    Lu au rythme de l'horloge (trames dues, retard reporté jusqu'à OUT_CARRY_MAX) :
-                //    l'hôte écrit par blocs (jusqu'à 4096 trames et plus), que l'anneau partagé lisse ;
-                //    les transmettre d'un coup ferait déborder puis vider les tampons d'émission.
-                //    Le plafond ne porte que sur le reliquat non servi : un réveil tardif de ce thread
-                //    (minuteurs grossiers des VM) rattrape toutes ses trames dues.
+                // 1. Application audio: peaks, patched outputs, internal loopback.
+                // Read at the clock rate (due frames, backlog carried up to OUT_CARRY_MAX):
+                // the host writes blocks (4096 frames or more), smoothed by the shared ring;
+                // forwarding them at once would overflow then empty transmit buffers.
+                // The cap applies only to unserved remainder: a late wakeup of this thread
+                // (coarse VM timers) catches up all due frames.
                 let want = owed + sample.saturating_sub(out_clock) as usize;
                 out_clock = sample;
                 let n = want.min(from_apps.readable() as usize).min(ring);
@@ -241,9 +241,9 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                         }
                     }
                 }
-                // 2. Entrées des applications : trames dues selon l'horloge. L'anneau est rempli tant
-                //    qu'il a de la place ; la latence est bornée par le plugin, qui connaît la taille
-                //    de bloc de l'hôte (il jette l'excédent avant de lire).
+                // 2. Application inputs: frames due according to the clock. Fill the ring while
+                // space remains; latency is bounded by the plugin, which knows the host
+                // block size (it discards excess before reading).
                 let due = sample.saturating_sub(produced) as usize;
                 produced = sample;
                 if !loopback && !routes.inputs.is_empty() && ch_out > 0 && due > 0 {
@@ -275,9 +275,9 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                             let _ = to_apps.write(dst);
                         }
                     } else {
-                        // Anneau plein : personne ne lit (IO du plugin arrêtée). On consomme quand même
-                        // les tampons de gigue pour ne pas accumuler de retard. Les crêtes restent
-                        // mesurées : l'app affiche l'audio reçu avant tout enregistrement.
+                        // Ring full: nobody is reading (plugin I/O stopped). Still consume
+                        // jitter buffers to avoid accumulating delay. Peaks remain
+                        // measured: the app displays received audio before any recording.
                         for route in &mut routes.inputs {
                             let sc = route.reader.channels();
                             if let Some(src) = scratch.get_mut(..frames * sc) {
@@ -325,8 +325,8 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                         })
                         .collect();
                     in_peaks.iter_mut().for_each(|p| *p = 0.0);
-                    // Rafraîchissement de l'état des routes (vecteurs réutilisés : pas d'allocation
-                    // tant que le nombre de routes ne change pas).
+                    // Refresh route state (reuse vectors: no allocation
+                    // unless the route count changes).
                     s.outputs.truncate(routes.outputs.len());
                     s.inputs.truncate(routes.inputs.len());
                     for (i, r) in routes.outputs.iter().enumerate() {
@@ -373,7 +373,7 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
 }
 
 impl Device {
-    /// Remplace la table de routes ; prise en compte au tick suivant du thread du périphérique.
+    /// Replace the routing table; applied at the device thread's next tick.
     pub fn set_routes(&self, routes: Routes) {
         let mut st = self.status.lock().unwrap_or_else(PoisonError::into_inner);
         st.outputs.clear();
@@ -382,7 +382,7 @@ impl Device {
         *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some(routes);
     }
 
-    /// Accès à l'emplacement de routes, pour le transmettre à un superviseur.
+    /// Access the route slot to pass it to a supervisor.
     pub fn routes_handle(&self) -> RoutesHandle {
         RoutesHandle {
             pending: self.pending.clone(),
@@ -398,7 +398,7 @@ impl Device {
     }
 }
 
-/// Poignée clonable pour remplacer les routes d'un périphérique en marche.
+/// Cloneable handle for replacing routes on a running device.
 #[derive(Clone)]
 pub struct RoutesHandle {
     pending: Arc<Mutex<Option<Routes>>>,

@@ -1,8 +1,8 @@
 #!/bin/sh
-# Construit l'installeur build/OpenLW-<version>.pkg (Intel et Apple Silicon, macOS 10.13 et plus).
-#   macos/installer/build-pkg.sh            après macos/scripts/build-all.sh
-#   INSTALLER_SIGN_ID="Developer ID Installer: …" macos/installer/build-pkg.sh   paquet signé
-# Contenu posé : voir macos/installer/README.md.
+# Build installer build/OpenLW-<version>.pkg (Intel/Apple Silicon, macOS 10.13+).
+#   macos/installer/build-pkg.sh            after macos/scripts/build-all.sh
+#   INSTALLER_SIGN_ID="Developer ID Installer: …" macos/installer/build-pkg.sh   signed package
+# Installed contents: see macos/installer/README.md.
 set -eu
 cd "$(dirname "$0")/../.."
 ROOT=$(pwd)
@@ -21,10 +21,10 @@ install -m 755 macos/installer/payload/uninstall.sh "$R/Library/Application Supp
 install -m 644 daemon/lw-daemon.default.json "$R/Library/Application Support/OpenLW/lw-daemon.default.json"
 install -m 644 macos/launchd/fr.francois-brille.openlw.daemon.plist "$R/Library/LaunchDaemons/"
 ditto "$APPSRC" "$R/Applications/OpenLW.app"
-# Attributs étendus retirés (quarantaine…). com.apple.provenance, protégé, reste : pkgbuild l'enregistre
-# en entrées ._* que l'installeur réapplique comme attribut.
+# Extended attributes removed (quarantine, etc.). Protected com.apple.provenance remains: pkgbuild records it
+# as ._* entries that installer reapplies as an attribute.
 xattr -cr "$R" 2>/dev/null || true
-# Bundles non déplaçables (posés à leur chemin même si une copie existe ailleurs) et toujours remplacés.
+# Non-relocatable bundles (installed at their path even if another copy exists), always replaced.
 pkgbuild --analyze --root "$R" "$STAGE/component.plist" >/dev/null
 n=$(/usr/libexec/PlistBuddy -c "Print" "$STAGE/component.plist" | grep -c "RootRelativeBundlePath")
 i=0

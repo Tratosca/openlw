@@ -1,4 +1,4 @@
-//! Compile la couche C : région partagée (commune) et couche système du système cible.
+//! Compile C layer: shared region (common) and target-system layer.
 fn main() {
     for f in [
         "csrc/lw_shm.c",
@@ -44,7 +44,7 @@ fn main() {
         b.flag("-Wall").flag("-Wextra").flag("-Werror");
     }
     b.compile("lw_sys");
-    // Après la bibliothèque statique : l'éditeur de liens GNU (mingw) résout dans l'ordre.
+    // After static library: GNU linker (mingw) resolves in order.
     if os == "windows" {
         for lib in ["avrt", "advapi32", "qwave", "ws2_32"] {
             println!("cargo:rustc-link-lib={lib}");

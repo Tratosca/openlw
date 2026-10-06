@@ -1,8 +1,8 @@
-//! Paquet d'horloge Livewire (`docs/protocol/04-clock.md`).
+//! Livewire clock packet (`docs/protocol/04-clock.md`).
 //!
-//! RTP + extension d'en-tête de profil `0xFA1A` sur 20 mots. Format partiel, observé :
-//! séquence (octets 16–19), type A/B (20–23), identifiant du maître (26–29) ; le reste est inconnu.
-//! Décodage seulement : l'émission n'est pas prévue tant que le format complet n'est pas capturé.
+//! RTP + 20-word header extension with profile `0xFA1A`. Partial observed format:
+//! sequence (bytes 16–19), type A/B (20–23), master identifier (26–29); remainder unknown.
+//! Decode only: transmission is deferred until the complete format is captured.
 
 use crate::bytes::at;
 use crate::rtp::Packet;
@@ -10,9 +10,9 @@ use crate::Error;
 
 pub const EXTENSION_PROFILE: u16 = 0xFA1A;
 pub const EXTENSION_WORDS: usize = 0x14;
-/// Charge UDP attendue : 12 (RTP) + 4 (en-tête d'extension) + 80.
+/// Expected UDP payload: 12 (RTP) + 4 (extension header) + 80.
 pub const EXPECTED_LEN: usize = 96;
-/// Un paquet par tick de 250 µs (hypothèse : 12 échantillons à 48 kHz).
+/// One packet per 250 µs tick (hypothesis: 12 samples at 48 kHz).
 pub const TICK_SAMPLES: u32 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub enum ClockKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClockPacket {
-    /// Timestamp RTP : compteur d'échantillons à 48 kHz.
+    /// RTP timestamp: 48 kHz sample counter.
     pub timestamp: u32,
     pub rtp_sequence: u16,
     pub ssrc: u32,
@@ -34,7 +34,7 @@ pub struct ClockPacket {
 }
 
 impl ClockPacket {
-    /// Accepte un paquet d'horloge : extension `FA1A` de 20 mots exigée.
+    /// Accept a clock packet: require a 20-word `FA1A` extension.
     pub fn parse(udp_payload: &[u8]) -> Result<Self, Error> {
         let rtp = Packet::parse(udp_payload)?;
         match rtp.extension {

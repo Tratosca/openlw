@@ -1,5 +1,5 @@
-// Vues de OpenLW : panneau en verre, vumètres, grille d'entrées.
-// AppKit uniquement (plancher 10.13). Liquid Glass sur macOS 26 et plus, NSVisualEffectView en dessous.
+// OpenLW views: glass panel, meters, input matrix.
+// AppKit only (10.13 minimum). Liquid Glass on macOS 26+, NSVisualEffectView below.
 
 import AppKit
 
@@ -17,7 +17,7 @@ enum Theme {
     static let small = NSFont.systemFont(ofSize: 11)
 }
 
-/// Conteneur à fond translucide : Liquid Glass si disponible, sinon effet de vibrance.
+/// Translucent container: Liquid Glass if available, otherwise vibrancy.
 final class GlassPanel: NSView {
     let content = NSView()
 
@@ -67,7 +67,7 @@ final class GlassPanel: NSView {
     required init?(coder: NSCoder) { fatalError("non utilisé") }
 }
 
-/// Vumètre horizontal, un segment par canal ; échelle −60…0 dBFS.
+/// Horizontal meter, one segment per channel; −60…0 dBFS scale.
 final class MeterView: NSView {
     var levels: [Double?] = [] { didSet { needsDisplay = true } }
 
@@ -91,30 +91,30 @@ final class MeterView: NSView {
     }
 }
 
-/// Ligne de la grille d'entrées : une source (découverte ou saisie) et son patch éventuel.
+/// Input matrix row: source (discovered/manual) and optional patch.
 struct GridRow {
     let source: DiscoveredSource
-    /// Colonne patchée (index de paire) ou nil.
+    /// Patched column (pair index), or nil.
     let patchedColumn: Int?
-    /// Terminal émetteur, ou provenance de la ligne si la source n'est pas annoncée.
+    /// Transmitting terminal, or row provenance if source not advertised.
     let origin: String
-    /// Ligne retirable (canal saisi, ou flux configuré mais non annoncé).
+    /// Removable row (manual channel or configured unadvertised stream).
     let removable: Bool
 }
 
-/// Grille de patch des entrées : sources en lignes, paires d'entrées du Mac en colonnes.
+/// Input patch matrix: source rows, Mac input-pair columns.
 final class InputGridView: NSView {
     var rows: [GridRow] = [] { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var pairs: [[Int]] = [[1, 2], [3, 4], [5, 6], [7, 8]] { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var columnLevels: [[Double?]] = [] { didSet { needsDisplay = true } }
     var columnStatus: [String] = [] { didSet { needsDisplay = true } }
-    /// Clic sur une case (ligne, colonne).
+    /// Cell click (row, column).
     var onToggle: ((Int, Int) -> Void)?
-    /// Clic sur le bouton d'écoute d'une ligne.
+    /// Row preview-button click.
     var onListen: ((Int) -> Void)?
-    /// Clic sur le bouton de retrait d'une ligne.
+    /// Row removal-button click.
     var onRemove: ((Int) -> Void)?
-    /// Ligne en pré-écoute et son niveau (dBFS).
+    /// Previewed row and its level (dBFS).
     var listeningRow: Int? { didSet { needsDisplay = true } }
     var listenLevel: Double? { didSet { needsDisplay = true } }
 
@@ -145,7 +145,7 @@ final class InputGridView: NSView {
 
     override var isFlipped: Bool { true }
 
-    /// Un clic agit même si la fenêtre n'est pas au premier plan (sinon il ne fait que l'activer).
+    /// Click acts even if window is not foreground (otherwise it merely activates it).
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override var intrinsicContentSize: NSSize {
@@ -189,7 +189,7 @@ final class InputGridView: NSView {
         needsDisplay = true
     }
 
-    /// Clic droit sur une ligne : écouter, retirer de la grille.
+    /// Right-click row: preview, remove from matrix.
     override func menu(for event: NSEvent) -> NSMenu? {
         let p = convert(event.locationInWindow, from: nil)
         guard p.y >= headerHeight else { return nil }
@@ -222,7 +222,7 @@ final class InputGridView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // En-têtes de colonnes : paire, vumètre, état.
+        // Column headers: pair, meter, state.
         for (c, pair) in pairs.enumerated() {
             let x = labelWidth + CGFloat(c) * columnWidth
             let name = pair.count > 2 ? "\(pair.first ?? 1)-\(pair.last ?? 8)" : "\(pair[0])-\(pair[1])"
@@ -268,7 +268,7 @@ final class InputGridView: NSView {
             text(s.name.isEmpty ? "—" : s.name, NSRect(x: 88, y: y + 8, width: 130, height: 16), font: Theme.body)
             let originRect = NSRect(x: 220, y: y + 8, width: labelWidth - 226, height: 16)
             if listeningRow == r {
-                // Pendant l'écoute : niveau reçu à la place de la provenance.
+                // During preview: received level replaces provenance.
                 let track = NSRect(x: originRect.minX, y: y + 13, width: 70, height: 5)
                 NSColor.quaternaryLabelColor.setFill()
                 track.fill()
@@ -300,7 +300,7 @@ final class InputGridView: NSView {
         }
     }
 
-    /// Bouton casque : plein quand la ligne est en écoute.
+    /// Headphone button: filled while row is previewed.
     private func drawListenButton(row r: Int) {
         let rect = listenRect(row: r)
         let active = listeningRow == r
@@ -326,7 +326,7 @@ final class InputGridView: NSView {
     }
 }
 
-/// Élément de menu qui exécute une fermeture.
+/// Menu item executing a closure.
 final class ClosureItem: NSMenuItem {
     private let run: () -> Void
 

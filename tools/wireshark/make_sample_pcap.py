@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Écrit huit trames Livewire synthétiques dans un pcap Ethernet, sans dépendance."""
+"""Write eight synthetic Livewire frames to an Ethernet pcap, without dependencies."""
 import argparse
 import ipaddress
 import struct
@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def item(tag, kind, value):
-    """Sérialise un item TlvMsg en ordre réseau."""
+    """Serialize a TlvMsg item in network order."""
     formats = {1: "!I", 7: "!B", 8: "!H", 9: "!Q"}
     if kind in formats:
         payload = struct.pack(formats[kind], value)
@@ -48,7 +48,7 @@ def rtp(seq, timestamp, ssrc, payload):
 
 
 def checksum(data):
-    """Somme de contrôle IPv4 (complément à un)."""
+    """IPv4 checksum (one's complement)."""
     words = struct.unpack("!" + "H" * (len(data) // 2), data)
     total = sum(words)
     while total >> 16:
@@ -70,15 +70,15 @@ def ethernet(payload, destination, port, ident):
 def packets():
     yield advertisement(), "239.192.255.3", 4001
     yield advertisement(short=True, seq=2), "239.192.255.3", 4001
-    # Silence L24 entrelacé ; trois paquets consécutifs à 240 échantillons/canal.
+    # Interleaved L24 silence; three consecutive packets with 240 samples/channel.
     for n in range(3):
         yield rtp(100 + n, 48000 + 240 * n, 0xEFC00065, bytes(240 * 2 * 3)), "239.192.0.101", 5004
     yield rtp(200, 48000, 0xEFC40005, bytes(60 * 8 * 3)), "239.196.0.5", 5004
-    # 44 octets de charge UDP au total : 12 RTP + 32 octets hypothétiques.
+    # 44-byte total UDP payload: 12 RTP + 32 hypothetical bytes.
     clock = bytearray(rtp(300, 48000, 0xEFC0FF02, bytes(32)))
     clock[26:30] = bytes.fromhex("12345678")
     yield bytes(clock), "239.192.255.2", 7000
-    # Longueurs Ethernet/IP/UDP cohérentes, mais dernier TlvMsg incomplet.
+    # Consistent Ethernet/IP/UDP lengths, but final TlvMsg incomplete.
     yield advertisement(seq=3)[:-5], "239.192.255.3", 4001
 
 

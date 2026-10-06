@@ -1,16 +1,12 @@
-# Dissecteurs Livewire pour Wireshark
+# Livewire dissectors for Wireshark
 
-`livewire.lua` décode Envelope/TlvMsg (`lwadv`), l'horloge (`lwclock`) et le RTP
-Livewire (`lwrtp`), d'après la [spécification](../../docs/protocol/README.md).
+`livewire.lua` decodes Envelope/TlvMsg (`lwadv`), clock (`lwclock`), and Livewire RTP (`lwrtp`), based on the [specification](../../docs/protocol/README.md).
 
 ## Installation
 
-Prérequis : Wireshark/TShark avec Lua ; Python 3 pour le générateur.
-Validé avec TShark 4.6.2 et Lua 5.4.7 sur macOS.
+Prerequisites: Wireshark/TShark with Lua; Python 3 for the generator. Validated with TShark 4.6.2 and Lua 5.4.7 on macOS.
 
-Copier `livewire.lua` dans le dossier **plugins personnel Lua** indiqué par
-Wireshark dans **À propos de Wireshark → Dossiers**, puis relancer Wireshark.
-Autre possibilité : charger explicitement le script, depuis la racine du dépôt :
+Copy `livewire.lua` into the **Personal Lua Plugins** directory shown in **About Wireshark → Folders**, then restart Wireshark. Alternatively, load the script explicitly from the repository root:
 
 ```sh
 /Applications/Wireshark.app/Contents/MacOS/Wireshark \
@@ -20,26 +16,22 @@ Autre possibilité : charger explicitement le script, depuis la racine du dépô
   -X lua_script:tools/wireshark/livewire.lua -r /tmp/lw_sample.pcap -V
 ```
 
-Ne pas cumuler installation personnelle et chargement `-X` du même script.
-Les appels utilisent les [API Lua officielles Wireshark](https://www.wireshark.org/docs/wsdg_html_chunked/lua_module_Proto.html).
+Do not combine a personal installation and `-X` loading of the same script. Calls use the [official Wireshark Lua APIs](https://www.wireshark.org/docs/wsdg_html_chunked/lua_module_Proto.html).
 
-## Ports et préférences
+## Ports and preferences
 
-Dans les préférences des protocoles Livewire, ou avec `tshark -o nom:valeur` :
+In Livewire protocol preferences, or with `tshark -o name:value`:
 
-| Préférence | Défaut | Usage |
+| Preference | Default | Purpose |
 |---|---:|---|
-| `lwadv.control_port` | 4000 | Requête / contrôle Envelope |
-| `lwadv.announce_port` | 4001 | Annonce Envelope |
-| `lwclock.port` | 7000 | Horloge RTP |
-| `lwrtp.port` | 5004 | Audio RTP |
+| `lwadv.control_port` | 4000 | Envelope request / control |
+| `lwadv.announce_port` | 4001 | Envelope advertisement |
+| `lwclock.port` | 7000 | RTP clock |
+| `lwrtp.port` | 5004 | RTP audio |
 
-Exemple : `-o lwrtp.port:15004`. La valeur 0 désactive une liaison ; les valeurs
-supérieures à 65535 sont ignorées. Utiliser des ports distincts entre protocoles.
-`lwrtp` est un dissecteur UDP dédié, et prend la place du décodage RTP habituel
-sur son port ; il expose ses propres champs, sans créer de champs `rtp.*`.
+Example: `-o lwrtp.port:15004`. Zero disables a binding; values above 65535 are ignored. Use distinct ports for each protocol. `lwrtp` is a dedicated UDP dissector that replaces normal RTP decoding on its port; it exposes its own fields, not `rtp.*` fields.
 
-## Filtres utiles
+## Useful filters
 
 ```text
 lwadv
@@ -57,23 +49,13 @@ lwrtp.ssrc_matches_dst == false
 _ws.malformed || _ws.expert.severity == error
 ```
 
-Les tags FourCC sont affichés en ASCII ; les octets non imprimables sont échappés
-`\xNN`. Les types TlvMsg 1 à 9 sont décodés ; les tableaux restent typés et les
-u64 gardent leur précision. Les types 2/3 affichent les octets et une chaîne si
-son contenu est ASCII imprimable, après retrait des NUL terminaux éventuels.
-Les champs PSID/LPID exposent le canal masqué sur 15 bits ; FSID/BSID/INIP
-exposent aussi une adresse IPv4.
+FourCC tags are displayed as ASCII; non-printable bytes are escaped as `\xNN`. TlvMsg types 1–9 are decoded; arrays remain typed and u64 values retain precision. Types 2/3 display bytes and a string if the content is printable ASCII, after removing trailing NULs. PSID/LPID fields expose the channel masked to 15 bits; FSID/BSID/INIP also expose an IPv4 address.
 
-Le résumé ADV affiche le nom et les sources présents dans le paquet : aucune
-mémorisation d'annonce antérieure. Une annonce courte affiche donc `<absent>`
-pour ATRN et `<aucune>` pour les sources. Un paquet mal formé peut avoir un
-résumé partiel ; consulter les informations expert.
+The ADV summary shows the name and sources present in the packet without retaining earlier advertisements. A short advertisement therefore shows the dissector's current French placeholders `<absent>` for ATRN and `<aucune>` for sources. A malformed packet may have a partial summary; inspect expert information.
 
-## Génération et validation
+## Generation and validation
 
-Le générateur utilise uniquement la bibliothèque standard Python. Il écrit un
-pcap classique Ethernet, sans émission réseau. Le chemin donné est écrasé.
-Conserver les captures hors du dépôt :
+The generator uses only the Python standard library. It writes a classic Ethernet pcap without transmitting network traffic. The supplied path is overwritten. Keep captures outside the repository:
 
 ```sh
 python3 tools/wireshark/make_sample_pcap.py /tmp/lw_sample.pcap
@@ -84,33 +66,21 @@ python3 tools/wireshark/make_sample_pcap.py /tmp/lw_sample.pcap
   -Y "_ws.malformed || _ws.expert.severity == error"
 ```
 
-Résultat attendu : huit paquets, uniquement le **paquet 8** dans le filtre
-expert, aucune erreur Lua.
+Expected result: eight packets, only **packet 8** matches the expert filter, no Lua errors.
 
-| Paquet | Contenu attendu |
+| Packet | Expected contents |
 |---|---|
-| 1 | ADV full, LW-SAMPLE, NUMS=1, S001, canal 101 |
-| 2 | ADV short, NUMS=1, sans ATRN ni source |
-| 3–5 | RTP PT 96, stéréo, canal 101, 240 échantillons, séquences 100–102 |
-| 6 | RTP PT 96, surround, canal 5, 60 échantillons sur 8 canaux |
-| 7 | Horloge : 44 octets de charge UDP au total, identité `12345678` |
-| 8 | ADV volontairement tronqué dans le sous-message S001 |
+| 1 | Full ADV, LW-SAMPLE, NUMS=1, S001, channel 101 |
+| 2 | Short ADV, NUMS=1, no ATRN or source |
+| 3–5 | RTP PT 96, stereo, channel 101, 240 samples, sequences 100–102 |
+| 6 | RTP PT 96, surround, channel 5, 60 samples on 8 channels |
+| 7 | Clock: total UDP payload 44 bytes, identity `12345678` |
+| 8 | ADV deliberately truncated inside the S001 submessage |
 
-## Limites
+## Limitations
 
-- Le format complet de l'horloge reste une **hypothèse**. Les offsets 26 à 29
-  sont comptés depuis le début de la charge UDP, à partir de zéro. Le reste de
-  la charge RTP est brut ; PT, SSRC et données synthétiques du générateur ne
-  constituent pas une preuve de format matériel.
-- Les annotations audio supposent **L24** : taille de charge RTP divisée par
-  `3 × nombre de canaux`, avec 8 canaux pour `239.196/16`, sinon 2 pour
-  `239.192/16` et `239.193/16`. Le PT dynamique ne prouve pas l'encodage.
-  L16 et les sessions SDP ne sont pas identifiés automatiquement. Les CSRC,
-  extensions et octets de bourrage RTP sont exclus du calcul de charge.
-- TlvMsg est limité à **8 niveaux, racine comprise**. Troncature, dépassement
-  d'une sous-longueur, type inconnu et profondeur excessive produisent une
-  information expert `Malformed/Error`. Les ACK/NACK Envelope sans TlvMsg sont acceptés.
-- Pas de reconstitution des annonces multipages ni de remplacement du dissecteur PTP
-  natif. Tout autre message reçu sur un port d'annonce reste lisible comme TlvMsg générique.
-- Les tests sont synthétiques, construits d'après la spécification ; ils
-  ne valident pas l'interopérabilité avec un équipement Livewire réel.
+- The complete clock format remains a **hypothesis**. Offsets 26–29 are zero-based from the UDP payload start. The rest of the RTP payload is raw; the generator's PT, SSRC, and synthetic data do not establish a hardware format.
+- Audio annotations assume **L24**: RTP payload size divided by `3 × channel count`, with eight channels for `239.196/16`, otherwise two for `239.192/16` and `239.193/16`. Dynamic PT does not establish encoding. L16 and SDP sessions are not identified automatically. CSRCs, extensions, and RTP padding are excluded from payload calculations.
+- TlvMsg is limited to **eight levels including the root**. Truncation, sub-length overrun, unknown types, and excessive depth produce `Malformed/Error` expert information. Envelope ACK/NACK packets without TlvMsg are accepted.
+- No multipage advertisement reconstruction or replacement of the native PTP dissector. Other messages received on an advertisement port remain readable as generic TlvMsg.
+- Tests are synthetic and built from the specification; they do not validate interoperability with real Livewire equipment.

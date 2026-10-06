@@ -1,5 +1,5 @@
 {
-  "source": "doc:04-clock (synthetique, octets 24-95 inconnus a zero)",
+  "source": "doc:04-clock (synthetic, unknown bytes 24–95 zeroed)",
   "expected_len": 96,
   "period_us": 250,
   "ts_step": 12,

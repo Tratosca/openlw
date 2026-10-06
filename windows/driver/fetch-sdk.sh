@@ -1,6 +1,6 @@
 #!/bin/sh
-# Télécharge le SDK ASIO de Steinberg (double licence ; utilisé ici sous GPLv3) dans sdk/,
-# après vérification de son empreinte. Le SDK n'est jamais versionné dans le dépôt.
+# Download Steinberg ASIO SDK (dual license; used here under GPLv3) to sdk/,
+# after hash verification. SDK is never versioned in repository.
 #   windows/driver/fetch-sdk.sh
 set -eu
 cd "$(dirname "$0")"

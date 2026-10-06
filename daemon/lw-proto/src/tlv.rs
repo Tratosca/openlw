@@ -1,21 +1,21 @@
-//! TlvMsg : message TLV typé de l'annonce Livewire (`docs/protocol/03-advertisement.md`).
+//! TlvMsg: typed TLV message for Livewire advertisements (`docs/protocol/03-advertisement.md`).
 //!
-//! `u32 id (FourCC) | u16 count | count × (u32 tag | u8 type | valeur)`, tout en big-endian.
+//! `u32 id (FourCC) | u16 count | count × (u32 tag | u8 type | value)`, all big-endian.
 
 use std::fmt;
 
 use crate::bytes::Reader;
 use crate::Error;
 
-/// Profondeur d'imbrication maximale acceptée au décodage.
+/// Maximum nesting depth accepted by decoding.
 pub const MAX_DEPTH: usize = 8;
 
-/// Identifiant ou tag sur 4 caractères.
+/// Four-character identifier or tag.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FourCc(pub u32);
 
 impl FourCc {
-    /// Construit un FourCC à partir de 4 octets ASCII (évalué à la compilation).
+    /// Construct a FourCC from four ASCII bytes (evaluated at compile time).
     pub const fn new(s: &[u8; 4]) -> Self {
         Self(u32::from_be_bytes(*s))
     }
@@ -42,7 +42,7 @@ impl fmt::Display for FourCc {
     }
 }
 
-/// Valeur d'un item, avec le code de type filaire entre parenthèses.
+/// Item value, with wire type code in parentheses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
     /// (1)
@@ -80,7 +80,7 @@ impl Value {
         }
     }
 
-    /// Valeur entière quelle que soit sa largeur.
+    /// Integer value regardless of width.
     pub fn as_u64(&self) -> Option<u64> {
         match *self {
             Value::U8(v) => Some(v.into()),
@@ -91,7 +91,7 @@ impl Value {
         }
     }
 
-    /// Chaîne d'un tableau d'octets, coupée au premier NUL.
+    /// String from a byte array, cut at first NUL.
     pub fn as_text(&self) -> Option<String> {
         match self {
             Value::Bytes(b) | Value::Str(b) => {
@@ -103,7 +103,7 @@ impl Value {
     }
 }
 
-/// Message TlvMsg : identifiant et items ordonnés (les tags peuvent se répéter).
+/// TlvMsg message: identifier and ordered items (tags may repeat).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TlvMsg {
     pub id: FourCc,
@@ -185,7 +185,7 @@ impl TlvMsg {
         Ok(())
     }
 
-    /// Décode un message complet (les octets en trop sont tolérés).
+    /// Decode a complete message (extra bytes tolerated).
     pub fn decode(buf: &[u8]) -> Result<Self, Error> {
         Self::decode_at_depth(buf, 0)
     }
@@ -197,7 +197,7 @@ impl TlvMsg {
         let mut r = Reader::new(buf, "TlvMsg");
         let id = FourCc(r.u32()?);
         let count = r.u16()?;
-        // Chaque item occupe au moins 6 octets : borne l'allocation sur une entrée hostile.
+        // Each item occupies at least six bytes: bound allocations for hostile input.
         let mut items = Vec::with_capacity(usize::from(count).min(r.remaining() / 6));
         for _ in 0..count {
             let tag = FourCc(r.u32()?);

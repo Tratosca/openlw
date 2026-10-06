@@ -1,10 +1,10 @@
-//! Contrôle du daemon : état partagé et requêtes JSON reçues par le canal de contrôle (ADR 0005,
-//! ADR 0007) : XPC (macOS), socket Unix (Linux), tube nommé (Windows).
+//! Daemon control: shared state and JSON requests received through the control channel (ADR 0005,
+//! ADR 0007): XPC (macOS), Unix socket (Linux), named pipe (Windows).
 //!
-//! Requêtes : `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"attach"}` (le client audio demande en
-//! plus la région partagée, jointe par le transport à la réponse). Réponses : `{"ok":true,...}` ou
-//! `{"ok":false,"error":...}`. Les apps de configuration et la commande `lw-daemon ctl` utilisent ce
-//! protocole.
+//! Requests: `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"attach"}` (the audio client also requests
+//! the shared region, attached by the transport to the response). Responses: `{"ok":true,...}` or
+//! `{"ok":false,"error":...}`. Configuration apps and `lw-daemon ctl` use this
+//! protocol.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -23,16 +23,16 @@ use crate::tx::TxReport;
 pub use lw_sys::ctl::SERVICE_NAME;
 use lw_sys::ctl::{Caller, Endpoint};
 
-/// État observable du daemon.
+/// Observable daemon state.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
     pub version: &'static str,
     pub pid: u32,
     pub started_unix: u64,
     pub uptime_s: u64,
-    /// Interface choisie automatiquement (`iface: "auto"`).
+    /// Automatically selected interface (`iface: "auto"`).
     pub iface_auto: bool,
-    /// Aucune interface utilisable : recherche du réseau Livewire (auto) ou interface absente.
+    /// No usable interface: searching for the Livewire network (auto) or interface absent.
     pub searching: bool,
     pub iface: String,
     pub iface_friendly: String,
@@ -40,14 +40,14 @@ pub struct Status {
     pub tx: BTreeMap<String, TxReport>,
     pub rx: BTreeMap<String, RxStats>,
     pub advertised_sources: usize,
-    /// Périphérique virtuel (région partagée avec le plugin), s'il est actif.
+    /// Virtual device (region shared with the plugin), if active.
     pub device: Option<crate::device::DeviceStatus>,
 }
 
-/// Source de l'état du périphérique (rafraîchi par son propre thread).
+/// Device-state source (refreshed by its own thread).
 pub type DeviceStatusRef = Arc<Mutex<crate::device::DeviceStatus>>;
 
-/// État partagé entre les threads et le gestionnaire du canal de contrôle.
+/// State shared between threads and the control-channel handler.
 #[derive(Clone)]
 pub struct Shared {
     inner: Arc<Mutex<Status>>,
@@ -58,7 +58,7 @@ pub struct Shared {
     heard: crate::detect::Heard,
 }
 
-/// Configuration courante, son fichier et le canal de rechargement de la session.
+/// Current configuration, its file, and the session reload channel.
 struct ConfigSource {
     current: Config,
     path: Option<PathBuf>,
@@ -66,7 +66,7 @@ struct ConfigSource {
 }
 
 impl Shared {
-    /// `iface` : interface de la session, ou `None` tant qu'aucune n'est choisie.
+    /// `iface`: session interface, or `None` until selected.
     pub fn new(iface: Option<&crate::iface::Iface>, advertised_sources: usize) -> Self {
         let started_unix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -96,12 +96,12 @@ impl Shared {
         }
     }
 
-    /// Interfaces où des annonces Livewire ont été entendues (détecteur).
+    /// Interfaces receiving Livewire advertisements (detector).
     pub fn heard(&self) -> &crate::detect::Heard {
         &self.heard
     }
 
-    /// Aucune session : recherche du réseau (`auto`) ou interface configurée absente.
+    /// No session: searching for the network (`auto`) or configured interface absent.
     pub fn set_searching(&self, auto: bool) {
         self.with(|s| {
             s.iface_auto = auto;
@@ -115,7 +115,7 @@ impl Shared {
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut Status) -> R) -> R {
-        // Un thread qui panique ne doit pas rendre l'état illisible : on reprend la donnée.
+        // A panicking thread must not make state unreadable: recover the data.
         let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
         f(&mut guard)
     }
@@ -128,12 +128,12 @@ impl Shared {
         self.with(|s| s.rx.insert(stats.group.clone(), stats.clone()));
     }
 
-    /// Nombre de sources annoncées (0 si l'annonce est désactivée).
+    /// Advertised source count (zero if advertising is disabled).
     pub fn set_advertised(&self, n: usize) {
         self.with(|s| s.advertised_sources = n);
     }
 
-    /// Retire les statistiques d'un flux arrêté.
+    /// Remove statistics for a stopped stream.
     pub fn forget_stream(&self, group: &str) {
         self.with(|s| {
             s.tx.remove(group);
@@ -141,8 +141,8 @@ impl Shared {
         });
     }
 
-    /// Branche la configuration courante : les commandes de patch la modifient, l'enregistrent dans
-    /// `path` (si fourni) et envoient la nouvelle version sur `reload`.
+    /// Connect current configuration: patch commands modify it, save it to
+    /// `path` (if supplied), and send the new version on `reload`.
     pub fn set_config(&self, current: Config, path: Option<PathBuf>, reload: Sender<Config>) {
         *self.config.lock().unwrap_or_else(PoisonError::into_inner) = Some(ConfigSource {
             current,
@@ -151,7 +151,7 @@ impl Shared {
         });
     }
 
-    /// Vide les statistiques de flux et met à jour l'interface (nouvelle session).
+    /// Clear stream statistics and update the interface (new session).
     pub fn reset_streams(&self, iface: &crate::iface::Iface, auto: bool) {
         self.with(|s| {
             s.iface_auto = auto;
@@ -194,7 +194,7 @@ impl Shared {
             .map(|s| s.current.clone())
     }
 
-    /// Noms du périphérique et de ses canaux, d'après la configuration et les annonces reçues.
+    /// Device and channel names from configuration and received advertisements.
     pub fn labels(&self) -> crate::labels::Labels {
         let announced = self
             .directory
@@ -215,12 +215,12 @@ impl Shared {
         }
     }
 
-    /// Annuaire des sources découvertes (alimenté par le thread de découverte).
+    /// Discovered-source directory (fed by the discovery thread).
     pub fn directory(&self) -> &crate::discovery::Directory {
         &self.directory
     }
 
-    /// Rattache l'état du périphérique virtuel.
+    /// Attach virtual-device state.
     pub fn set_device(&self, status: DeviceStatusRef) {
         *self.device.lock().unwrap_or_else(PoisonError::into_inner) = Some(status);
     }
@@ -245,7 +245,7 @@ impl Shared {
         })
     }
 
-    /// Traite une requête JSON et renvoie la réponse JSON (jamais d'erreur côté appelant).
+    /// Handle a JSON request and return a JSON response (never a caller-side error).
     pub fn handle(&self, request: &str, caller: &Caller) -> String {
         let reply = match serde_json::from_str::<Value>(request) {
             Ok(v) if is_mutating(&v) && !caller.may_edit => {
@@ -334,13 +334,13 @@ impl Shared {
         reply.to_string()
     }
 
-    /// Démarre le canal de contrôle sur `endpoint`.
+    /// Start the control channel on `endpoint`.
     pub fn serve(&self, endpoint: &Endpoint) -> Result<lw_sys::ctl::Server, lw_sys::ctl::Error> {
         let me = self.clone();
         lw_sys::ctl::Server::start(endpoint, Box::new(move |req, c| me.handle(req, c)))
     }
 
-    /// Canal de contrôle XPC anonyme (tests, même processus ; macOS).
+    /// Anonymous XPC control channel (tests, same process; macOS).
     #[cfg(target_os = "macos")]
     pub fn serve_anonymous_xpc(&self) -> Result<lw_sys::ctl::Server, lw_sys::ctl::Error> {
         let me = self.clone();

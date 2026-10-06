@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Genere docs/protocol/vectors/ a partir de la doc (contrat avec src/endpoint).
+"""Generate docs/protocol/vectors/ from documentation (contract with src/endpoint).
 
     python3 tools/lw/make_vectors.py [--out docs/protocol/vectors]
 
-Les vecteurs sont construits d'apres la specification ; ceux qui portent "source": "doc"
-devront etre completes par des paquets reels ("source": "pcap:<ID>") apres les captures.
+Vectors are built from the specification; those marked "source": "doc"
+must be supplemented with real packets ("source": "pcap:<ID>") after captures.
 """
 import argparse
 import json
@@ -52,23 +52,23 @@ def rtp_headers():
         out.append({"mode": mode, "group": group, "samples_per_packet": samples, "channels": nchn,
                     "payload_bytes_L24": samples * nchn * 3, "ts_step": samples, "packets_per_s": 48000 // samples,
                     "header_hex": hdr.hex(), "ssrc_is_dst": True,
-                    "confidence": {"ssrc_is_dst": "choix OpenLW", "ts_step": "observe en Standard, suppose pour les autres formats"}})
+                    "confidence": {"ssrc_is_dst": "OpenLW choice", "ts_step": "observed for Standard, assumed for other formats"}})
     return {"source": "doc:02-rtp-audio", "streams": out}
 
 
 def clock_packet(seq, ts, kind="A", master_id=bytes.fromhex("c0a80a14")):
-    """Paquet d'horloge synthetique : RTP (X=1) + extension FA1A de 20 mots ; octets inconnus a zero."""
+    """Synthetic clock packet: RTP (X=1) + 20-word FA1A extension; unknown bytes zeroed."""
     ext = bytearray(80)
     struct.pack_into(">I", ext, 0, seq)
     ext[4:8] = bytes.fromhex("0a00caba" if kind == "A" else "0b00caba")
-    ext[10:14] = master_id  # octets 26-29 de la charge UDP
+    ext[10:14] = master_id  # Bytes 26–29 of UDP payload
     return struct.pack(">BBHII", 0x90, 96, seq & 0xFFFF, ts, 0xEFC0FF02) + struct.pack(">HH", 0xFA1A, 0x14) + bytes(ext)
 
 
 def lwclock():
     pkts = [{"clock_seq": 1000 + i, "rtp_ts": 48000 + 12 * i, "type": "A",
              "hex": clock_packet(1000 + i, 48000 + 12 * i).hex()} for i in range(3)]
-    return {"source": "doc:04-clock (synthetique, octets 24-95 inconnus a zero)",
+    return {"source": "doc:04-clock (synthetic, unknown bytes 24–95 zeroed)",
             "expected_len": 96, "period_us": 250, "ts_step": 12, "packets": pkts}
 
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Annonce une source Livewire factice (ADV), ecrit d'apres docs/protocol/03-advertisement.md.
+"""Advertise a mock Livewire source (ADV), based on docs/protocol/03-advertisement.md.
 
     python3 emit_adv.py --iface en7 --channel 4001 --name "MAC TEST" [--seconds 120] [--dry-run]
 
-Critere d'acceptation (Q8) : la source apparait dans le navigateur de sources des appareils Livewire
-Combiner avec emit_rtp.py pour avoir l'audio.
-Cadence : annonce complete au demarrage puis a 1 s, puis courtes toutes les 20 s +/- 5 s,
-complete apres 8 courtes.
+Acceptance criterion (Q8): source appears in Livewire device source browsers.
+Combine with emit_rtp.py for audio.
+Timing: full advertisement at startup and after 1 s, then short every 20 s +/- 5 s,
+full after eight short advertisements.
 """
 import argparse
 import random
@@ -36,7 +36,7 @@ def main(argv=None):
     sock = None
     if not args.dry_run:
         from netiface import udp_socket
-        # --ip ne change que l'adresse annoncée (INIP) : utile pour simuler un autre terminal en labo.
+        # --ip changes only advertised address (INIP): useful to simulate another terminal in the lab.
         sock, iface_ip = udp_socket(args.iface, tos=0)
         ip = args.ip or iface_ip
     ip = ip or "192.168.0.10"
@@ -55,7 +55,7 @@ def main(argv=None):
         msg = advertisement(args.advv, ip, sources, name=args.terminal, full=send_full)
         sock.sendto(encode_datagram(msg, seq), (ADV_GROUP, ADV_PORT))
         print(f"{time.strftime('%H:%M:%S')} {'complete' if send_full else 'courte'} seq={seq}")
-        seq = (seq + 1) & 0xFFFFFFFF or 1  # le numero Envelope n'est jamais 0
+        seq = (seq + 1) & 0xFFFFFFFF or 1  # Envelope sequence number is never zero
         if send_full and first_cycle:
             next_send, first_cycle, send_full = time.monotonic() + 1 + random.uniform(-0.5, 0.5), False, True
             continue

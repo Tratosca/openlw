@@ -1,6 +1,6 @@
 #!/bin/sh
-# Retire l'installation de développement (daemon, LaunchDaemon, plugin, app). À lancer avec sudo.
-# La config et les journaux sont conservés, sauf avec --purge.
+# Remove development installation (daemon, LaunchDaemon, plugin, app). Run with sudo.
+# Preserve configuration/logs unless --purge is supplied.
 set -eu
 [ "$(id -u)" -eq 0 ] || { echo "à lancer avec sudo" >&2; exit 1; }
 APP="/Library/Application Support/OpenLW"

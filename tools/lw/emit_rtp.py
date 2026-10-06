@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Emetteur RTP Livewire de test (Standard 240, AES67 48, surround 60 echantillons), ecrit d'apres la doc.
+"""Test Livewire RTP transmitter (Standard 240, AES67 48, surround 60 samples), based on documentation.
 
     python3 emit_rtp.py --iface en7 --channel 4001 --mode standard --seconds 30 [--freq 997]
 
-Critere d'acceptation (Q2) : le flux est joue par un recepteur Livewire
-(fenetre Statistics sans erreur). Cadencement logiciel : la regularite suffit pour la RE,
-pas pour de la production.
+Acceptance criterion (Q2): stream plays on a Livewire receiver
+(Statistics window without errors). Software pacing: regularity suffices for interoperability tests,
+not for production.
 """
 import argparse
 import math
@@ -16,7 +16,7 @@ import time
 from lwchan import channel_to_group
 from netiface import udp_socket
 
-MODES = {  # (echantillons par paquet, canaux, type de groupe)
+MODES = {  # (samples per packet, channels, group type)
     "standard": (240, 2, "stereo"),
     "aes67": (48, 2, "stereo"),
     "livestream": (12, 2, "stereo"),

@@ -1,5 +1,5 @@
-//! Réception d'un flux RTP Livewire / AES67 et statistiques : paquets, pertes, erreurs de séquence,
-//! gigue (RFC 3550).
+//! Livewire / AES67 RTP reception and statistics: packets, loss, sequence errors,
+//! jitter (RFC 3550).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -13,27 +13,27 @@ use crate::iface::Iface;
 use crate::net::rx_socket;
 use crate::Stop;
 
-/// Statistiques cumulées d'un flux reçu.
+/// Cumulative statistics for a received stream.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct RxStats {
     pub group: String,
     pub packets: u64,
     pub bytes: u64,
     pub invalid: u64,
-    /// Paquets manquants (sauts de séquence vers l'avant).
+    /// Missing packets (forward sequence jumps).
     pub lost: u64,
-    /// Doublons ou paquets en retard (écart dans [-399, 0]).
+    /// Duplicates or late packets (difference in [-399, 0]).
     pub late_or_dup: u64,
-    /// Ruptures de séquence hors fenêtre (nouveau flux, redémarrage de l'émetteur).
+    /// Out-of-window sequence breaks (new stream, transmitter restart).
     pub resyncs: u64,
     pub payload_types: BTreeMap<u8, u64>,
     pub payload_sizes: BTreeMap<usize, u64>,
     pub ts_steps: BTreeMap<u32, u64>,
     pub ssrc: Option<u32>,
     pub ssrc_is_group: bool,
-    /// Gigue RFC 3550 en échantillons à 48 kHz.
+    /// RFC 3550 jitter in 48 kHz samples.
     pub jitter_samples: f64,
-    /// Crête depuis le dernier relevé, dBFS (L24 supposé).
+    /// Peak since last report, dBFS (assuming L24).
     pub peak_dbfs: f64,
     pub senders: BTreeMap<String, u64>,
     #[serde(skip)]
@@ -51,8 +51,8 @@ impl RxStats {
         }
     }
 
-    /// Prend en compte un paquet reçu à `now`. Renvoie `true` si le paquet est retenu (ni invalide,
-    /// ni doublon, ni en retard) ; ses échantillons L24 sont alors laissés dans `scratch`.
+    /// Process a packet received at `now`. Return `true` if accepted (not invalid,
+    /// duplicate, or late); its L24 samples are then left in `scratch`.
     pub fn record(
         &mut self,
         now: Instant,
@@ -96,7 +96,7 @@ impl RxStats {
         true
     }
 
-    /// Fige la crête courante en dBFS et la remet à zéro (appel périodique).
+    /// Snapshot the current peak in dBFS and reset it (periodic call).
     pub fn take_peak(&mut self) {
         self.peak_dbfs = if self.peak == 0 {
             f64::NEG_INFINITY
@@ -107,7 +107,7 @@ impl RxStats {
     }
 }
 
-/// Reçoit `group:port` jusqu'à l'arrêt ; `on_report` est appelé environ chaque `every`.
+/// Receive `group:port` until stopped; call `on_report` approximately every `every`.
 pub fn run(
     iface: &Iface,
     group: Ipv4Addr,
@@ -119,8 +119,8 @@ pub fn run(
     run_into(iface, group, port, stop, every, None, on_report)
 }
 
-/// Comme [`run`], et pousse l'audio décodé (L24 → float) dans `sink` (entrées du périphérique).
-/// Les paquets dont la taille ne correspond pas au nombre de canaux du bus sont ignorés.
+/// Like [`run`], also push decoded audio (L24 → float) into `sink` (device inputs).
+/// Ignore packets whose size does not match the bus channel count.
 pub fn run_into(
     iface: &Iface,
     group: Ipv4Addr,
@@ -132,9 +132,9 @@ pub fn run_into(
 ) -> io::Result<RxStats> {
     let mut floats: Vec<f32> = Vec::with_capacity(2048);
     let sock = rx_socket(iface, group, port, Duration::from_millis(50))?;
-    // Flux patché vers le périphérique : une réception retardée de quelques dizaines de ms (thread à
-    // priorité normale) vide le tampon de gigue puis le fait déborder (manque, puis glissement).
-    // Le thread bloque dans recv : la politique temps réel ne consomme que le temps de décodage.
+    // Stream patched to device: reception delayed by tens of ms (normal-priority
+    // thread) empties then overflows the jitter buffer (underrun, then slip).
+    // The thread blocks in recv: real-time policy accounts only for decoding time.
     if sink.is_some() {
         if let Err(kr) = lw_sys::rt::promote_for_packet_interval(Duration::from_millis(1)) {
             crate::error!("réception {group} : temps réel refusé (code {kr})");
@@ -178,7 +178,7 @@ pub fn run_into(
             next += every;
         }
     }
-    // Récapitulatif : ne pas écraser la dernière crête mesurée s'il n'est rien arrivé depuis.
+    // Summary: retain the last measured peak if nothing has arrived since.
     if stats.peak > 0 || stats.peak_dbfs == f64::NEG_INFINITY {
         stats.take_peak();
     }

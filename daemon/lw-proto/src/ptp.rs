@@ -1,4 +1,4 @@
-//! PTPv2 (IEEE 1588-2008), messages utiles au profil média AES67 (`docs/protocol/04-clock.md`).
+//! PTPv2 (IEEE 1588-2008), messages relevant to the AES67 media profile (`docs/protocol/04-clock.md`).
 
 use std::net::Ipv4Addr;
 
@@ -10,7 +10,7 @@ pub const PRIMARY_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 1, 129);
 pub const EVENT_PORT: u16 = 319;
 pub const GENERAL_PORT: u16 = 320;
 pub const HEADER_LEN: usize = 34;
-/// Écart TAI − UTC en vigueur depuis 2017.
+/// TAI − UTC offset in effect since 2017.
 pub const TAI_UTC_OFFSET: i16 = 37;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +82,7 @@ impl MessageType {
     }
 }
 
-/// Identité de port : identité d'horloge (EUI-64) et numéro de port.
+/// Port identity: clock identity (EUI-64) and port number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PortIdentity {
     pub clock: [u8; 8],
@@ -90,7 +90,7 @@ pub struct PortIdentity {
 }
 
 impl PortIdentity {
-    /// EUI-64 dérivée d'une adresse MAC (insertion de FF FE).
+    /// EUI-64 derived from a MAC address (insert FF FE).
     pub fn from_mac(mac: [u8; 6], port: u16) -> Self {
         Self {
             clock: [mac[0], mac[1], mac[2], 0xFF, 0xFE, mac[3], mac[4], mac[5]],
@@ -99,7 +99,7 @@ impl PortIdentity {
     }
 }
 
-/// Horodatage PTP en nanosecondes depuis l'époque PTP (TAI).
+/// PTP timestamp in nanoseconds since the PTP epoch (TAI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(pub u128);
 
@@ -132,15 +132,15 @@ impl Timestamp {
         Ok(Self::from_parts(s, ns))
     }
 
-    /// Horloge média AES67 (`mediaclk:direct=offset`) : échantillons à 48 kHz, modulo 2^32.
-    /// Horloge média AES67 (RFC 7273, `mediaclk:direct=0`) : `s × 48000 + ns × 48000 / 10^9`.
+    /// AES67 media clock (`mediaclk:direct=offset`): 48 kHz samples, modulo 2^32.
+    /// AES67 media clock (RFC 7273, `mediaclk:direct=0`): `s × 48000 + ns × 48000 / 10^9`.
     pub fn media_clock(self, offset: u32) -> u32 {
         let samples = self.0 * u128::from(SAMPLE_RATE) / 1_000_000_000;
         (samples as u32).wrapping_add(offset)
     }
 }
 
-/// Qualité d'horloge annoncée.
+/// Advertised clock quality.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClockQuality {
     pub class: u8,
@@ -159,10 +159,10 @@ pub struct Announce {
     pub time_source: u8,
 }
 
-/// Corps d'un message.
+/// Message body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Body {
-    /// Sync, Delay_Req, Follow_Up : horodatage d'origine.
+    /// Sync, Delay_Req, Follow_Up: origin timestamp.
     Timestamp(Timestamp),
     DelayResp {
         receive: Timestamp,
@@ -172,7 +172,7 @@ pub enum Body {
         origin: Timestamp,
         announce: Announce,
     },
-    /// Type non décodé.
+    /// Undecoded type.
     Raw,
 }
 
@@ -342,7 +342,7 @@ impl Message {
     }
 }
 
-/// Domaine d'un message sans le décoder entièrement (octet 4).
+/// Message domain without full decoding (byte 4).
 pub fn peek_domain(buf: &[u8]) -> Option<u8> {
     at::<1>(buf, 4, "PTP").ok().map(|b| b[0])
 }
@@ -421,7 +421,7 @@ mod tests {
             Body::Timestamp(Timestamp(5)),
         )
         .encode();
-        raw[40] = 0xFF; // nanosecondes >= 10^9
+        raw[40] = 0xFF; // nanoseconds >= 10^9
         assert!(Message::parse(&raw).is_err());
     }
 }

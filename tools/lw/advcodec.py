@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Codec Envelope + TlvMsg et messages d'annonce Livewire (docs/protocol/03-advertisement.md).
+"""Envelope + TlvMsg codec and Livewire advertisement messages (docs/protocol/03-advertisement.md).
 
-Usage en ligne de commande : decoder un datagramme en hexadecimal.
+Command-line usage: decode a hexadecimal datagram.
     python3 advcodec.py 0300 0207 ...
 """
 import ipaddress
 import struct
 import sys
 
-# Types TlvMsg
+# TlvMsg types
 T_DWORD, T_BYTES, T_STRING, T_WORDS, T_DWORDS, T_MSG, T_BYTE, T_WORD, T_QWORD = 1, 2, 3, 4, 5, 6, 7, 8, 9
 
-# En-tete Envelope
+# Envelope header
 ENVELOPE_HEADER_LEN = 16
 ENVELOPE_VERSION = 7
 TLV_VERSION = 2
@@ -26,7 +26,7 @@ class DecodeError(ValueError):
 
 
 def fourcc(tag):
-    """'PSNM' -> 0x5053494E ; un entier est rendu tel quel."""
+    """'PSNM' -> 0x5053494E; integers are returned unchanged."""
     if isinstance(tag, int):
         return tag
     raw = tag.encode("ascii")
@@ -41,7 +41,7 @@ def fourcc_str(value):
 
 
 class TlvMsg:
-    """Message TLV : identifiant FourCC et liste ordonnee d'items (tag, type, valeur)."""
+    """TLV message: FourCC identifier and ordered list of (tag, type, value) items."""
 
     def __init__(self, msg_id, items=None):
         self.msg_id = fourcc(msg_id)
@@ -59,7 +59,7 @@ class TlvMsg:
         return default
 
     def to_dict(self):
-        """Representation lisible (pour JSON et affichage)."""
+        """Readable representation (for JSON and display)."""
         out = {"_id": fourcc_str(self.msg_id)}
         for tag, typ, value in self.items:
             key = fourcc_str(tag)
@@ -157,7 +157,7 @@ def encode_datagram(msg, seq, msg_type=MSG_DATAGRAM):
 
 
 def decode_datagram(data):
-    """Retourne (en-tete dict, TlvMsg). Leve DecodeError si le datagramme n'est pas du Envelope v7."""
+    """Return (header dict, TlvMsg). Raise DecodeError unless datagram uses Envelope v7."""
     if len(data) < ENVELOPE_HEADER_LEN:
         raise DecodeError("datagramme plus court que l'en-tete Envelope")
     layer, msg_type, cmsg_ver, envelope_ver, seq, result_port, lock_id, lock_tid = struct.unpack_from(">BBBBIHHI", data, 0)
@@ -173,7 +173,7 @@ def _ip(value):
 
 
 def _fixed(text, size):
-    """Chaîne ASCII de longueur fixe : accents translittérés (NFKD), autres caractères remplacés par '?'."""
+    """Fixed-length ASCII string: transliterate accents (NFKD), replace other characters with '?'."""
     import unicodedata
     plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
     plain = "".join(c if 32 <= ord(c) < 127 else "?" for c in plain)
@@ -194,7 +194,7 @@ def terminal_block(advv, ip, udpc=4000, nums=0, name=None, hwid=None):
 
 
 def source_block(channel, name, fast=2, shareable=0, label=None, group=None):
-    """Entree source annoncee (FAST : 2 L24, 3 L16, 4 surround)."""
+    """Advertised source entry (FAST: 2 L24, 3 L16, 4 surround)."""
     if group is None:
         prefix = 0xEFC40000 if fast == 4 else 0xEFC00000
         group = prefix | channel
@@ -216,7 +216,7 @@ def source_block(channel, name, fast=2, shareable=0, label=None, group=None):
 
 
 def advertisement(advv, ip, sources=(), name=None, full=True, udpc=4000):
-    """Construit une page d'annonce (NEST). sources : liste de (emplacement 1..240, bloc source), 8 au plus."""
+    """Build an advertisement page (NEST). sources: list of (slot 1..240, source block), at most eight."""
     if len(sources) > 8:
         raise ValueError("au plus 8 sources par datagramme")
     msg = TlvMsg("NEST")
@@ -230,7 +230,7 @@ def advertisement(advv, ip, sources=(), name=None, full=True, udpc=4000):
 
 
 def summarize(msg):
-    """Resume d'une annonce : dict avec terminal et sources."""
+    """Advertisement summary: dictionary with terminal and sources."""
     term = msg.get("TERM")
     out = {"id": fourcc_str(msg.msg_id), "advt": msg.get("ADVT"), "pver": msg.get("PVER")}
     if isinstance(term, TlvMsg):

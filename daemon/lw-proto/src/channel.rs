@@ -1,12 +1,12 @@
-//! Canal Livewire ↔ groupe multicast (`docs/protocol/01-channels.md`).
+//! Livewire channel ↔ multicast group (`docs/protocol/01-channels.md`).
 
 use std::net::Ipv4Addr;
 
-/// Plus petit et plus grand canal utilisables (0x7FFF est réservé).
+/// Smallest and largest usable channels (0x7FFF reserved).
 pub const CHANNEL_MIN: u16 = 1;
 pub const CHANNEL_MAX: u16 = 0x7FFE;
 
-/// Groupe de l'horloge Livewire et de l'annonce.
+/// Livewire clock and advertisement group.
 pub const CLOCK_GROUP: Ipv4Addr = Ipv4Addr::new(239, 192, 255, 2);
 pub const ADV_GROUP: Ipv4Addr = Ipv4Addr::new(239, 192, 255, 3);
 pub const GPIO_GROUP: Ipv4Addr = Ipv4Addr::new(239, 192, 255, 4);
@@ -15,14 +15,14 @@ pub const CLOCK_PORT: u16 = 7000;
 pub const ADV_PORT: u16 = 4001;
 pub const ADV_REQUEST_PORT: u16 = 4000;
 
-/// Famille de groupe d'un flux.
+/// Stream group family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GroupKind {
-    /// Stéréo Standard, AES67, Livestream : 239.192.x.x
+    /// Standard, AES67, Livestream stereo: 239.192.x.x
     Stereo,
-    /// Retour vers la source (« To Source ») : 239.193.x.x
+    /// Return to source (“To Source”): 239.193.x.x
     Backfeed,
-    /// Surround 8 canaux : 239.196.x.x
+    /// 8-channel surround: 239.196.x.x
     Surround,
 }
 
@@ -45,7 +45,7 @@ impl GroupKind {
     }
 }
 
-/// Numéro de canal Livewire validé.
+/// Validated Livewire channel number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Channel(u16);
 
@@ -62,12 +62,12 @@ impl Channel {
         self.0
     }
 
-    /// Groupe multicast du canal pour une famille donnée.
+    /// Channel multicast group for a given family.
     pub fn group(self, kind: GroupKind) -> Ipv4Addr {
         Ipv4Addr::from(kind.prefix() | u32::from(self.0))
     }
 
-    /// Canal et famille d'un groupe, ou `None` si le groupe n'est pas un groupe audio Livewire.
+    /// Group's channel and family, or `None` if not a Livewire audio group.
     pub fn from_group(group: Ipv4Addr) -> Option<(Self, GroupKind)> {
         let v = u32::from(group);
         let kind = GroupKind::from_prefix(v & 0xFFFF_8000)?;
@@ -76,7 +76,7 @@ impl Channel {
     }
 }
 
-/// Groupe de l'horloge à partir de son identifiant de flux (0x00FF02 → 239.192.255.2).
+/// Clock group from its stream identifier (0x00FF02 → 239.192.255.2).
 pub fn clock_group(stream_id: u32) -> Ipv4Addr {
     let [_, b1, b2, b3] = stream_id.to_be_bytes();
     Ipv4Addr::new(239, 0xC0 | (b1 & 0x3F), b2, b3)

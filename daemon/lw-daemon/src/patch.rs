@@ -1,11 +1,11 @@
-//! Patch : construit, à partir de la configuration, les bus entre flux réseau et périphérique.
+//! Patching: build buses between network streams and device from configuration.
 //!
-//! - Source avec `device_channels` : sorties du périphérique → bus → flux émis.
-//! - Destination avec `device_channels` : flux reçu → bus → entrées du périphérique.
+//! - Source with `device_channels`: device outputs → bus → transmitted stream.
+//! - Destination with `device_channels`: received stream → bus → device inputs.
 //!
-//! Réglages des tampons de gigue (en trames à 48 kHz), selon le préréglage de latence :
-//! - émission : cible = 2 paquets + réserve (256, 512 ou 1024), seuil haut = cible + 2048 ;
-//! - réception : cible = 288, 576 ou 1152 (6, 12 ou 24 ms), seuil haut = 4 × cible.
+//! Jitter-buffer settings (48 kHz frames), according to latency preset:
+//! - transmit: target = two packets + reserve (256, 512, or 1024), high threshold = target + 2048;
+//! - receive: target = 288, 576, or 1152 (6, 12, or 24 ms), high threshold = 4 × target.
 
 use std::net::Ipv4Addr;
 
@@ -14,18 +14,18 @@ use crate::config::Config;
 use crate::device::{InRoute, OutRoute, Routes};
 use crate::tx::TxStream;
 
-/// Capacité de chaque bus (trames) : 170 ms.
+/// Bus capacity (frames): 170 ms.
 pub const BUS_FRAMES: usize = 8192;
-/// Cible du tampon de gigue en réception avec le préréglage par défaut (trames).
+/// Receive jitter-buffer target with the default preset (frames).
 pub const RX_TARGET: usize = 576;
 
-/// Flux émis et, le cas échéant, sa source audio.
+/// Transmitted stream and its audio source, if any.
 pub struct TxPlan {
     pub stream: TxStream,
     pub source: Option<JitterReader>,
 }
 
-/// Flux reçu et, le cas échéant, son bus vers le périphérique.
+/// Received stream and its device bus, if any.
 pub struct RxPlan {
     pub group: Ipv4Addr,
     pub port: u16,
@@ -33,7 +33,7 @@ pub struct RxPlan {
     pub sink: Option<BusWriter>,
 }
 
-/// Plan complet : threads réseau à lancer et table de routes du périphérique.
+/// Complete plan: network threads to start and device routing table.
 pub struct Plan {
     pub tx: Vec<TxPlan>,
     pub rx: Vec<RxPlan>,
@@ -41,13 +41,13 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Nombre de routes vers ou depuis le périphérique.
+    /// Number of routes to or from the device.
     pub fn patched(&self) -> usize {
         self.routes.inputs.len() + self.routes.outputs.len()
     }
 }
 
-/// Construit le plan d'une configuration validée.
+/// Build the plan from a validated configuration.
 pub fn build(cfg: &Config) -> Plan {
     let mut routes = Routes::default();
     let mut tx = Vec::new();

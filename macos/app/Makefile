@@ -1,11 +1,11 @@
-# OpenLW : app AppKit universelle (x86_64 10.13, arm64 11.0).
-#   make            construit build/OpenLW.app (signature ad hoc)
-#   make check-min  affiche le plancher OS de chaque tranche
-#   make snapshot   lance l'app et rend sa fenêtre dans build/snapshot.png
-#   make install    copie l'app dans /Applications
+# OpenLW: universal AppKit app (x86_64 10.13, arm64 11.0).
+#   make            build build/OpenLW.app (ad hoc signing)
+#   make check-min  show minimum OS for each slice
+#   make snapshot   launch app and render window to build/snapshot.png
+#   make install    copy app to /Applications
 #
-# Le SDK de Xcode est requis (NSGlassEffectView, macOS 26). Sous 10.14.4, le runtime Swift
-# n'est pas fourni par le système : swift-stdlib-tool l'embarque dans Contents/Frameworks.
+# Xcode SDK required (NSGlassEffectView, macOS 26). Before 10.14.4, Swift runtime
+# is not provided by system: swift-stdlib-tool embeds it in Contents/Frameworks.
 
 DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 export DEVELOPER_DIR
@@ -16,11 +16,11 @@ EXE     := $(APP)/Contents/MacOS/$(NAME)
 SRC     := $(wildcard Sources/*.swift)
 SDK     := $(shell DEVELOPER_DIR=$(DEVELOPER_DIR) xcrun --sdk macosx --show-sdk-path)
 SWIFTC  := xcrun --sdk macosx swiftc
-# /usr/lib/swift est déjà en rpath par défaut ; Frameworks sert au runtime embarqué (10.13 à 10.14.3).
+# /usr/lib/swift is already in default rpath; Frameworks holds embedded runtime (10.13–10.14.3).
 FLAGS   := -swift-version 5 -O -g -sdk "$(SDK)" -framework AppKit -Xlinker -rpath -Xlinker @executable_path/../Frameworks
 SIGN_ID ?= -
 
-# Le nom de l'app contient une espace : les règles portent sur un témoin, pas sur le chemin du bundle.
+# App name contains a space: rules target a stamp, not the bundle path.
 STAMP   := build/app.stamp
 
 all: $(STAMP)

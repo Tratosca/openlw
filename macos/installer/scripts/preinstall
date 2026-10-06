@@ -1,7 +1,7 @@
 #!/bin/sh
-# Arrête le service en place avant son remplacement.
+# Stop existing service before replacement.
 launchctl bootout system/fr.francois-brille.openlw.daemon 2>/dev/null || true
-# Migration : versions de développement antérieures au nom OpenLW (périphérique, service, app, réglages).
+# Migration: development versions predating OpenLW name (device, service, app, settings).
 OLD=fr.francois-brille.livewire.daemon
 launchctl bootout "system/$OLD" 2>/dev/null || true
 rm -f "/Library/LaunchDaemons/$OLD.plist"

@@ -1,68 +1,68 @@
-# 02 — Flux audio RTP
+# 02 — RTP audio streams
 
 ## Formats
 
-Audio PCM linéaire entrelacé, 48 kHz. L24 big-endian (RFC 3190) par défaut ; L16 annoncé possible (`FAST = 3`, voir [03](03-advertisement.md)).
+Interleaved linear PCM audio, 48 kHz. Big-endian L24 (RFC 3190) by default; L16 can be advertised (`FAST = 3`, see [03](03-advertisement.md)).
 
-| Format | Échantillons par paquet | Intervalle | Paquets/s | Charge utile stéréo L24 | Mention |
+| Format | Samples per packet | Interval | Packets/s | Stereo L24 payload | Evidence |
 |---|---|---|---|---|---|
-| Standard | 240 | 5 ms | 200 | 1 440 octets | Observé |
-| Livestream | 12 | 0,25 ms | 4 000 | 72 octets | Observé (taille), Choix OpenLW (émission) |
-| AES67 | 48 | 1 ms | 1 000 | 288 octets | AES67 |
-| Surround 8 canaux | 60 | 1,25 ms | 800 | 1 440 octets | Hypothèse |
+| Standard | 240 | 5 ms | 200 | 1,440 bytes | Observed |
+| Livestream | 12 | 0.25 ms | 4,000 | 72 bytes | Observed (size), OpenLW choice (transmission) |
+| AES67 | 48 | 1 ms | 1,000 | 288 bytes | AES67 |
+| 8-channel surround | 60 | 1.25 ms | 800 | 1,440 bytes | Hypothesis |
 
-La charge utile reste à 1 440 octets au plus : le surround garde la taille d'un paquet Standard.
+Payloads remain at or below 1,440 bytes: surround keeps the Standard packet size.
 
-## En-tête RTP
+## RTP header
 
-En-tête de 12 octets, sans CSRC ni extension (RFC 3550).
+12-byte header, no CSRC or extension (RFC 3550).
 
-| Champ | Valeur | Mention |
+| Field | Value | Evidence |
 |---|---|---|
-| V, P, X, CC | 2, 0, 0, 0 (octet `0x80`) | Observé |
-| M | 0 | Observé |
-| PT | 96 par défaut (dynamique) | Observé |
-| Séquence | +1 par paquet | Observé |
-| Timestamp | +nombre d'échantillons par paquet (Δ = 240 en Standard) | Observé (Standard) |
-| SSRC | les 4 octets de l'adresse du groupe de destination | Choix OpenLW |
+| V, P, X, CC | 2, 0, 0, 0 (byte `0x80`) | Observed |
+| M | 0 | Observed |
+| PT | 96 by default (dynamic) | Observed |
+| Sequence | +1 per packet | Observed |
+| Timestamp | +samples per packet (Δ = 240 for Standard) | Observed (Standard) |
+| SSRC | The four bytes of the destination group address | OpenLW choice |
 
-Au démarrage d'un flux, OpenLW dérive la séquence et le timestamp de l'horloge du Mac (échantillons à 48 kHz depuis le démarrage du système). Un flux relancé reprend ainsi vers l'avant au lieu de repartir de zéro ; un récepteur y voit une perte, pas un retour en arrière. Choix OpenLW.
+At stream startup, OpenLW derives the sequence and timestamp from the Mac's clock (48 kHz samples since system startup). A restarted stream therefore moves forward rather than restarting at zero; a receiver sees loss, not a backward jump. OpenLW choice.
 
-Réception : OpenLW suppose un en-tête de 12 octets et dérive le nombre d'échantillons de la longueur UDP. Un écart de séquence dans [−399, 0] est traité comme doublon ou retard ; un écart plus grand vers l'avant compte comme perte ; tout autre écart est une resynchronisation.
+Reception: OpenLW assumes a 12-byte header and derives the sample count from the UDP length. A sequence difference in [−399, 0] is treated as a duplicate or late packet; a larger forward difference counts as loss; any other difference triggers resynchronization.
 
 ## IP, UDP, QoS
 
-| Champ | Valeur | Mention |
+| Field | Value | Evidence |
 |---|---|---|
-| TTL multicast | 128 | Observé |
-| DSCP | EF (46, octet TOS `0xB8`) par défaut ; AF41 (34) recommandé par AES67 ; réglable | Observé (EF) |
-| Port source | égal au port de destination (5004) | Observé |
-| Checksum UDP | calculé par la pile du Mac | Choix OpenLW |
+| Multicast TTL | 128 | Observed |
+| DSCP | EF (46, TOS byte `0xB8`) by default; AES67 recommends AF41 (34); configurable | Observed (EF) |
+| Source port | Same as destination port (5004) | Observed |
+| UDP checksum | Calculated by the Mac's network stack | OpenLW choice |
 
-Les sockets sont liées à l'interface Livewire (`IP_BOUND_IF`, `IP_MULTICAST_IF`). L'abonnement aux groupes passe par IGMP (pile macOS).
+Sockets are bound to the Livewire interface (`IP_BOUND_IF`, `IP_MULTICAST_IF`). Group membership uses IGMP (macOS stack).
 
 ## SDP (AES67)
 
-OpenLW produit et lit des descriptions SDP conformes à RFC 4566 et RFC 7273. Lignes produites, fins de ligne CRLF :
+OpenLW generates and reads SDP descriptions conforming to RFC 4566 and RFC 7273. Generated lines use CRLF endings:
 
 ```
 v=0
-o=- <sess-id> <sess-version> IN IP4 <ip de l'hôte>
-s=<nom de la source>
-c=IN IP4 <groupe>
+o=- <sess-id> <sess-version> IN IP4 <host-ip>
+s=<source-name>
+c=IN IP4 <group>
 t=0 0
 m=audio <port> RTP/AVP <pt>
-a=rtpmap:<pt> L<bits>/<fréquence>/<canaux>
+a=rtpmap:<pt> L<bits>/<rate>/<channels>
 a=sendonly
-a=ptime:<durée>
-[a=ts-refclk:ptp=IEEE1588-2008:<identité du grandmaster>:<domaine>
+a=ptime:<duration>
+[a=ts-refclk:ptp=IEEE1588-2008:<grandmaster-identity>:<domain>
  a=mediaclk:direct=0]
 ```
 
-- `a=ptime` : millisecondes entières si le paquet en contient un nombre entier (`1`, `5`), sinon deux décimales (`1.25`, `0.25`).
-- `ts-refclk` et `mediaclk` ne figurent que si un grandmaster PTP est connu.
-- En lecture, `a=sync-time:<n>` (variante Ravenna) est accepté comme `a=mediaclk:direct=<n>`.
+- `a=ptime`: integer milliseconds if the packet duration is integral (`1`, `5`), otherwise two decimal places (`1.25`, `0.25`).
+- `ts-refclk` and `mediaclk` appear only when a PTP grandmaster is known.
+- When parsing, `a=sync-time:<n>` (Ravenna variant) is accepted as `a=mediaclk:direct=<n>`.
 
-Vecteur : [vectors/sdp/aes67-ch101.sdp](vectors/sdp/aes67-ch101.sdp). Horloge média : [04-clock.md](04-clock.md).
+Vector: [vectors/sdp/aes67-ch101.sdp](vectors/sdp/aes67-ch101.sdp). Media clock: [04-clock.md](04-clock.md).
 
-Vecteurs d'en-têtes : [vectors/rtp_headers.json](vectors/rtp_headers.json).
+Header vectors: [vectors/rtp_headers.json](vectors/rtp_headers.json).

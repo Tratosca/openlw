@@ -1,5 +1,5 @@
-// Client XPC du daemon lw-daemon (service Mach fr.francois-brille.openlw.daemon, domaine système).
-// Protocole : dictionnaire XPC avec une clé "json" (requête et réponse JSON). Voir daemon/lw-daemon/src/control.rs.
+// lw-daemon XPC client (Mach service fr.francois-brille.openlw.daemon, system domain).
+// Protocol: XPC dictionary with "json" key (JSON request/response). See daemon/lw-daemon/src/control.rs.
 
 import Foundation
 import XPC
@@ -7,7 +7,7 @@ import XPC
 final class DaemonClient {
     static let serviceName = "fr.francois-brille.openlw.daemon"
 
-    /// Service Mach visé ; `privileged` : LaunchDaemon (domaine système), sinon LaunchAgent (tests).
+    /// Target Mach service; `privileged`: LaunchDaemon (system domain), otherwise LaunchAgent (tests).
     let service: String
     let privileged: Bool
 
@@ -19,7 +19,7 @@ final class DaemonClient {
     private let queue = DispatchQueue(label: "fr.francois-brille.openlw.control.xpc")
     private var connection: xpc_connection_t?
 
-    /// Requête JSON asynchrone ; `completion` est appelé sur le fil principal.
+    /// Asynchronous JSON request; `completion` runs on main thread.
     func call(_ request: [String: Any], completion: @escaping (Result<[String: Any], DaemonError>) -> Void) {
         queue.async {
             let result = self.callSync(request)
@@ -35,7 +35,7 @@ final class DaemonClient {
         let c = xpc_connection_create_mach_service(service, nil, flags)
         xpc_connection_set_event_handler(c) { [weak self] event in
             if xpc_get_type(event) == XPC_TYPE_ERROR {
-                // Connexion perdue (daemon redémarré ou absent) : nouvelle connexion à la prochaine requête.
+                // Connection lost (daemon restarted/absent): reconnect on next request.
                 self?.queue.async { self?.connection = nil }
             }
         }
@@ -73,7 +73,7 @@ enum DaemonError: Error {
     case decoding
     case refused(String)
 
-    /// Message affiché : ce qui s'est passé, puis ce que l'utilisateur peut faire.
+    /// Displayed message: what happened, then what the user can do.
     var message: String {
         switch self {
         case .unreachable:

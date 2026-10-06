@@ -1,7 +1,7 @@
 /*
- * Couche C du daemon OpenLW, macOS. Compilée sans ARC : gestion explicite xpc_retain/xpc_release.
- * Disponibilité : thread_policy_set (10.0), os_log (10.12), XPC C API (10.7) — compatible plancher 10.13.
- * Également compilée dans le plugin HAL (client XPC, mappage de la région).
+ * OpenLW daemon C layer, macOS. Compiled without ARC: explicit xpc_retain/xpc_release management.
+ * Availability: thread_policy_set (10.0), os_log (10.12), XPC C API (10.7) — compatible with 10.13 minimum.
+ * Also compiled into HAL plugin (XPC client, region mapping).
  */
 #include "../lw_sys.h"
 
@@ -15,7 +15,7 @@
 #include <sys/mman.h>
 #include <xpc/xpc.h>
 
-/* ---------- Threads temps réel ---------- */
+/* ---------- Real-time threads ---------- */
 
 static uint32_t ns_to_abs(uint64_t ns) {
     static mach_timebase_info_data_t tb;
@@ -47,10 +47,10 @@ void lw_sleep_ns(uint64_t ns) {
     mach_wait_until(mach_absolute_time() + ns * tb.denom / tb.numer);
 }
 
-/* ---------- Journal unifié ---------- */
+/* ---------- Unified logging ---------- */
 
 void lw_log(int level, const char *category, const char *message) {
-    /* os_log_create mémorise les objets par (sous-système, catégorie) : appel répété peu coûteux. */
+    /* os_log_create caches objects by (subsystem, category): repeated calls are inexpensive. */
     os_log_t log = os_log_create("fr.francois-brille.openlw", category ? category : "daemon");
     os_log_type_t type = level <= 0   ? OS_LOG_TYPE_DEBUG
                          : level == 1 ? OS_LOG_TYPE_INFO
@@ -60,7 +60,7 @@ void lw_log(int level, const char *category, const char *message) {
     os_log_with_type(log, type, "%{public}s", message ? message : "");
 }
 
-/* ---------- Contrôle XPC ---------- */
+/* ---------- XPC control ---------- */
 
 struct lw_server {
     xpc_connection_t listener;
@@ -68,7 +68,7 @@ struct lw_server {
     lw_handler_fn handler;
     lw_free_fn free_response;
     void *ctx;
-    xpc_object_t shmem; /* région partagée remise aux clients qui la demandent (want_shmem) */
+    xpc_object_t shmem; /* Shared region returned to requesting clients (want_shmem) */
 };
 
 struct lw_client {
@@ -154,7 +154,7 @@ void lw_xpc_server_stop(lw_server *s) {
         return;
     }
     xpc_connection_cancel(s->listener);
-    /* Barrière : aucun gestionnaire ne s'exécute plus après ce point. */
+    /* Barrier: no handler runs beyond this point. */
     dispatch_sync(s->queue, ^{
                   });
     s->handler = NULL;
@@ -171,7 +171,7 @@ static lw_client *client_from(xpc_connection_t conn) {
         return NULL;
     }
     xpc_connection_set_event_handler(conn, ^(xpc_object_t ev) {
-      (void)ev; /* erreurs remontées par l'appel synchrone */
+      (void)ev; /* Errors returned by synchronous call */
     });
     xpc_connection_resume(conn);
     lw_client *c = calloc(1, sizeof *c);
@@ -251,7 +251,7 @@ void lw_free(char *p) {
     free(p);
 }
 
-/* ---------- Région partagée : création, transfert, mappage ---------- */
+/* ---------- Shared region: creation, transfer, mapping ---------- */
 
 void *lw_shm_alloc(size_t size, void **shmem) {
     *shmem = NULL;

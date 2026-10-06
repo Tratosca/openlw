@@ -1,4 +1,4 @@
-//! Boucle de supervision : géométrie du périphérique, recréation à chaud, mode d'interface.
+//! Supervision loop: device geometry, live recreation, interface mode.
 
 #![allow(clippy::indexing_slicing)]
 
@@ -14,7 +14,7 @@ fn call(client: &Client, req: Value) -> Value {
     serde_json::from_str(&client.call(&req.to_string()).unwrap()).unwrap()
 }
 
-/// Canal de contrôle propre au test : socket Unix temporaire ou tube nommé unique.
+/// Test-specific control channel: temporary Unix socket or unique named pipe.
 fn test_endpoint() -> Endpoint {
     #[cfg(unix)]
     return Endpoint::Socket(
@@ -27,7 +27,7 @@ fn test_endpoint() -> Endpoint {
     ));
 }
 
-/// Attend que `f` soit vrai (2 s au plus).
+/// Wait for `f` to become true (at most 2 s).
 fn wait(mut f: impl FnMut() -> bool) -> bool {
     let t = Instant::now();
     while t.elapsed() < Duration::from_secs(3) {
@@ -77,7 +77,7 @@ fn device_geometry_follows_configuration() {
             ["iface"]
             == lo.name.as_str()));
 
-        // Les commandes de modification exigent les droits d'édition (voir ctl::edit_policy).
+        // Modification commands require edit privileges (see ctl::edit_policy).
         let probe = call(&client, json!({"cmd":"set_advertise","advertise":false}));
         if probe["ok"] != true {
             eprintln!("ignoré : modifications refusées à l'utilisateur du test ({probe})");
@@ -86,7 +86,7 @@ fn device_geometry_follows_configuration() {
             return;
         }
 
-        // Nombre de canaux modifié : nouveau périphérique, génération suivante.
+        // Channel count changed: new device, next generation.
         let r = call(
             &client,
             json!({"cmd":"set_device_channels","to_net":4,"from_net":6}),
@@ -109,7 +109,7 @@ fn device_geometry_follows_configuration() {
         );
         assert_eq!(r["ok"], false, "au-delà de 32 canaux : refusé");
 
-        // Mode automatique : l'interface de bouclage n'est jamais candidate.
+        // Automatic mode: loopback interface is never a candidate.
         assert_eq!(
             call(&client, json!({"cmd":"set_iface","iface":"auto"}))["ok"],
             true
@@ -118,7 +118,7 @@ fn device_geometry_follows_configuration() {
             let st = call(&client, json!({"cmd":"status"}));
             st["status"]["iface_auto"] == true && st["status"]["iface"] != lo.name.as_str()
         }));
-        // Un patch seul ne recrée pas le périphérique.
+        // A patch alone does not recreate the device.
         let r = call(
             &client,
             json!({"cmd":"patch_output","channel":4001,"device_channels":[1,2]}),

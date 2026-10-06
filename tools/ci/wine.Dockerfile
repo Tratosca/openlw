@@ -1,7 +1,7 @@
-# Tests Windows sans machine Windows : Rust (cible x86_64-pc-windows-gnu), mingw-w64 et Wine.
-# Wine 10 ou plus (bcryptprimitives.dll, exigée par la bibliothèque standard Rust).
-# Couvre la couche C et les tests du daemon ; ne remplace pas un essai sur Windows réel (MMCSS,
-# jetons et ACL ne sont qu'imités par Wine).
+# Windows tests without Windows hardware: Rust (x86_64-pc-windows-gnu target), mingw-w64, Wine.
+# Wine 10+ (bcryptprimitives.dll required by Rust standard library).
+# Covers C layer and daemon tests; does not replace real Windows testing (MMCSS,
+# tokens, ACLs only emulated by Wine).
 #
 #   docker build --platform linux/amd64 -t openlw-wine -f tools/ci/wine.Dockerfile tools/ci
 #   docker run --rm --platform linux/amd64 -v "$PWD":/src -w /src/daemon openlw-wine cargo test --target x86_64-pc-windows-gnu

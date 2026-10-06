@@ -1,6 +1,6 @@
-//! Annonce des sources Livewire (`docs/protocol/03-advertisement.md`).
+//! Livewire source advertisements (`docs/protocol/03-advertisement.md`).
 //!
-//! Format observé sur le réseau et vérifié avec des appareils Livewire (voir la spécification).
+//! Format observed on the network and verified with Livewire devices (see specification).
 
 use std::net::Ipv4Addr;
 
@@ -34,13 +34,13 @@ pub const STPL: FourCc = FourCc::new(b"STPL");
 pub const PSNM: FourCc = FourCc::new(b"PSNM");
 pub const LABL: FourCc = FourCc::new(b"LABL");
 
-/// Nombre maximal de sources par terminal et par datagramme.
+/// Maximum sources per terminal and per datagram.
 pub const MAX_SOURCES: usize = 240;
 pub const SOURCES_PER_PAGE: usize = 8;
 pub const PROTOCOL_VERSION: u16 = 2;
 pub const DEFAULT_CONTROL_PORT: u16 = 4000;
 
-/// Type du flux aller annoncé (`FAST`).
+/// Advertised forward-stream type (`FAST`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdvStreamType {
     StereoL24,
@@ -69,7 +69,7 @@ impl AdvStreamType {
     }
 }
 
-/// Description du terminal (bloc `TERM`).
+/// Terminal description (`TERM` block).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Terminal {
     pub advv: u32,
@@ -77,12 +77,12 @@ pub struct Terminal {
     pub ip: Ipv4Addr,
     pub control_port: u16,
     pub nums: u16,
-    /// Nom d'hôte, présent uniquement dans l'annonce complète (32 octets au plus).
+    /// Hostname, present only in full advertisements (up to 32 bytes).
     pub name: Option<String>,
 }
 
 impl Terminal {
-    /// Terminal avec `HWID` = 16 bits bas de l'IP.
+    /// Terminal with `HWID` = low 16 bits of IP.
     pub fn new(advv: u32, ip: Ipv4Addr, name: &str) -> Self {
         let hwid = (u32::from(ip) & 0xFFFF) as u16;
         Self {
@@ -96,10 +96,10 @@ impl Terminal {
     }
 }
 
-/// Source annoncée (entrée `S###`).
+/// Advertised source (`S###` entry).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source {
-    /// Emplacement 1..=240.
+    /// Slot 1..=240.
     pub slot: u16,
     pub channel: u32,
     pub shareable: u8,
@@ -116,7 +116,7 @@ pub struct Source {
 }
 
 impl Source {
-    /// Source stéréo ou surround annoncée sur son canal (groupe aller et groupe de retour dérivés du canal).
+    /// Stereo/surround source advertised on its channel (forward/return groups derived from channel).
     pub fn new(slot: u16, channel: Channel, name: &str, stream_type: AdvStreamType) -> Self {
         let kind = if stream_type == AdvStreamType::Surround {
             GroupKind::Surround
@@ -183,10 +183,10 @@ impl Source {
     }
 }
 
-/// Une page d'annonce (un datagramme).
+/// One advertisement page (one datagram).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Advertisement {
-    /// `true` : annonce complète (`ADVT=1`) ; `false` : courte (`ADVT=2`).
+    /// `true`: full advertisement (`ADVT=1`); `false`: short (`ADVT=2`).
     pub full: bool,
     pub terminal: Terminal,
     pub sources: Vec<Source>,
@@ -257,7 +257,7 @@ impl Advertisement {
         })
     }
 
-    /// Pages d'une annonce complète : 8 sources par datagramme (au moins une page).
+    /// Full-advertisement pages: eight sources per datagram (at least one page).
     pub fn full_pages(terminal: &Terminal, sources: &[Source]) -> Vec<Self> {
         let mut terminal = terminal.clone();
         terminal.nums = sources.len().min(MAX_SOURCES) as u16;
@@ -277,19 +277,19 @@ impl Advertisement {
     }
 }
 
-/// Requête d'annonce complète :
-/// `TlvMsg 'READ'` avec `ADVD` u8 = 1, envoyée en unicast vers `INIP:UDPC` du terminal.
+/// Full-advertisement request:
+/// `TlvMsg 'READ'` with `ADVD` u8 = 1, sent unicast to the terminal's `INIP:UDPC`.
 pub fn full_info_request() -> TlvMsg {
     TlvMsg::new(READ).with(ADVD, Value::U8(1))
 }
 
-/// Tag `S###` d'un emplacement.
+/// Slot `S###` tag.
 pub fn slot_tag(slot: u16) -> FourCc {
     let d = |n: u16| b'0' + (n % 10) as u8;
     FourCc::new(&[b'S', d(slot / 100), d(slot / 10), d(slot)])
 }
 
-/// Emplacement d'un tag `S` + 3 chiffres ASCII.
+/// Slot from an `S` + three ASCII digits tag.
 pub fn parse_slot_tag(tag: FourCc) -> Option<u16> {
     let [s, a, b, c] = tag.bytes();
     if s != b'S' || ![a, b, c].iter().all(u8::is_ascii_digit) {
@@ -298,8 +298,8 @@ pub fn parse_slot_tag(tag: FourCc) -> Option<u16> {
     Some(u16::from(a - b'0') * 100 + u16::from(b - b'0') * 10 + u16::from(c - b'0'))
 }
 
-/// Chaîne de longueur fixe (complétée par des zéros), en ASCII : les appareils Livewire affichent
-/// des octets, pas de l'UTF-8. Lettres accentuées latines translittérées, autres caractères → `?`.
+/// Fixed-length zero-padded ASCII string: Livewire devices display
+/// bytes, not UTF-8. Accented Latin letters transliterated; other characters → `?`.
 fn fixed(text: &str, size: usize) -> Vec<u8> {
     let mut v: Vec<u8> = text.chars().flat_map(ascii).take(size).collect();
     v.resize(size, 0);

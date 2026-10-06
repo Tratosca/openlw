@@ -1,12 +1,12 @@
-// Hôte de test du pilote audio Windows d'OpenLW : charge la DLL comme un logiciel ASIO, joue une
-// sinusoïde sur deux sorties et vérifie qu'elle revient sur deux entrées par la boucle interne du
+// OpenLW Windows audio-driver test host: load DLL like an ASIO application, play a
+// sine wave on two outputs, check it returns on two inputs through service internal
 // service (configuration "device": {"loopback": true}).
 //
-//   openlw-driver-test [chemin\OpenLWDriver.dll]          essai complet
-//   openlw-driver-test --expect-busy [chemin]             init doit échouer : pilote déjà utilisé
-//   openlw-driver-test --hold SECONDES [chemin]           garde le pilote attaché (pour --expect-busy)
+//   openlw-driver-test [path\OpenLWDriver.dll]          full test
+//   openlw-driver-test --expect-busy [path]             init must fail: driver already in use
+//   openlw-driver-test --hold SECONDS [path]           keep driver attached (for --expect-busy)
 //
-// Copyright 2026 François Brille (Tratosca). Licence GPL version 3 (fichier LICENSE).
+// Copyright 2026 François Brille (Tratosca). GPL version 3 (LICENSE file).
 // ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 
 #include <windows.h>
@@ -46,7 +46,7 @@ ASIOBufferInfo g_infos[4];
 std::atomic<long> g_switches{0};
 std::atomic<long> g_time_info{0};
 uint64_t g_phase = 0;
-std::vector<float> g_received; // entrée 1 (après amorçage)
+std::vector<float> g_received; // Input 1 (after priming)
 float g_peak = 0.0f;
 long g_mismatch = 0;
 
@@ -114,7 +114,7 @@ IASIO *load(const wchar_t *dll, HMODULE *module) {
         return nullptr;
     }
     IASIO *driver = nullptr;
-    // Convention ASIO : l'interface est demandée par le CLSID du pilote.
+    // ASIO convention: interface requested through driver CLSID.
     HRESULT hr = factory->CreateInstance(nullptr, CLSID_OpenLW, reinterpret_cast<void **>(&driver));
     factory->Release();
     return SUCCEEDED(hr) ? driver : nullptr;
@@ -203,7 +203,7 @@ int wmain(int argc, wchar_t **argv) {
     CHECK(g_mismatch == 0, "canaux intacts (%ld écarts)", g_mismatch);
     long jumps = 0;
     for (size_t i = 2; i < g_received.size(); i++) {
-        // Continuité : la dérivée seconde d'une sinusoïde à 1 kHz reste faible.
+        // Continuity: second derivative of a 1 kHz sine remains small.
         float d2 = g_received[i] - 2 * g_received[i - 1] + g_received[i - 2];
         if (std::fabs(d2) > 0.05f) {
             jumps++;

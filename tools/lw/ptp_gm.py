@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Grandmaster PTPv2 minimal pour le banc (horodatage logiciel, two-step, multicast E2E).
+"""Minimal test PTPv2 grandmaster (software timestamps, two-step, E2E multicast).
 
     sudo python3 ptp_gm.py --iface en7 [--domain 0] [--sync-log -3] [--priority1 248]
 
-Couvre le minimum d'un esclave PTP logiciel : Sync + Follow_Up
-+ Announce sur 224.0.1.129, plus Delay_Resp pour des esclaves E2E (linuxptp).
-Pas de BMCA : ne pas lancer sur un reseau ou un vrai grandmaster existe dans le meme domaine.
-Horloge = horloge systeme (UTC) + offset TAI ; precision de l'ordre de la dizaine de microsecondes,
-suffisante pour la RE, pas pour l'exploitation.
+Covers minimum software PTP slave requirements: Sync + Follow_Up
++ Announce on 224.0.1.129, plus Delay_Resp for E2E slaves (linuxptp).
+No BMCA: do not run on a network with a real grandmaster in the same domain.
+Clock = system clock (UTC) + TAI offset; accuracy on the order of tens of microseconds,
+sufficient for interoperability tests, not production.
 """
 import argparse
 import select
@@ -21,11 +21,11 @@ EVENT_PORT, GENERAL_PORT = 319, 320
 SYNC, DELAY_REQ, FOLLOW_UP, DELAY_RESP, ANNOUNCE = 0x0, 0x1, 0x8, 0x9, 0xB
 CONTROL = {SYNC: 0, DELAY_REQ: 1, FOLLOW_UP: 2, DELAY_RESP: 3, ANNOUNCE: 5}
 LENGTH = {SYNC: 44, DELAY_REQ: 44, FOLLOW_UP: 44, DELAY_RESP: 54, ANNOUNCE: 64}
-TAI_UTC_OFFSET = 37  # secondes (depuis 2017)
+TAI_UTC_OFFSET = 37  # Seconds (since 2017)
 
 
 def timestamp(ns):
-    """Timestamp PTP sur 10 octets : secondes sur 48 bits, nanosecondes sur 32 bits."""
+    """10-byte PTP timestamp: 48-bit seconds, 32-bit nanoseconds."""
     sec, nsec = divmod(ns, 1_000_000_000)
     return struct.pack(">HII", (sec >> 32) & 0xFFFF, sec & 0xFFFFFFFF, nsec)
 
@@ -50,7 +50,7 @@ def follow_up(domain, clock_id, seq, log_interval, precise_ns):
 
 def announce(domain, clock_id, seq, log_interval, priority1=248, priority2=248, clock_class=248,
              accuracy=0xFE, variance=0xFFFF, time_source=0xA0):
-    # flags : ptpTimescale (0x08) | currentUtcOffsetValid (0x04) dans l'octet de poids faible
+    # flags: ptpTimescale (0x08) | currentUtcOffsetValid (0x04) in least-significant byte
     body = timestamp(0) + struct.pack(">hBBBBHB8sHB", TAI_UTC_OFFSET, 0, priority1, clock_class, accuracy,
                                       variance, priority2, clock_id, 0, time_source)
     return header(ANNOUNCE, domain, clock_id, seq, log_interval, flags=0x000C) + body
@@ -63,7 +63,7 @@ def delay_resp(domain, clock_id, req, receive_ns, log_interval):
 
 
 def clock_identity(mac):
-    """EUI-64 derivee d'une MAC (insertion FF FE)."""
+    """EUI-64 derived from a MAC (insert FF FE)."""
     return mac[:3] + b"\xff\xfe" + mac[3:]
 
 

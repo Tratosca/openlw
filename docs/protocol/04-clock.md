@@ -1,38 +1,38 @@
-# 04 — Horloge
+# 04 — Clock
 
-## Fonctionnement d'OpenLW
+## OpenLW behavior
 
-OpenLW ne se synchronise pas encore sur une horloge réseau : l'audio est cadencé par l'horloge du Mac (48 kHz nominal). Avec les appareils testés, l'échange fonctionne sans horloge commune. L'écart entre les horloges est compensé par glissement dans les tampons de réception : une coupure très brève, rare, quand l'écart cumulé dépasse le tampon. Un asservissement (PTP, puis horloge Livewire) est prévu ([ADR 0003](../adr/0003-horloge.md)).
+OpenLW does not yet synchronize to a network clock: the Mac's clock paces audio (nominal 48 kHz). Audio exchange works with the tested devices without a common clock. Reception buffers compensate for clock differences through slips: occasional very brief interruptions when accumulated drift exceeds the buffer. Synchronization is planned (PTP, then Livewire clock; [ADR 0003](../adr/0003-horloge.md)).
 
-## Horloge Livewire
+## Livewire clock
 
-| Élément | Valeur | Mention |
+| Item | Value | Evidence |
 |---|---|---|
-| Transport | multicast **239.192.255.2**, UDP **7000** | Observé |
-| Forme | paquet RTP avec extension d'en-tête, profil `0xFA1A`, longueur 20 mots (80 octets) | Hypothèse |
-| Timestamp RTP | compteur d'échantillons à 48 kHz | Hypothèse |
-| Cadence | un paquet toutes les 250 µs (timestamp +12) | Hypothèse |
+| Transport | Multicast **239.192.255.2**, UDP **7000** | Observed |
+| Structure | RTP packet with header extension, profile `0xFA1A`, length 20 words (80 bytes) | Hypothesis |
+| RTP timestamp | 48 kHz sample counter | Hypothesis |
+| Timing | One packet every 250 µs (timestamp +12) | Hypothesis |
 
-Contenu supposé de la charge UDP (à confirmer en capture, [Q4](open-questions.md)) :
+Assumed UDP payload content (to be confirmed by capture, [Q4](open-questions.md)):
 
-| Octets | Contenu |
+| Bytes | Contents |
 |---|---|
-| 0–11 | en-tête RTP |
-| 12–13 | profil d'extension `FA 1A` |
-| 14–15 | longueur d'extension `00 14` |
-| 16–19 | numéro de séquence d'horloge |
-| 20–23 | type de message : `0A 00 CA BA` (A) ou `0B 00 CA BA` (B) |
-| 26–29 | identifiant du maître |
-| autres | inconnus |
+| 0–11 | RTP header |
+| 12–13 | Extension profile `FA 1A` |
+| 14–15 | Extension length `00 14` |
+| 16–19 | Clock sequence number |
+| 20–23 | Message type: `0A 00 CA BA` (A) or `0B 00 CA BA` (B) |
+| 26–29 | Master identifier |
+| Other | Unknown |
 
-OpenLW décode ces paquets (`daemon/lw-proto/src/lwclock.rs`, `tools/lw/lwdump.py`) mais n'en émet pas. Vecteurs : [vectors/lwclock.json](vectors/lwclock.json).
+OpenLW decodes these packets (`daemon/lw-proto/src/lwclock.rs`, `tools/lw/lwdump.py`) but does not send them. Vectors: [vectors/lwclock.json](vectors/lwclock.json).
 
 ## PTP (AES67)
 
-PTPv2 (IEEE 1588-2008), profil média AES67 : groupe 224.0.1.129, ports 319 (événements) et 320 (général), domaine réglable (0 par défaut). Horloge média des flux AES67 (RFC 7273, `mediaclk:direct=0`) :
+PTPv2 (IEEE 1588-2008), AES67 media profile: group 224.0.1.129, ports 319 (event) and 320 (general), configurable domain (default 0). AES67 stream media clock (RFC 7273, `mediaclk:direct=0`):
 
 ```
-timestamp RTP = secondes × 48 000 + nanosecondes × 48 000 / 10⁹   (modulo 2³²)
+RTP timestamp = seconds × 48,000 + nanoseconds × 48,000 / 10⁹   (modulo 2³²)
 ```
 
-OpenLW contient un décodeur PTP (`daemon/lw-proto/src/ptp.rs`) et un grandmaster logiciel de test (`tools/lw/ptp_gm.py`), pas encore d'esclave.
+OpenLW contains a PTP decoder (`daemon/lw-proto/src/ptp.rs`) and a software test grandmaster (`tools/lw/ptp_gm.py`), but no slave yet.

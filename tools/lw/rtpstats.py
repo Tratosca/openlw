@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Statistiques des flux RTP Livewire / AES67 d'une capture (Q2, Q3, Q4, Q5).
+"""Statistics for captured Livewire / AES67 RTP streams (Q2, Q3, Q4, Q5).
 
     python3 rtpstats.py capture.pcapng [--port 5004] [--json]
 
-Par flux (src, dst, port) : PT, SSRC (et SSRC == IP destination ?), taille de charge,
-echantillons par paquet deduits, pas de sequence et de timestamp, debit, gigue d'arrivee
-(RFC 3550), TOS, TTL, ID IP, checksum UDP nul, VLAN.
+Per stream (src, dst, port): PT, SSRC (does SSRC equal destination IP?), payload size,
+inferred samples per packet, sequence/timestamp steps, bitrate, arrival jitter
+(RFC 3550), TOS, TTL, IP ID, zero UDP checksum, VLAN.
 """
 import argparse
 import collections

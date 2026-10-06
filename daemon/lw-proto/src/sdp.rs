@@ -1,6 +1,6 @@
 //! SDP AES67 (`docs/protocol/02-rtp-audio.md`).
 //!
-//! Génération (RFC 4566, RFC 7273, AES67) et analyse tolérante des champs dont un récepteur a besoin.
+//! Generation (RFC 4566, RFC 7273, AES67) and tolerant parsing of receiver-required fields.
 
 use std::fmt::Write as _;
 use std::net::Ipv4Addr;
@@ -8,7 +8,7 @@ use std::net::Ipv4Addr;
 use crate::format::{ptime_text, SAMPLE_RATE};
 use crate::Error;
 
-/// Sens du flux (`a=sendonly` / `recvonly` / `inactive`).
+/// Stream direction (`a=sendonly` / `recvonly` / `inactive`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     SendOnly,
@@ -16,7 +16,7 @@ pub enum Direction {
     Inactive,
 }
 
-/// Référence d'horloge PTP (`a=ts-refclk` + `a=mediaclk:direct=<offset>`).
+/// PTP clock reference (`a=ts-refclk` + `a=mediaclk:direct=<offset>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PtpRef {
     pub grandmaster: [u8; 8],
@@ -24,7 +24,7 @@ pub struct PtpRef {
     pub media_clock_offset: u32,
 }
 
-/// Description d'un flux audio RTP linéaire.
+/// Linear RTP audio-stream description.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     pub session_id: u64,
@@ -39,14 +39,14 @@ pub struct Session {
     pub rate: u32,
     pub channels: u16,
     pub direction: Direction,
-    /// Échantillons par paquet (pour `a=ptime`).
+    /// Samples per packet (for `a=ptime`).
     pub samples_per_packet: u32,
     pub max_samples_per_packet: Option<u32>,
     pub ptp: Option<PtpRef>,
 }
 
 impl Session {
-    /// Texte SDP, fins de ligne CRLF.
+    /// SDP text, CRLF line endings.
     pub fn to_text(&self) -> String {
         let mut s = String::new();
         let ttl = self.ttl.map(|t| format!("/{t}")).unwrap_or_default();
@@ -55,7 +55,7 @@ impl Session {
             Direction::RecvOnly => "recvonly",
             Direction::Inactive => "inactive",
         };
-        // write! sur une String ne peut pas échouer.
+        // write! on a String cannot fail.
         let _ = write!(
             s,
             "v=0\r\no=- {} {} IN IP4 {}\r\ns={}\r\nc=IN IP4 {}{}\r\nt=0 0\r\nm=audio {} RTP/AVP {}\r\n\
@@ -89,7 +89,7 @@ impl Session {
         s
     }
 
-    /// Analyse un SDP ; seuls `c=`, `m=` et `a=rtpmap` sont obligatoires.
+    /// Parse SDP; only `c=`, `m=`, and `a=rtpmap` are required.
     pub fn parse(text: &str) -> Result<Self, Error> {
         let mut sess = Session {
             session_id: 0,
@@ -174,7 +174,7 @@ impl Session {
             } else if let Some(v) = line.strip_prefix("a=mediaclk:direct=") {
                 mediaclk = v.split_whitespace().next().and_then(|x| x.parse().ok());
             } else if let Some(v) = line.strip_prefix("a=sync-time:") {
-                // Variante Ravenna.
+                // Ravenna variant.
                 mediaclk = mediaclk.or_else(|| v.trim().parse().ok());
             }
         }

@@ -1,7 +1,7 @@
-//! Boucle audio interne : un « faux client audio » joue le rôle du plugin HAL ou du pilote Windows.
-//! Il obtient la région par le canal de contrôle (`attach` : XPC sous macOS, tube nommé sous
-//! Windows ; sous Linux la région reste dans le processus), écrit l'audio des applications, relit le
-//! retour en boucle interne, lit l'horloge partagée ; le daemon expose crêtes et compteurs par `status`.
+//! Internal audio loopback: a mock audio client acts as the HAL plugin or Windows driver.
+//! It obtains the region through the control channel (`attach`: XPC on macOS, named pipe on
+//! Windows; region stays in-process on Linux), writes application audio, reads internal
+//! loopback and shared clock; the daemon exposes peaks and counters through `status`.
 
 #![allow(clippy::indexing_slicing)]
 
@@ -16,7 +16,7 @@ use lw_daemon::Stop;
 use lw_sys::shm::{Dir, Region};
 use serde_json::Value;
 
-/// Côté client : canal de contrôle (gardé ouvert) et région obtenue par `attach`.
+/// Client side: control channel (kept open) and region obtained through `attach`.
 struct FakeClient {
     _server: lw_sys::ctl::Server,
     call: Box<dyn Fn(&str) -> String>,
@@ -58,7 +58,7 @@ fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
     }
 }
 
-/// Linux : le daemon sert lui-même les nœuds PipeWire, la région ne quitte pas le processus.
+/// Linux: daemon serves PipeWire nodes itself; region remains in-process.
 #[cfg(target_os = "linux")]
 fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
     let ep = lw_sys::ctl::Endpoint::Socket(
@@ -96,7 +96,7 @@ fn fake_plugin_loopback_roundtrip() {
     let shared = Shared::new(Some(&lo), 0);
     shared.set_device(dev.status.clone());
 
-    // --- côté client audio ---
+    // --- audio client side ---
     let client = attach(&shared, &dev);
     let reply = &client.attach_reply;
     assert_eq!(reply["ok"], true);
@@ -105,7 +105,7 @@ fn fake_plugin_loopback_roundtrip() {
     let mut to_net = region.producer(Dir::ToNet).unwrap();
     let mut from_net = region.consumer(Dir::FromNet).unwrap();
 
-    // Horloge : la position avance à 48 kHz par rapport à l'horloge hôte.
+    // Clock: position advances at 48 kHz relative to the host clock.
     std::thread::sleep(Duration::from_millis(30));
     let (h1, s1, rate) = region.clock().expect("horloge publiée");
     std::thread::sleep(Duration::from_millis(200));
@@ -119,7 +119,7 @@ fn fake_plugin_loopback_roundtrip() {
         s2 - s1
     );
 
-    // Audio : 1 kHz, −6 dBFS, sur les deux canaux, au rythme réel (48 trames par ms) pendant 0,5 s.
+    // Audio: 1 kHz, −6 dBFS, both channels, real-time pacing (48 frames/ms) for 0.5 s.
     let amp = 10f32.powf(-6.0 / 20.0);
     let total = 24_000usize;
     let mut sent = Vec::with_capacity(total);
@@ -156,7 +156,7 @@ fn fake_plugin_loopback_roundtrip() {
     );
     assert_eq!(received, sent, "échantillons identiques, dans l'ordre");
 
-    // État vu par le canal de contrôle : aucun débordement.
+    // State through the control channel: no overrun.
     std::thread::sleep(Duration::from_millis(150));
     let status: Value = serde_json::from_str(&(client.call)(r#"{"cmd":"status"}"#)).unwrap();
     let d = &status["status"]["device"];
@@ -179,7 +179,7 @@ fn meters_follow_signal_level() {
     };
     let dev = device::start(&cfg, &stop).unwrap();
     let mut to_net = dev.region.producer(Dir::ToNet).unwrap();
-    // 200 ms : canal 0 à −12 dBFS, canal 2 à −3 dBFS, canaux 1 et 3 muets.
+    // 200 ms: channel 0 at −12 dBFS, channel 2 at −3 dBFS, channels 1 and 3 silent.
     let (a, b) = (10f32.powf(-12.0 / 20.0), 10f32.powf(-3.0 / 20.0));
     for _ in 0..200 {
         let block: Vec<f32> = (0..48).flat_map(|_| [a, 0.0, b, 0.0]).collect();
@@ -203,8 +203,8 @@ fn meters_follow_signal_level() {
     dev.thread.join().unwrap();
 }
 
-/// L'hôte écrit par blocs de 4096 trames (≈ 85 ms) : la sortie patchée doit arriver lissée à
-/// l'émetteur (240 trames toutes les 5 ms, tampon de gigue comme un flux Standard).
+/// Host writes 4096-frame blocks (≈ 85 ms): patched output must reach
+/// the transmitter smoothly (240 frames every 5 ms, jitter buffer like a Standard stream).
 #[test]
 fn large_host_blocks_reach_the_stream_smoothly() {
     use lw_daemon::bus::{bus, JitterReader};
@@ -236,12 +236,12 @@ fn large_host_blocks_reach_the_stream_smoothly() {
     let mut primed_at = None;
     let mut silent_after_prime = 0u32;
     while t0.elapsed() < Duration::from_millis(2500) {
-        // Bloc de l'hôte dû : écrit d'un coup.
+        // Host block due: write at once.
         if t0.elapsed() >= Duration::from_micros(85_333 * u64::from(blocks)) {
             to_net.write(&block).unwrap();
             blocks += 1;
         }
-        // Paquet dû (5 ms).
+        // Packet due (5 ms).
         if t0.elapsed() >= Duration::from_millis(5 * u64::from(packets)) {
             jitter.pull(&mut out);
             packets += 1;

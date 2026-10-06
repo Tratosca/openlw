@@ -1,75 +1,77 @@
 # OpenLW
 
-App de réglage du driver : interface réseau, nombre de canaux, patch des sources Livewire vers les entrées du Mac, diffusion des sorties du Mac sur des canaux Livewire, vumètres. AppKit en code, sans storyboard. Elle pilote le service réseau par XPC (`fr.francois-brille.openlw.daemon`) sans jamais le nommer à l'écran : l'utilisateur voit un réseau, des canaux et le périphérique « OpenLW ».
+Driver configuration app: network interface, channel count, patches from Livewire sources to Mac inputs, Mac output transmission on Livewire channels, and meters. Programmatic AppKit, no storyboard. It controls the network service through XPC (`fr.francois-brille.openlw.daemon`) without naming the service on screen: users see a network, channels, and the “OpenLW” device.
 
-## Construire
+## Build
 
 ```
-make -C macos/app            # build/OpenLW.app, universelle, signature ad hoc
-make -C macos/app check-min  # plancher par tranche : x86_64 10.13, arm64 11.0
-make -C macos/app snapshot   # lance l'app et rend sa fenêtre dans macos/app/build/snapshot.png
+make -C macos/app            # build/OpenLW.app, universal, ad hoc signing
+make -C macos/app check-min  # Minimum per slice: x86_64 10.13, arm64 11.0
+make -C macos/app snapshot   # Launch the app and render its window to macos/app/build/snapshot.png
 ```
 
-Prérequis : Xcode (SDK macOS 26 ou plus, pour `NSGlassEffectView`). Sous macOS 10.14.4, le système ne fournit pas le runtime Swift : `swift-stdlib-tool` le copie dans `Contents/Frameworks`. Sur un système plus récent, `/usr/lib/swift` est chargé en premier.
+Prerequisite: Xcode (macOS 26 SDK or later for `NSGlassEffectView`). Before macOS 10.14.4, the system does not provide the Swift runtime: `swift-stdlib-tool` copies it into `Contents/Frameworks`. On newer systems, `/usr/lib/swift` is loaded first.
 
-`macos/scripts/build-all.sh` construit l'app avec le reste ; `sudo macos/scripts/install-dev.sh` la copie dans `/Applications`.
+`macos/scripts/build-all.sh` builds the app with the other components; `sudo macos/scripts/install-dev.sh` copies it to `/Applications`.
 
-## Fenêtre
+## Window
 
-| Zone | Contenu | Commandes XPC |
+The current app uses French labels; the descriptions below explain their function in English.
+
+| Area | Contents | XPC commands |
 |---|---|---|
-| Réseau Livewire | interface utilisée ou recherche en cours ; menu « Automatique » (interface qui entend des annonces Livewire) ou interface Ethernet forcée ; annonce des sorties | `status` (5 Hz), `ifaces`, `set_iface`, `set_advertise` |
-| Entrées du Mac | nombre de canaux reçus (1 à 16 stéréo) ; entrée par défaut du Mac et bouton « Utiliser OpenLW » ; grille : sources découvertes (ADV), flux configurés non annoncés et canaux saisis, en lignes ; paires d'entrées du périphérique en colonnes. Un clic patche ou libère. Vumètre et état par paire (libre, en attente, audio reçu) | `sources`, `config` (2 s), `patch_input`, `unpatch_input` |
-| Sorties du Mac | nombre de canaux diffusés (1 à 16 stéréo) ; sortie par défaut du Mac et bouton « Utiliser OpenLW » ; une ligne par paire de sorties : vumètre, canal, nom annoncé, format (Standard 5 ms, AES67 1 ms, Livestream 0,25 ms), case Diffuser | `set_device_channels`, `patch_output`, `unpatch_output` |
+| Livewire network | Active interface or search status; automatic selection (interface receiving Livewire advertisements) or forced Ethernet interface; output advertisement | `status` (5 Hz), `ifaces`, `set_iface`, `set_advertise` |
+| Mac inputs | Received channel count (1–16 stereo); default Mac input and button to select OpenLW; matrix rows: discovered sources (ADV), configured unadvertised streams, and manually entered channels; columns: device input pairs. Click to patch or release. Meter and state per pair (free, waiting, receiving audio) | `sources`, `config` (2 s), `patch_input`, `unpatch_input` |
+| Mac outputs | Transmitted channel count (1–16 stereo); default Mac output and button to select OpenLW; one row per output pair: meter, channel, advertised name, format (Standard 5 ms, AES67 1 ms, Livestream 0.25 ms), transmission checkbox | `set_device_channels`, `patch_output`, `unpatch_output` |
 
-Réduire le nombre de canaux retire les patchs devenus hors plage, après confirmation. Le périphérique est recréé : le son des applications qui l'utilisent s'interrompt un instant.
+Reducing the channel count removes out-of-range patches after confirmation. The device is recreated, briefly interrupting audio in applications using it.
 
-**Réglages avancés** (section repliable, état mémorisé) :
+**Advanced settings** (collapsible section, state persisted):
 
-| Réglage | Valeurs | Effet |
+| Setting | Values | Effect |
 |---|---|---|
-| Nom annoncé du Mac | 32 caractères au plus ; vide = nom de l'ordinateur | `ATRN` des annonces, translittéré en ASCII |
-| Latence de réception | Faible, Normale (défaut), Sûre | tampon de gigue 6, 12 ou 24 ms et marge d'entrée du plugin 128, 256 ou 512 trames : ≈ 8, 17 ou 35 ms ajoutées ; réserve d'émission 256, 512 ou 1024 trames |
-| Priorité réseau (DSCP) | EF 46 (défaut), AF41 34, aucune 0 | marquage des flux audio émis |
+| Advertised Mac name | Up to 32 characters; empty = computer name | Advertisement `ATRN`, transliterated to ASCII |
+| Receive latency | Low, Normal (default), Safe | 6, 12, or 24 ms jitter buffer and 128, 256, or 512-frame plugin input margin: approximately 8, 17, or 35 ms added; 256, 512, or 1024-frame transmit reserve |
+| Network priority (DSCP) | EF 46 (default), AF41 34, none 0 | Marks outgoing audio streams |
 
-Commande XPC : `set_advanced` (`terminal_name`, `latency`, `dscp`) ; en ligne de commande, `lw-daemon ctl set-advanced`.
+XPC command: `set_advanced` (`terminal_name`, `latency`, `dscp`); CLI: `lw-daemon ctl set-advanced`.
 
-Menu OpenLW > Désinstaller OpenLW : lance `/Library/Application Support/OpenLW/uninstall.sh` avec les droits administrateur (posé par l'installeur).
+OpenLW menu > **Désinstaller OpenLW** (Uninstall OpenLW): runs `/Library/Application Support/OpenLW/uninstall.sh` with administrator privileges (provided by the installer).
 
-**Écouter** : le bouton casque en tête de ligne joue la source sur la sortie audio par défaut du Mac, sans la patcher ; un niveau remplace alors la provenance. Une seule source à la fois ; un second clic arrête l'écoute. L'app reçoit elle-même le flux multicast sur l'interface de la session (le daemon et l'app partagent le port 5004 grâce à `SO_REUSEPORT`). Jouée en stéréo à 48 kHz via AudioQueue, avec 30 ms de tampon ; d'une source surround, seuls les canaux 1 et 2 sont joués. L'écoute est refusée quand la sortie par défaut du Mac est « OpenLW » (elle repartirait vers le réseau).
+**Preview:** the headphone button at the start of a row plays the source on the Mac's default output without patching it; a level meter replaces the provenance indicator. One source at a time; click again to stop. The app receives multicast directly on the session interface (daemon and app share port 5004 through `SO_REUSEPORT`). Stereo playback at 48 kHz through AudioQueue, with a 30 ms buffer; only channels 1 and 2 of a surround source are played. Preview is rejected when the Mac's default output is “OpenLW”, which would send it back to the network.
 
-**Lignes de la grille** : sources découvertes, canaux saisis (mémorisés entre deux lancements) et flux configurés mais non annoncés. Le bouton ✕ retire une ligne saisie ou non annoncée ; si elle est patchée, ses entrées sont libérées.
+**Matrix rows:** discovered sources, manually entered channels (persisted between launches), and configured but unadvertised streams. The ✕ button removes a manual or unadvertised row and releases its inputs if patched.
 
-**Périphérique audio** : présentation en un périphérique « OpenLW » (entrée et sortie, nom fixe, défaut) ou en deux périphériques « OpenLW In » et « OpenLW Out ». Avec deux périphériques, la case « Nommer les périphériques d'après les canaux patchés » donne par exemple « OpenLW In (2 - Studio A) » et « OpenLW Out (31 - Mac 1-2) ». Les canaux portent toujours le nom de leur source (« 2 - Studio A G »), visible dans Configuration audio et MIDI et dans les applications qui l'affichent. Audacity mémorise le périphérique par son nom : après un changement de présentation ou de nom, il faut le sélectionner de nouveau.
+**Audio device:** one “OpenLW” duplex device (fixed name, default), or separate “OpenLW In” and “OpenLW Out” devices. With separate devices, the option to name devices after patched channels produces names such as “OpenLW In (2 - Studio A)” and “OpenLW Out (31 - Mac 1-2)”. Channels always carry their source name (currently, for example, “2 - Studio A G”), visible in Audio MIDI Setup and applications that display it. Audacity stores devices by name: reselect the device after changing its layout or name.
 
-Une source surround occupe 8 entrées à partir de la paire cliquée. Changer le canal d'une sortie émise arrête l'ancien canal, puis émet le nouveau. Les sources de test sans sorties associées (générateur de sinusoïde de la config) ne sont pas affichées.
+A surround source occupies eight inputs starting at the clicked pair. Changing a transmitted output's channel stops the old channel before transmitting on the new one. Test sources with no associated outputs (configuration sine generator) are hidden.
 
-Modifier le patch exige que l'utilisateur soit administrateur (groupe `admin`) : le daemon vérifie l'uid de l'appelant. Les erreurs du daemon s'affichent sous l'en-tête.
+Changing patches requires administrator membership (`admin` group): the daemon checks the caller's UID. Daemon errors appear below the header.
 
-## Apparence
+## Appearance
 
-Panneaux en Liquid Glass (`NSGlassEffectView`) sur macOS 26 et plus, `NSVisualEffectView` en dessous. Fond de fenêtre en vibrance (`.sidebar`). Couleurs système, mode sombre automatique.
+Liquid Glass panels (`NSGlassEffectView`) on macOS 26 and later, `NSVisualEffectView` on earlier versions. Vibrant window background (`.sidebar`). System colors and automatic dark mode.
 
-## Essai sans installation
+## Test without installation
 
-Le daemon peut tourner en LaunchAgent sous un autre nom de service. L'app s'y connecte avec :
+The daemon can run as a LaunchAgent under another service name. Connect the app with:
 
 ```
 "macos/app/build/OpenLW.app/Contents/MacOS/OpenLW" --user --service fr.francois-brille.openlw.daemon.dev
 ```
 
-Banc simulé sur lo0 (une seule machine) :
+Simulated test environment on lo0 (one machine):
 
 ```
 python3 tools/lw/emit_adv.py --iface lo0 --ip 127.0.0.2 --channel 4001 --name "STUDIO-A PGM" --terminal STUDIO-A
 build/lw-daemon send --iface lo0 --channel 4001 --level -12
 ```
 
-Validé ainsi : mode automatique en recherche ; puis lo0 forcée, passage à 2 canaux dans chaque sens (génération 2 du périphérique), sources découvertes, patch 4001 → entrées 3-4, vumètre à −12 dBFS, « audio reçu », sorties 1-2 diffusées sur 4005. Écoute de 4001 (option `--listen 4001`) : niveau reçu affiché pendant que le daemon alimente toujours les entrées 3-4.
+Validated in this environment: automatic mode searching; then forced lo0, two channels in each direction (device generation 2), discovered sources, patch 4001 → inputs 3–4, −12 dBFS meter, receiving-audio state, outputs 1–2 transmitted on 4005. Preview of 4001 (`--listen 4001`): received level displayed while the daemon still feeds inputs 3–4.
 
-## Reste à faire
+## Pending work
 
-- Valider sur 10.13 (VM ou Mac Intel) : non testé.
-- Restitution de l'écoute sur haut-parleurs : file AudioQueue démarrée sans erreur, son non contrôlé à l'oreille.
-- Clics réels dans la grille et la liste : le chemin XPC est celui de `lw-daemon ctl`, validé ; l'interaction souris reste à valider à l'écran.
-- Signature Developer ID et notarisation.
+- Validate on 10.13 (VM or Intel Mac): untested.
+- Preview playback through speakers: AudioQueue started without errors, but audible output not checked.
+- Actual matrix/list clicks: the XPC path matches the validated `lw-daemon ctl` path; mouse interaction remains to be checked on screen.
+- Developer ID signing and notarization.

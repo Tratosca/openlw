@@ -1,4 +1,4 @@
-"""Tests des outils de RE (fixtures synthetiques uniquement, aucune capture reelle)."""
+"""Protocol tool tests (synthetic fixtures only, no real captures)."""
 import json
 import pathlib
 import struct
@@ -34,7 +34,7 @@ def test_invalid_channels(channel):
 
 
 def test_not_livewire_group():
-    assert lwchan.group_to_channel("239.192.255.2") is None  # 0x7FFF + bit haut -> horloge, pas un canal
+    assert lwchan.group_to_channel("239.192.255.2") is None  # 0x7FFF + high bit -> clock, not a channel
     assert lwchan.group_to_channel("224.0.1.129") is None
 
 
@@ -155,9 +155,9 @@ def test_ptp_gm_messages_match_windows_driver_offsets():
     t = 1_760_000_000 * 1_000_000_000 + 123_456_789
     s, f, a = ptp_gm.sync(0, cid, 7, -3), ptp_gm.follow_up(0, cid, 7, -3, t), ptp_gm.announce(5, cid, 1, 0)
     assert (len(s), len(f), len(a)) == (44, 44, 64)
-    # PTP : octet 0 & 0xF = type, octet 4 = domaine, octet 6 bit 1 = two-step
+    # PTP: byte 0 & 0xF = type, byte 4 = domain, byte 6 bit 1 = two-step
     assert s[0] & 0xF == 0 and s[6] & 0x02 and f[0] & 0xF == 8 and a[0] & 0xF == 0xB and a[4] == 5
-    # association Sync/Follow_Up : clockIdentity (20-27), port (28-29), sequenceId (30-31)
+    # Sync/Follow_Up association: clockIdentity (20–27), port (28–29), sequenceId (30–31)
     assert s[20:32] == f[20:32]
     fu = lwdump.ptp_message(f)
     assert fu["timestamp"] == "1760000000.123456789" and fu["seq"] == 7

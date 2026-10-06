@@ -1,17 +1,17 @@
-// OpenLW — pilote audio Windows, interface ASIO (ADR 0008).
-// Copyright 2026 François Brille (Tratosca). Licence GPL version 3 (fichier LICENSE) : le pilote
-// est construit avec le SDK ASIO de Steinberg, utilisé sous GPLv3.
+// OpenLW — Windows audio driver, ASIO interface (ADR 0008).
+// Copyright 2026 François Brille (Tratosca). GPL version 3 (LICENSE file): driver
+// is built with Steinberg ASIO SDK, used under GPLv3.
 // ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 //
-// DLL COM in-process chargée par le logiciel hôte. Le pilote :
-// - se connecte au service OpenLW par le tube nommé (ADR 0007) et lit la géométrie du périphérique ;
-// - obtient la région partagée (`attach`), dupliquée dans ce processus par le service ;
-// - cadence les échanges de tampons sur l'horloge publiée dans la région (QueryPerformanceCounter),
-//   dans un thread MMCSS « Pro Audio » : anneau FROM_NET → entrées de l'hôte, sorties de l'hôte →
-//   anneau TO_NET ;
-// - surveille la géométrie et demande une réinitialisation à l'hôte quand le périphérique change.
+// In-process COM DLL loaded by host application. Driver:
+// - connects to OpenLW service through named pipe (ADR 0007), reads device geometry;
+// - obtains shared region (`attach`), duplicated into this process by service;
+// - paces buffer exchanges using published region clock (QueryPerformanceCounter),
+// in an MMCSS “Pro Audio” thread: FROM_NET ring → host inputs, host outputs →
+//   TO_NET ring;
+// - monitors geometry and requests host reset when device changes.
 //
-// Salle blanche : s'appuie uniquement sur le SDK ASIO, la documentation Microsoft et docs/protocol/.
+// Clean-room: relies only on ASIO SDK, Microsoft documentation, and docs/protocol/.
 
 #include <windows.h>
 #include <objbase.h>
@@ -44,7 +44,7 @@ static const CLSID CLSID_OpenLW = {0x4f9dd084, 0xe18a, 0x4e0e, {0x8d, 0x38, 0xc2
 namespace {
 
 constexpr const char *kServicePipe = "fr.francois-brille.openlw.daemon";
-constexpr const wchar_t *kDriverName = L"OpenLW"; // nom affiché par les hôtes (clé HKLM\SOFTWARE\ASIO)
+constexpr const wchar_t *kDriverName = L"OpenLW"; // Host-displayed name (HKLM\SOFTWARE\ASIO key)
 constexpr long kVersion = 5;                     // 0.5
 constexpr double kRate = 48000.0;
 constexpr long kMinBuffer = 64, kMaxBuffer = 2048, kPreferredBuffer = 256;
@@ -55,7 +55,7 @@ std::atomic<long> g_locks{0};
 
 void log_msg(int level, const std::string &msg) { lw_log(level, "pilote", msg.c_str()); }
 
-// UTF-8 → page de code ANSI (les hôtes ASIO affichent des chaînes ANSI), tronqué à cap - 1.
+// UTF-8 → ANSI code page (ASIO hosts display ANSI strings), truncated to cap - 1.
 void to_ansi(const std::string &utf8, char *out, size_t cap) {
     if (cap == 0) {
         return;
@@ -72,7 +72,7 @@ void to_ansi(const std::string &utf8, char *out, size_t cap) {
     }
 }
 
-// ---------- Lecture des réponses JSON du service (format connu, sans imbrication ambiguë) ----------
+// ---------- Service JSON response parsing (known format, no ambiguous nesting) ----------
 
 bool json_u64(const std::string &j, const char *key, uint64_t *out) {
     std::string pat = std::string("\"") + key + "\":";
@@ -93,7 +93,7 @@ bool json_u64(const std::string &j, const char *key, uint64_t *out) {
     return true;
 }
 
-// Chaîne JSON commençant après son guillemet ouvrant ; renvoie la position après le guillemet fermant.
+// JSON string starting after opening quote; return position after closing quote.
 size_t json_str(const std::string &j, size_t p, std::string *out) {
     out->clear();
     while (p < j.size() && j[p] != '"') {
@@ -112,7 +112,7 @@ size_t json_str(const std::string &j, size_t p, std::string *out) {
                 char h = j[p++];
                 v = v * 16 + static_cast<unsigned>(h >= 'a' ? h - 'a' + 10 : h >= 'A' ? h - 'A' + 10 : h - '0');
             }
-            // Caractères du plan multilingue de base, encodés en UTF-8 (paires de substitution ignorées).
+            // Basic multilingual plane characters encoded as UTF-8 (surrogate pairs ignored).
             if (v < 0x80) {
                 out->push_back(static_cast<char>(v));
             } else if (v < 0x800) {
@@ -161,7 +161,7 @@ std::vector<std::string> json_strings(const std::string &j, const char *key) {
     return v;
 }
 
-// ---------- Connexion au service ----------
+// ---------- Service connection ----------
 
 class Control {
 public:
@@ -236,7 +236,7 @@ void split64(uint64_t v, unsigned long *hi, unsigned long *lo) {
     *lo = static_cast<unsigned long>(v & 0xFFFFFFFFu);
 }
 
-// ---------- Pilote ----------
+// ---------- Driver ----------
 
 class Driver final : public IASIO {
 public:
@@ -254,7 +254,7 @@ public:
         g_objects--;
     }
 
-    // IUnknown. Les hôtes ASIO demandent l'interface par le CLSID du pilote.
+    // IUnknown. ASIO hosts request interface through driver CLSID.
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppv) override {
         if (ppv == nullptr) {
             return E_POINTER;
@@ -373,7 +373,7 @@ public:
         *minSize = kMinBuffer;
         *maxSize = kMaxBuffer;
         *preferredSize = kPreferredBuffer;
-        *granularity = -1; // puissances de 2
+        *granularity = -1; // Powers of two
         return ASE_OK;
     }
 
@@ -468,7 +468,7 @@ public:
             b.data.assign(static_cast<size_t>(bufferSize) * 2, 0.0f);
             buffers_.push_back(std::move(b));
         }
-        // Adresses fixées après remplissage du vecteur (aucune réallocation ensuite).
+        // Addresses fixed after filling vector (no subsequent reallocation).
         for (long i = 0; i < numChannels; i++) {
             bufferInfos[i].buffers[0] = buffers_[static_cast<size_t>(i)].data.data();
             bufferInfos[i].buffers[1] = buffers_[static_cast<size_t>(i)].data.data() + bufferSize;
@@ -492,7 +492,7 @@ public:
         return ASE_OK;
     }
 
-    // Panneau de réglage : l'app OpenLW, installée à côté du pilote.
+    // Control panel: OpenLW app installed beside driver.
     ASIOError controlPanel() override {
         wchar_t path[MAX_PATH];
         DWORD n = GetModuleFileNameW(g_module, path, MAX_PATH);
@@ -518,7 +518,7 @@ private:
     struct Buf {
         bool input = false;
         long channel = 0;
-        std::vector<float> data; // deux moitiés de buffer_size_ échantillons
+        std::vector<float> data; // Two halves of buffer_size_ samples
     };
 
     ASIOBool fail(const std::string &e) {
@@ -530,7 +530,7 @@ private:
         return ASIOFalse;
     }
 
-    // Instant (ticks QPC) où la position d'échantillon du service vaudra `pos`, extrapolé depuis l'horloge publiée.
+    // Instant (QPC ticks) at which service sample position equals `pos`, extrapolated from published clock.
     bool deadline_for(uint64_t pos, uint64_t *ticks, uint64_t *sample_now) {
         uint64_t ht = 0, st = 0;
         double rate = 1.0;
@@ -563,7 +563,7 @@ private:
         const uint64_t margin = geom_.margin;
         uint64_t ticks = 0, now_pos = 0;
         while (running_ && !deadline_for(0, &ticks, &now_pos)) {
-            Sleep(5); // horloge pas encore publiée
+            Sleep(5); // Clock not yet published
         }
         uint64_t next = now_pos + period;
         long index = 0;
@@ -577,11 +577,11 @@ private:
             if (ticks > now) {
                 lw_sleep_ns((ticks - now) * 1000000000ull / qpc_freq_);
             } else if (now_pos > next + 4 * period) {
-                next = now_pos + period; // retard important (thread suspendu) : on se recale
+                next = now_pos + period; // Large delay (suspended thread): realign
                 primed = false;
                 continue;
             }
-            // Entrées : audio du réseau, avec la marge de latence fixée par le service.
+            // Inputs: network audio with service-configured latency margin.
             uint32_t readable = lw_ring_readable(base_, LW_FROM_NET);
             if (!primed && readable >= period + margin) {
                 primed = true;
@@ -603,7 +603,7 @@ private:
                     dst[f] = in_frames_[f * ch_in + static_cast<size_t>(b.channel)];
                 }
             }
-            // Horodatage ASIO sous Windows : dérivé de timeGetTime(), en nanosecondes.
+            // Windows ASIO timestamp: derived from timeGetTime(), in nanoseconds.
             const uint64_t time_ns = static_cast<uint64_t>(timeGetTime()) * 1000000ull;
             {
                 std::lock_guard<std::mutex> l(position_mutex_);
@@ -622,7 +622,7 @@ private:
             } else {
                 callbacks_->bufferSwitch(index, ASIOTrue);
             }
-            // Sorties : remplies par l'hôte pendant l'appel, vers le réseau.
+            // Outputs: filled by host during callback, sent to network.
             std::fill(out_frames_.begin(), out_frames_.end(), 0.0f);
             for (const Buf &b : buffers_) {
                 if (b.input) {
@@ -640,7 +640,7 @@ private:
         }
     }
 
-    // Surveillance (connexion séparée) : périphérique recréé ou service arrêté → réinitialisation.
+    // Monitoring (separate connection): device recreated/service stopped → reset.
     void start_monitor() {
         monitor_stop_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         monitor_thread_ = CreateThread(nullptr, 0, &Driver::monitor_main, this, 0, nullptr);
@@ -707,7 +707,7 @@ private:
     std::string error_;
 };
 
-// ---------- Fabrique COM ----------
+// ---------- COM factory ----------
 
 class Factory final : public IClassFactory {
 public:
@@ -784,8 +784,8 @@ extern "C" HRESULT STDAPICALLTYPE DllCanUnloadNow() {
     return g_objects == 0 && g_locks == 0 ? S_OK : S_FALSE;
 }
 
-// Enregistrement (regsvr32, développement ; l'installeur écrit les mêmes clés) :
-// HKCR\CLSID\{…}\InprocServer32 et HKLM\SOFTWARE\ASIO\OpenLW.
+// Registration (regsvr32, development; installer writes same keys):
+// HKCR\CLSID\{…}\InprocServer32 and HKLM\SOFTWARE\ASIO\OpenLW.
 extern "C" HRESULT STDAPICALLTYPE DllRegisterServer() {
     wchar_t path[MAX_PATH];
     DWORD n = GetModuleFileNameW(g_module, path, MAX_PATH);

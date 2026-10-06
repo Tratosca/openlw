@@ -1,12 +1,12 @@
-// Pré-écoute d'une source Livewire : l'app reçoit elle-même le flux RTP multicast sur l'interface
-// Livewire et le joue sur la sortie audio par défaut du Mac. Le patch du daemon n'est pas modifié.
-// Le daemon ouvre le port 5004 avec SO_REUSEPORT : les deux reçoivent chacun une copie des paquets.
+// Livewire source preview: app receives multicast RTP directly on the Livewire
+// interface and plays it on the Mac's default output. Daemon patch remains unchanged.
+// Daemon opens port 5004 with SO_REUSEPORT: both receive a copy of each packet.
 
 import AudioToolbox
 import Darwin
 import Foundation
 
-/// Groupe multicast d'un canal Livewire (docs/protocol/01-channels.md).
+/// Livewire channel multicast group (docs/protocol/01-channels.md).
 func livewireGroup(channel: Int, kind: String) -> String {
     let base: Int
     switch kind {
@@ -18,10 +18,10 @@ func livewireGroup(channel: Int, kind: String) -> String {
 }
 
 final class Listener {
-    /// Échantillons par seconde du réseau Livewire.
+    /// Livewire network samples per second.
     static let rate = 48_000.0
-    private static let target = 1_440 // 30 ms de tampon avant de jouer
-    private static let high = 9_600 // au-delà de 200 ms, on jette l'excédent (dérive de l'émetteur)
+    private static let target = 1_440 // 30 ms buffer before playback
+    private static let high = 9_600 // Above 200 ms, discard excess (transmitter drift)
 
     private var lock = os_unfair_lock()
     private var ring = [Float](repeating: 0, count: 2 * 48_000)
@@ -30,14 +30,14 @@ final class Listener {
     private var primed = false
     private var peak: Float = 0
 
-    /// Génération d'écoute : un thread de réception s'arrête dès qu'elle change.
+    /// Preview generation: receive thread stops as soon as it changes.
     private var generation = 0
     private var thread: Thread?
     private var queue: AudioQueueRef?
 
     deinit { stop() }
 
-    /// Crête (dBFS) depuis le dernier appel, nil si silence.
+    /// Peak (dBFS) since last call, nil for silence.
     func takePeak() -> Double? {
         os_unfair_lock_lock(&lock)
         let p = peak
@@ -46,8 +46,8 @@ final class Listener {
         return p > 0 ? 20 * log10(Double(p)) : nil
     }
 
-    /// Démarre l'écoute de `group:port` reçu sur l'interface `iface` (nom BSD, adresse IPv4).
-    /// `channels` : canaux du flux (2, ou 8 en surround) ; seuls les deux premiers sont joués.
+    /// Start preview of `group:port` received on `iface` (BSD name, IPv4 address).
+    /// `channels`: stream channels (two, or eight for surround); play only first two.
     func start(group: String, port: UInt16 = 5004, iface: String, ifaceIP: String, channels: Int, bits: Int) throws {
         stop()
         let sock = try Self.openSocket(group: group, port: port, iface: iface, ifaceIP: ifaceIP)
@@ -78,7 +78,7 @@ final class Listener {
         }
     }
 
-    // MARK: - Réseau
+    // MARK: - Network
 
     private static func openSocket(group: String, port: UInt16, iface: String, ifaceIP: String) throws -> Int32 {
         let s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
@@ -92,7 +92,7 @@ final class Listener {
         }
         var timeout = timeval(tv_sec: 0, tv_usec: 200_000)
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-        // Liaison à l'adresse du groupe : seuls les paquets de ce groupe arrivent sur la socket.
+        // Bind group address: only packets for this group reach the socket.
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
@@ -124,7 +124,7 @@ final class Listener {
         while current(gen) {
             let n = recv(sock, &buf, buf.count, 0)
             guard n >= 12, buf[0] >> 6 == 2 else { continue }
-            // En-tête RTP : 12 octets, CSRC, extension éventuelle.
+            // RTP header: 12 bytes, CSRCs, optional extension.
             var off = 12 + 4 * Int(buf[0] & 0x0F)
             if buf[0] & 0x10 != 0, off + 4 <= n {
                 off += 4 + 4 * (Int(buf[off + 2]) << 8 | Int(buf[off + 3]))
@@ -166,7 +166,7 @@ final class Listener {
         os_unfair_lock_unlock(&lock)
     }
 
-    /// Remplit `out` (stéréo entrelacée) : silence avant amorçage, glissement si trop de retard.
+    /// Fill `out` (interleaved stereo): silence before priming, slip if excessive backlog.
     fileprivate func pull(_ out: UnsafeMutablePointer<Float>, frames: Int) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
@@ -196,7 +196,7 @@ final class Listener {
         }
     }
 
-    // MARK: - Sortie audio (AudioQueue : disponible sur 10.13)
+    // MARK: - Audio output (AudioQueue: available on 10.13)
 
     private func startQueue() throws {
         var format = AudioStreamBasicDescription(

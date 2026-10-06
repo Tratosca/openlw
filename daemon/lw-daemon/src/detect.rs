@@ -1,12 +1,12 @@
-//! Détection du réseau Livewire : écoute des annonces (239.192.255.3:4001) sur toutes les
-//! interfaces Ethernet candidates, pour le choix automatique de l'interface.
+//! Livewire network detection: listen for advertisements (239.192.255.3:4001) on all
+//! candidate Ethernet interfaces for automatic interface selection.
 //!
-//! - Candidates : IPv4, hors bouclage et hors interfaces virtuelles (VPN, conteneurs, machines
-//!   virtuelles, Wi-Fi Direct ; listes par système ci-dessous). La liste est relue toutes les 5 s
-//!   (câble branché, adaptateur USB ajouté).
-//! - Une interface est « entendue » quand elle reçoit une annonce décodable d'un autre terminal
-//!   (adresse annoncée différente de toutes nos adresses).
-//! - Choix : l'interface déjà utilisée tant qu'elle reste entendue, sinon la plus récemment entendue.
+//! - Candidates: IPv4, excluding loopback and virtual interfaces (VPN, containers, virtual
+//!   machines, Wi-Fi Direct; per-system lists below). Refresh the list every 5 s
+//!   (cable connected, USB adapter added).
+//! - An interface is “heard” when it receives a decodable advertisement from another terminal
+//!   (advertised address differs from all our addresses).
+//! - Selection: keep the active interface while still heard, otherwise use the most recently heard.
 
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, UdpSocket};
@@ -21,11 +21,11 @@ use crate::iface::{self, Iface};
 use crate::net::rx_socket;
 use crate::Stop;
 
-/// Une interface non entendue depuis cette durée n'est plus considérée comme Livewire
-/// (3 keepalives manqués, comme l'annuaire).
+/// An interface unheard for this duration is no longer considered Livewire
+/// (three missed keepalives, like the directory).
 pub const HEARD_VALIDITY: Duration = Duration::from_secs(75);
 
-/// Préfixes des noms d'interfaces virtuelles (nom système).
+/// Virtual interface name prefixes (system name).
 #[cfg(target_os = "macos")]
 const VIRTUAL_PREFIXES: &[&str] = &["utun", "awdl", "llw", "bridge", "ap", "anpi", "gif", "stf"];
 #[cfg(target_os = "linux")]
@@ -52,8 +52,8 @@ const VIRTUAL_PREFIXES: &[&str] = &[
 #[cfg(windows)]
 const VIRTUAL_PREFIXES: &[&str] = &[];
 
-/// Fragments (minuscules) des noms conviviaux d'interfaces virtuelles Windows : Hyper-V et WSL,
-/// hyperviseurs, VPN, Wi-Fi Direct, Bluetooth.
+/// Lowercase fragments of Windows virtual-interface friendly names: Hyper-V and WSL,
+/// hypervisors, VPN, Wi-Fi Direct, Bluetooth.
 #[cfg(windows)]
 const VIRTUAL_FRAGMENTS: &[&str] = &[
     "vethernet",
@@ -75,7 +75,7 @@ const VIRTUAL_FRAGMENTS: &[&str] = &[
 #[cfg(not(windows))]
 const VIRTUAL_FRAGMENTS: &[&str] = &[];
 
-/// Interface susceptible de porter Livewire.
+/// Interface potentially carrying Livewire.
 pub fn is_candidate(i: &Iface) -> bool {
     let lower = i.friendly.to_lowercase();
     !i.loopback
@@ -83,7 +83,7 @@ pub fn is_candidate(i: &Iface) -> bool {
         && !VIRTUAL_FRAGMENTS.iter().any(|f| lower.contains(f))
 }
 
-/// Dernière annonce entendue par interface (nom système).
+/// Last advertisement heard per interface (system name).
 #[derive(Clone, Default)]
 pub struct Heard {
     inner: Arc<Mutex<BTreeMap<String, Instant>>>,
@@ -97,7 +97,7 @@ impl Heard {
             .insert(iface.to_string(), at);
     }
 
-    /// L'interface a-t-elle entendu Livewire récemment ?
+    /// Has the interface heard Livewire recently?
     pub fn recent(&self, iface: &str, now: Instant) -> bool {
         self.inner
             .lock()
@@ -106,7 +106,7 @@ impl Heard {
             .is_some_and(|t| now.duration_since(*t) < HEARD_VALIDITY)
     }
 
-    /// Choix automatique : `current` s'il est encore entendu, sinon la plus récemment entendue.
+    /// Automatic selection: `current` if still heard, otherwise the most recently heard.
     pub fn choose(&self, current: Option<&str>, now: Instant) -> Option<String> {
         if let Some(c) = current {
             if self.recent(c, now) {
@@ -121,7 +121,7 @@ impl Heard {
     }
 }
 
-/// Écoute jusqu'à l'arrêt et met `heard` à jour.
+/// Listen until stopped and update `heard`.
 pub fn run(heard: &Heard, stop: &Stop) {
     let mut sockets: BTreeMap<String, (Ipv4Addr, UdpSocket)> = BTreeMap::new();
     let mut local: Vec<Ipv4Addr> = Vec::new();
@@ -132,7 +132,7 @@ pub fn run(heard: &Heard, stop: &Stop) {
             last_scan = Some(Instant::now());
             let list = iface::list().unwrap_or_default();
             local = list.iter().map(|i| i.ipv4).collect();
-            // Interfaces disparues ou changées d'adresse : socket fermée, rouverte au besoin.
+            // Disappeared interfaces or changed addresses: close socket, reopen as needed.
             sockets.retain(|name, (ip, _)| list.iter().any(|i| &i.name == name && i.ipv4 == *ip));
             for i in list.iter().filter(|i| is_candidate(i)) {
                 if sockets.contains_key(&i.name) {
@@ -142,7 +142,7 @@ pub fn run(heard: &Heard, stop: &Stop) {
                     Ok(s) if s.set_nonblocking(true).is_ok() => {
                         sockets.insert(i.name.clone(), (i.ipv4, s));
                     }
-                    // Interface sans multicast (ex. point à point) : ignorée jusqu'au prochain examen.
+                    // Interface without multicast (e.g. point-to-point): ignore until the next scan.
                     _ => {}
                 }
             }

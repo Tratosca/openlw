@@ -1,16 +1,16 @@
-//! Journal : stderr horodaté, journal du système (`lw_sys::log` : `os_log` sous macOS, journal des
-//! événements sous Windows ; journald recueille stderr sous Linux) et, en option, un fichier
-//! (service Windows, qui n'a pas de stderr).
+//! Logging: timestamped stderr, system log (`lw_sys::log`: `os_log` on macOS, Event Log
+//! on Windows; journald collects stderr on Linux), and an optional file
+//! (Windows service has no stderr).
 
 use std::io::Write;
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Fichier journal, s'il est demandé.
+/// Log file, if requested.
 static FILE: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
-/// Au-delà, le fichier journal repart de zéro au démarrage.
+/// Above this size, reset the log file at startup.
 const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 pub fn stamp() -> String {
@@ -27,7 +27,7 @@ pub fn stamp() -> String {
     )
 }
 
-/// Copie aussi le journal dans `path` (ajout ; remis à zéro au-delà de 10 Mo).
+/// Also copy logs to `path` (append; reset above 10 MB).
 pub fn to_file(path: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir)?;
@@ -43,7 +43,7 @@ pub fn to_file(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Écrit sur stderr, dans le journal du système et dans le fichier journal.
+/// Write to stderr, system log, and log file.
 pub fn emit(level: lw_sys::log::Level, message: &str) {
     let line = format!("{} {message}", stamp());
     eprintln!("{line}");

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Rejoint des groupes multicast sur une interface et les garde tant que le script tourne.
+"""Join multicast groups on an interface and maintain membership while running.
 
-Sert pendant une capture quand l'IGMP snooping masque les flux (docs/protocol/02-rtp-audio.md).
+Used during captures when IGMP snooping hides streams (docs/protocol/02-rtp-audio.md).
 
     python3 mcast_join.py --iface en7 --groups 239.192.255.2 239.192.255.3 224.0.1.129 --channels 1 2 101
 """

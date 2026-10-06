@@ -9,8 +9,8 @@ authors.workspace = true
 publish = false
 build = "build.rs"
 
-# Pas de `[lints] workspace = true` : le workspace interdit `unsafe`, indispensable ici à la frontière C.
-# Chaque bloc unsafe est justifié par un commentaire SAFETY.
+# No `[lints] workspace = true`: workspace forbids `unsafe`, required here at the C boundary.
+# Every unsafe block has a SAFETY justification comment.
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_docs = "warn"

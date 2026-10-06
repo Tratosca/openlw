@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generation (RFC 4566 / RFC 7273) et verification de SDP AES67.
+"""Generate (RFC 4566 / RFC 7273) and validate AES67 SDP.
 
     python3 sdptool.py gen --channel 101 --host 192.168.10.20 --name "Mac 1" [--gm 00-1D-C1-FF-FE-12-34-56 --domain 0]
-    python3 sdptool.py check fichier.sdp
+    python3 sdptool.py check file.sdp
 """
 import argparse
 import re
@@ -12,7 +12,7 @@ from lwchan import channel_to_group
 
 
 def ptime_text(samples, rate=48000):
-    """Regle du driver : multiple de 48 -> entier (ms) ; 60 ou 12 -> %3.2f ; sinon '1'."""
+    """Driver rule: multiple of 48 -> integer (ms); 60 or 12 -> %3.2f; otherwise '1'."""
     if samples % 48 == 0:
         return str(samples * 1000 // rate)
     if samples in (60, 12):
@@ -42,7 +42,7 @@ def generate(group, host, name, port=5004, pt=96, bits=24, rate=48000, channels=
 
 
 def check(text):
-    """Retourne (infos, problemes). Verifie ce dont un recepteur AES67 a besoin."""
+    """Return (info, problems). Validate AES67 receiver requirements."""
     problems, info = [], {}
     lines = [l.strip() for l in text.replace("\r\n", "\n").split("\n") if l.strip()]
     if not lines or lines[0] != "v=0":

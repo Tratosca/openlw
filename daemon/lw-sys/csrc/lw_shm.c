@@ -1,6 +1,6 @@
 /*
- * Implémentation unique de la région partagée (voir lw_shm.h). Atomiques sans verrou, sans appel
- * système : utilisable dans le thread IO du plugin HAL ou le rappel audio du pilote Windows.
+ * Single shared-region implementation (see lw_shm.h). Lock-free atomics, no system
+ * calls: usable in the HAL plugin I/O thread or Windows driver audio callback.
  */
 #include "lw_shm.h"
 
@@ -9,8 +9,8 @@
 #define HDR(b) ((lw_shm_header *)(b))
 #define CHDR(b) ((const lw_shm_header *)(b))
 
-/* Accès atomiques sur des champs ordinaires (alignés) de la région partagée, par taille.
- * Clang/GCC : builtins __atomic ; MSVC : primitives de winnt.h (x64 et ARM64). */
+/* Size-specific atomic accesses to ordinary aligned shared-region fields.
+ * Clang/GCC: __atomic builtins; MSVC: winnt.h primitives (x64/ARM64). */
 #if defined(_MSC_VER) && !defined(__clang__)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -72,7 +72,7 @@ int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_fra
         h->host_ns_numer = clock->ns_numer;
         h->host_ns_denom = clock->ns_denom;
     }
-    /* La magie est écrite en dernier : une région à moitié initialisée n'est jamais valide. */
+    /* Write magic last: a partially initialized region is never valid. */
     STORE_REL32(&h->magic, LW_SHM_MAGIC);
     return 0;
 }
@@ -197,7 +197,7 @@ void lw_ring_counters(const void *base, int dir, uint64_t *w, uint64_t *r, uint6
 void lw_clock_publish(void *base, uint64_t host_time, uint64_t sample_time, double rate_scalar) {
     lw_shm_header *h = HDR(base);
     uint32_t seq = LOAD_RLX32(&h->clock_seq);
-    STORE_RLX32(&h->clock_seq, seq + 1); /* impair : écriture en cours */
+    STORE_RLX32(&h->clock_seq, seq + 1); /* Odd: write in progress */
     FENCE_REL();
     STORE_RLX64(&h->clock_host_time, host_time);
     STORE_RLX64(&h->clock_sample_time, sample_time);

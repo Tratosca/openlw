@@ -1,6 +1,6 @@
 /*
- * Couche C du daemon OpenLW, partie commune à macOS et Linux : appartenance à un groupe, identité du
- * processus à l'autre bout d'une socket Unix.
+ * OpenLW daemon C layer shared by macOS/Linux: group membership, process identity
+ * at the other end of a Unix socket.
  */
 #if defined(__linux__)
 #define _GNU_SOURCE /* struct ucred, getgrouplist */

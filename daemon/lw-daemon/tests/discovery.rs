@@ -1,5 +1,5 @@
-//! Découverte de bout en bout sur lo0 : un annonceur joue un terminal distant (IP fictive),
-//! la découverte du daemon doit reconstituer ses 10 sources (2 pages).
+//! End-to-end discovery on lo0: advertiser acts as a remote terminal (mock IP),
+//! daemon discovery must reconstruct its ten sources (two pages).
 
 #![allow(clippy::indexing_slicing)]
 
@@ -37,7 +37,7 @@ fn discovery_rebuilds_remote_terminal_sources() {
         })
         .collect();
     let mut adv = Advertiser::new(&lo, "STUDIO-A", sources).unwrap();
-    adv.terminal.ip = Ipv4Addr::new(10, 9, 9, 9); // sinon ignoré comme « nos propres annonces »
+    adv.terminal.ip = Ipv4Addr::new(10, 9, 9, 9); // Otherwise ignored as our own advertisements
     adv.send_full(|| Duration::from_millis(5), &Stop::new())
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);

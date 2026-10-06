@@ -1,9 +1,9 @@
-//! Sockets UDP liées à l'interface Livewire choisie (exigence de la spec : bind sur la NIC).
+//! UDP sockets bound to the selected Livewire interface (specification requirement: bind to NIC).
 //!
-//! macOS : `IP_BOUND_IF` (via `bind_device_by_index_v4`) ; Linux : `SO_BINDTODEVICE` ; Windows : pas
-//! d'équivalent, l'interface est fixée par `IP_MULTICAST_IF` et par l'adhésion aux groupes.
-//! Toutes les sockets fixent `IP_MULTICAST_IF` et rejoignent les groupes sur l'IP de l'interface.
-//! Ports partagés (`SO_REUSEADDR`) : OpenLW coexiste avec un autre logiciel Livewire sur la machine.
+//! macOS: `IP_BOUND_IF` (through `bind_device_by_index_v4`); Linux: `SO_BINDTODEVICE`; Windows: no
+//! equivalent; interface selected through `IP_MULTICAST_IF` and group membership.
+//! All sockets set `IP_MULTICAST_IF` and join groups on the interface IP.
+//! Shared ports (`SO_REUSEADDR`): OpenLW coexists with other Livewire software on the machine.
 
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
@@ -13,13 +13,13 @@ use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::iface::Iface;
 
-/// Paramètres d'émission.
+/// Transmission parameters.
 #[derive(Debug, Clone, Copy)]
 pub struct TxOptions {
     pub ttl: u32,
-    /// Octet TOS (DSCP × 4). EF = 0xB8 (défaut usuel Livewire), AF41 = 0x88 (recommandé AES67).
+    /// TOS byte (DSCP × 4). EF = 0xB8 (usual Livewire default), AF41 = 0x88 (AES67 recommendation).
     pub tos: u32,
-    /// Thread d'émission en temps réel (voir `lw_sys::rt::promote`).
+    /// Real-time transmit thread (see `lw_sys::rt::promote`).
     pub realtime: bool,
 }
 
@@ -40,8 +40,8 @@ fn base_socket(iface: &Iface) -> io::Result<Socket> {
     s.set_reuse_port(true)?;
     bind_to_iface(&s, iface)?;
     s.set_multicast_if_v4(&iface.ipv4)?;
-    // Sur lo0 (tests), le bouclage multicast est indispensable ; sur une vraie NIC on ne veut pas
-    // recevoir nos propres flux.
+    // On lo0 (tests), multicast loopback is essential; on a physical NIC we do not want to
+    // receive our own streams.
     s.set_multicast_loop_v4(iface.loopback)?;
     Ok(s)
 }
@@ -56,11 +56,11 @@ fn bind_to_iface(_s: &Socket, _iface: &Iface) -> io::Result<()> {
     Ok(())
 }
 
-/// Socket d'émission. `src_port` : port source (OpenLW émet avec port source = port destination).
+/// Transmit socket. `src_port`: source port (OpenLW uses source port = destination port).
 pub fn tx_socket(iface: &Iface, src_port: u16, opts: TxOptions) -> io::Result<UdpSocket> {
     let s = base_socket(iface)?;
     s.set_multicast_ttl_v4(opts.ttl)?;
-    // Windows ignore IP_TOS (voir `mark_dscp`) ; ailleurs, un refus est une erreur.
+    // Windows ignores IP_TOS (see `mark_dscp`); elsewhere, rejection is an error.
     if let Err(e) = s.set_tos_v4(opts.tos) {
         if !cfg!(windows) {
             return Err(e);
@@ -70,9 +70,9 @@ pub fn tx_socket(iface: &Iface, src_port: u16, opts: TxOptions) -> io::Result<Ud
     Ok(s.into())
 }
 
-/// Socket de réception d'un groupe. macOS, Linux : liée à (groupe, port), le noyau filtre par
-/// destination. Windows refuse de lier une adresse multicast : liée à (0.0.0.0, port), la socket ne
-/// reçoit que les groupes qu'elle a rejoints sur l'interface.
+/// Group receive socket. macOS/Linux: bound to (group, port), with kernel filtering by
+/// destination. Windows rejects binding multicast addresses: bound to (0.0.0.0, port), the socket
+/// receives only groups joined on the interface.
 pub fn rx_socket(
     iface: &Iface,
     group: Ipv4Addr,
@@ -92,15 +92,15 @@ pub fn rx_socket(
     Ok(s.into())
 }
 
-/// Marquage DSCP d'un flux émis, actif tant que la valeur vit.
+/// DSCP marking for a transmitted stream, active while the value lives.
 pub struct DscpGuard {
     #[cfg(windows)]
     _flow: lw_sys::qos::Flow,
 }
 
-/// Marque les envois de `sock` vers `dest` avec le DSCP de l'octet `tos`. Windows : qWAVE (service
-/// ou administrateur requis ; l'erreur est le code Windows). Ailleurs, `IP_TOS` (posé par
-/// [`tx_socket`]) suffit : `Ok(None)`.
+/// Mark sends from `sock` to `dest` with the DSCP from `tos`. Windows: qWAVE (service
+/// or administrator required; error is a Windows code). Elsewhere, `IP_TOS` (set by
+/// [`tx_socket`]) suffices: `Ok(None)`.
 pub fn mark_dscp(sock: &UdpSocket, dest: SocketAddrV4, tos: u32) -> Result<Option<DscpGuard>, i32> {
     #[cfg(windows)]
     {

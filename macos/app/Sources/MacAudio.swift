@@ -1,19 +1,19 @@
-// Périphériques audio du Mac : entrée et sortie par défaut, périphérique « OpenLW ».
-// API CoreAudio disponibles depuis 10.0 (plancher 10.13).
+// Mac audio devices: default input/output, “OpenLW” device.
+// CoreAudio APIs available since 10.0 (minimum 10.13).
 
 import CoreAudio
 import Foundation
 
 enum MacAudio {
-    /// UID publiés par le plugin HAL (macos/plugin/src/OpenLWPlugIn.c) : périphérique duplex, ou
-    /// « OpenLW In » et « OpenLW Out » en présentation à deux périphériques.
+    /// UIDs published by HAL plugin (macos/plugin/src/OpenLWPlugIn.c): duplex device, or
+    /// “OpenLW In” and “OpenLW Out” in two-device layout.
     static let livewireUID = "fr.francois-brille.openlw.device"
     static let livewireInUID = "fr.francois-brille.openlw.device.in"
     static let livewireOutUID = "fr.francois-brille.openlw.device.out"
 
     private static func address(_ selector: AudioObjectPropertySelector,
                                 _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal) -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: 0) // élément principal
+        AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: 0) // Main element
     }
 
     private static func string(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> String? {
@@ -37,7 +37,7 @@ enum MacAudio {
         string(id, kAudioObjectPropertyName) ?? "périphérique \(id)"
     }
 
-    /// Périphérique OpenLW d'entrée (ou de sortie), s'il est chargé par CoreAudio.
+    /// OpenLW input/output device if loaded by CoreAudio.
     static func livewireDevice(input: Bool) -> AudioObjectID? {
         let uids = [livewireUID, input ? livewireInUID : livewireOutUID]
         return devices().first { uids.contains(string($0, kAudioDevicePropertyDeviceUID) ?? "") }
@@ -56,7 +56,7 @@ enum MacAudio {
         return id
     }
 
-    /// Le périphérique OpenLW est-il l'entrée (ou la sortie) par défaut du Mac ?
+    /// Is OpenLW the Mac's default input/output?
     static func livewireIsDefault(input: Bool) -> Bool {
         guard let lw = livewireDevice(input: input) else { return false }
         return defaultDevice(input: input) == lw

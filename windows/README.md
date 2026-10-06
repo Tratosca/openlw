@@ -1,45 +1,45 @@
-# OpenLW pour Windows
+# OpenLW for Windows
 
 <img src="../docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="48" align="right">
 
-Windows 10 22H2 et 11, x64 et ARM64. Périphérique audio : pilote ASIO®, affiché « OpenLW » dans les logiciels hôtes ([ADR 0008](../docs/adr/0008-audio-windows.md)).
+Windows 10 22H2 and 11, x64 and ARM64. Audio device: ASIO® driver, displayed as “OpenLW” in host applications ([ADR 0008](../docs/adr/0008-audio-windows.md)).
 
-| Composant | Dossier | État |
+| Component | Directory | Status |
 |---|---|---|
-| Service réseau | `daemon/` (`lw-daemon service`) | prêt, à valider sur Windows réel |
-| Pilote ASIO | [`windows/driver`](driver/README.md) (`OpenLWDriver.dll`, GPLv3, SDK Steinberg téléchargé à la compilation) | fait, essai complet sous Wine ARM64 ; Windows réel et hôtes du commerce à essayer |
-| App OpenLW | `windows/app` (WinUI 3, C#) | à faire |
-| Installeur | `windows/installer` (MSI x64 et ARM64) | à faire |
+| Network service | `daemon/` (`lw-daemon service`) | Implemented; validation on real Windows pending |
+| ASIO driver | [`windows/driver`](driver/README.md) (`OpenLWDriver.dll`, GPLv3, Steinberg SDK downloaded at build time) | Implemented; full Wine ARM64 test; real Windows and commercial hosts remain to be tested |
+| OpenLW app | `windows/app` (WinUI 3, C#) | Planned |
+| Installer | `windows/installer` (x64 and ARM64 MSI) | Planned |
 
-## Service, installation de développement
+## Development service installation
 
-Prérequis : Rust (cible MSVC), Visual Studio Build Tools avec le compilateur C.
+Prerequisites: Rust (MSVC target), Visual Studio Build Tools with the C compiler.
 
 ```powershell
 cd daemon
 cargo build --release
-# PowerShell en administrateur :
+# Elevated PowerShell:
 New-Item -ItemType Directory -Force "$env:ProgramFiles\OpenLW" | Out-Null
 Copy-Item target\release\lw-daemon.exe "$env:ProgramFiles\OpenLW\"
 sc.exe create OpenLW binPath= "\"$env:ProgramFiles\OpenLW\lw-daemon.exe\" service" start= auto
-New-EventLog -LogName Application -Source OpenLW        # facultatif : source du journal des événements
+New-EventLog -LogName Application -Source OpenLW        # Optional: Event Log source
 net localgroup OpenLW /add
-net localgroup OpenLW $env:USERNAME /add                 # modifications sans session élevée
+net localgroup OpenLW $env:USERNAME /add                 # Allow changes without elevation
 sc.exe start OpenLW
 ```
 
-- Configuration : `%ProgramData%\OpenLW\lw-daemon.json` (créée au premier démarrage).
-- Journal : `%ProgramData%\OpenLW\Logs\lw-daemon.log` ; erreurs aussi dans le journal des événements (source OpenLW).
-- Contrôle : `lw-daemon ctl status` (tube nommé `\\.\pipe\fr.francois-brille.openlw.daemon`). La nouvelle appartenance au groupe `OpenLW` ne vaut qu'après une nouvelle ouverture de session.
-- Retrait : `sc.exe stop OpenLW`, `sc.exe delete OpenLW`, puis suppression des dossiers.
+- Configuration: `%ProgramData%\OpenLW\lw-daemon.json` (created on first startup).
+- Log: `%ProgramData%\OpenLW\Logs\lw-daemon.log`; errors also go to the Event Log (OpenLW source).
+- Control: `lw-daemon ctl status` (named pipe `\\.\pipe\fr.francois-brille.openlw.daemon`). New `OpenLW` group membership takes effect after signing in again.
+- Removal: `sc.exe stop OpenLW`, `sc.exe delete OpenLW`, then remove the directories.
 
-## Coexistence avec le driver Axia
+## Coexistence with the Axia driver
 
-OpenLW partage les ports Livewire (`SO_REUSEADDR`) et n'en occupe aucun en exclusivité ; donner un nom de terminal distinct (`lw-daemon ctl set-advanced --name …`). À vérifier sur une machine équipée des deux.
+OpenLW shares Livewire ports (`SO_REUSEADDR`) without exclusive binding; use a distinct terminal name (`lw-daemon ctl set-advanced --name …`). This remains to be verified on a machine with both installed.
 
-## Tests sans machine Windows
+## Testing without a Windows machine
 
-`tools/ci/test-wine.sh` (ARM64, Wine natif sur hôte arm64) ou `tools/ci/test-wine.sh x64` : couche système, canal de contrôle, région partagée et périphérique. Wine n'énumère pas les cartes réseau du conteneur : les tests réseau tournent en CI, sur Windows réel.
+`tools/ci/test-wine.sh` (ARM64, native Wine on an arm64 host) or `tools/ci/test-wine.sh x64` tests the system layer, control channel, shared region, and device. Wine does not enumerate the container's network adapters: network tests run in CI on real Windows.
 
 ---
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.

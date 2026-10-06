@@ -1,8 +1,10 @@
-//! Contrôle du daemon : état partagé et requêtes JSON reçues par XPC (ADR 0005).
+//! Contrôle du daemon : état partagé et requêtes JSON reçues par le canal de contrôle (ADR 0005,
+//! ADR 0007) : XPC (macOS), socket Unix (Linux), tube nommé (Windows).
 //!
-//! Requêtes : `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"attach"}` (le plugin demande en plus
-//! la région partagée, jointe par la couche C à la réponse). Réponses : `{"ok":true,...}` ou `{"ok":false,"error":...}`.
-//! L'app de configuration et la commande `lw-daemon ctl` utilisent ce protocole.
+//! Requêtes : `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"attach"}` (le client audio demande en
+//! plus la région partagée, jointe par le transport à la réponse). Réponses : `{"ok":true,...}` ou
+//! `{"ok":false,"error":...}`. Les apps de configuration et la commande `lw-daemon ctl` utilisent ce
+//! protocole.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -18,8 +20,8 @@ use crate::editor::{self, Edit};
 use crate::rx::RxStats;
 use crate::tx::TxReport;
 
-/// Nom du service Mach déclaré dans le plist du LaunchDaemon.
-pub const SERVICE_NAME: &str = "fr.francois-brille.openlw.daemon";
+pub use lw_sys::ctl::SERVICE_NAME;
+use lw_sys::ctl::{Caller, Endpoint};
 
 /// État observable du daemon.
 #[derive(Debug, Clone, Serialize)]
@@ -45,7 +47,7 @@ pub struct Status {
 /// Source de l'état du périphérique (rafraîchi par son propre thread).
 pub type DeviceStatusRef = Arc<Mutex<crate::device::DeviceStatus>>;
 
-/// État partagé entre les threads et le gestionnaire XPC.
+/// État partagé entre les threads et le gestionnaire du canal de contrôle.
 #[derive(Clone)]
 pub struct Shared {
     inner: Arc<Mutex<Status>>,
@@ -62,9 +64,6 @@ struct ConfigSource {
     path: Option<PathBuf>,
     reload: Sender<Config>,
 }
-
-/// Groupe autorisé à modifier le patch (en plus de root).
-pub const ADMIN_GROUP: &str = "admin";
 
 impl Shared {
     /// `iface` : interface de la session, ou `None` tant qu'aucune n'est choisie.
@@ -247,10 +246,10 @@ impl Shared {
     }
 
     /// Traite une requête JSON et renvoie la réponse JSON (jamais d'erreur côté appelant).
-    pub fn handle(&self, request: &str, peer_uid: u32) -> String {
+    pub fn handle(&self, request: &str, caller: &Caller) -> String {
         let reply = match serde_json::from_str::<Value>(request) {
-            Ok(v) if is_mutating(&v) && !lw_sys::auth::uid_in_group(peer_uid, ADMIN_GROUP) => {
-                json!({ "ok": false, "error": format!("réservé aux administrateurs de ce Mac (groupe {ADMIN_GROUP}, uid {peer_uid})") })
+            Ok(v) if is_mutating(&v) && !caller.may_edit => {
+                json!({ "ok": false, "error": format!("{} ({})", lw_sys::ctl::edit_policy(), caller.label) })
             }
             Ok(v) if is_mutating(&v) => match parse_edit(&v) {
                 Ok(edit) => self.apply_edit(&edit),
@@ -335,13 +334,17 @@ impl Shared {
         reply.to_string()
     }
 
-    /// Démarre le service XPC (`None` : écouteur anonyme, pour les tests).
-    pub fn serve(
-        &self,
-        mach_name: Option<&str>,
-    ) -> Result<lw_sys::xpc::Server, lw_sys::xpc::Error> {
+    /// Démarre le canal de contrôle sur `endpoint`.
+    pub fn serve(&self, endpoint: &Endpoint) -> Result<lw_sys::ctl::Server, lw_sys::ctl::Error> {
         let me = self.clone();
-        lw_sys::xpc::Server::start(mach_name, Box::new(move |req, uid| me.handle(req, uid)))
+        lw_sys::ctl::Server::start(endpoint, Box::new(move |req, c| me.handle(req, c)))
+    }
+
+    /// Canal de contrôle XPC anonyme (tests, même processus ; macOS).
+    #[cfg(target_os = "macos")]
+    pub fn serve_anonymous_xpc(&self) -> Result<lw_sys::ctl::Server, lw_sys::ctl::Error> {
+        let me = self.clone();
+        lw_sys::ctl::Server::anonymous_xpc(Box::new(move |req, c| me.handle(req, c)))
     }
 }
 
@@ -419,7 +422,7 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
             name: v
                 .get("name")
                 .and_then(Value::as_str)
-                .unwrap_or("MAC")
+                .unwrap_or(crate::config::DEFAULT_SOURCE_NAME)
                 .to_string(),
             format: serde_json::from_value::<Format>(from_json("format", "standard")?)
                 .map_err(|e| format!("`format` : {e}"))?,
@@ -515,25 +518,59 @@ mod tests {
             packets: 42,
             ..TxReport::default()
         });
-        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"status"}"#, 0)).unwrap();
+        let me = Caller::trusted("test");
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"status"}"#, &me)).unwrap();
         assert_eq!(v["ok"], true);
         assert_eq!(v["status"]["tx"]["239.192.15.161"]["packets"], 42);
         assert_eq!(v["status"]["advertised_sources"], 2);
-        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"nope"}"#, 0)).unwrap();
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"nope"}"#, &me)).unwrap();
         assert_eq!(v["ok"], false);
-        let v: Value = serde_json::from_str(&s.handle("pas du json", 0)).unwrap();
+        let v: Value = serde_json::from_str(&s.handle("pas du json", &me)).unwrap();
         assert_eq!(v["ok"], false);
+    }
+
+    #[test]
+    fn edits_require_permission() {
+        let s = shared();
+        let guest = Caller {
+            may_edit: false,
+            ..Caller::trusted("invité")
+        };
+        let v: Value =
+            serde_json::from_str(&s.handle(r#"{"cmd":"set_advertise","advertise":true}"#, &guest))
+                .unwrap();
+        assert_eq!(v["ok"], false);
+        assert!(v["error"].as_str().unwrap().contains("invité"));
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"ping"}"#, &guest)).unwrap();
+        assert_eq!(v["ok"], true, "lecture libre");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn over_xpc() {
         let s = shared();
-        let server = s.serve(None).unwrap();
-        let client = lw_sys::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
+        let server = s.serve_anonymous_xpc().unwrap();
+        let client =
+            lw_sys::xpc::Client::from_endpoint(&server.xpc().unwrap().endpoint()).unwrap();
         let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"ping"}"#).unwrap()).unwrap();
         assert_eq!(v["pong"], true);
         let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"status"}"#).unwrap()).unwrap();
         assert_eq!(v["status"]["iface"], "lo0");
+    }
+
+    #[test]
+    fn over_stream_transport() {
+        let s = shared();
+        #[cfg(unix)]
+        let ep = Endpoint::Socket(
+            std::env::temp_dir().join(format!("openlw-control-{}.sock", std::process::id())),
+        );
+        #[cfg(windows)]
+        let ep = Endpoint::Pipe(format!("fr.francois-brille.openlw.control-test.{}", std::process::id()));
+        let _server = s.serve(&ep).unwrap();
+        let client = lw_sys::ctl::Client::connect(&ep).unwrap();
+        let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"status"}"#).unwrap()).unwrap();
+        assert_eq!(v["status"]["iface"], "lo0");
+        assert_eq!(v["status"]["pid"], std::process::id());
     }
 }

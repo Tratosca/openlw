@@ -1,8 +1,9 @@
 //! Détection du réseau Livewire : écoute des annonces (239.192.255.3:4001) sur toutes les
 //! interfaces Ethernet candidates, pour le choix automatique de l'interface.
 //!
-//! - Candidates : IPv4, hors bouclage et hors interfaces virtuelles (utun, awdl, llw, bridge, ap,
-//!   anpi, gif, stf). La liste est relue toutes les 5 s (câble branché, adaptateur USB ajouté).
+//! - Candidates : IPv4, hors bouclage et hors interfaces virtuelles (VPN, conteneurs, machines
+//!   virtuelles, Wi-Fi Direct ; listes par système ci-dessous). La liste est relue toutes les 5 s
+//!   (câble branché, adaptateur USB ajouté).
 //! - Une interface est « entendue » quand elle reçoit une annonce décodable d'un autre terminal
 //!   (adresse annoncée différente de toutes nos adresses).
 //! - Choix : l'interface déjà utilisée tant qu'elle reste entendue, sinon la plus récemment entendue.
@@ -24,14 +25,37 @@ use crate::Stop;
 /// (3 keepalives manqués, comme l'annuaire).
 pub const HEARD_VALIDITY: Duration = Duration::from_secs(75);
 
-const VIRTUAL_PREFIXES: [&str; 8] = ["utun", "awdl", "llw", "bridge", "ap", "anpi", "gif", "stf"];
+/// Préfixes des noms d'interfaces virtuelles (nom système).
+#[cfg(target_os = "macos")]
+const VIRTUAL_PREFIXES: &[&str] = &["utun", "awdl", "llw", "bridge", "ap", "anpi", "gif", "stf"];
+#[cfg(target_os = "linux")]
+const VIRTUAL_PREFIXES: &[&str] = &[
+    "docker", "veth", "virbr", "br-", "tun", "tap", "wg", "vnet", "lxc", "lxd", "cni", "flannel",
+    "cali", "zt", "tailscale", "podman", "vboxnet", "vmnet",
+];
+#[cfg(windows)]
+const VIRTUAL_PREFIXES: &[&str] = &[];
+
+/// Fragments (minuscules) des noms conviviaux d'interfaces virtuelles Windows : Hyper-V et WSL,
+/// hyperviseurs, VPN, Wi-Fi Direct, Bluetooth.
+#[cfg(windows)]
+const VIRTUAL_FRAGMENTS: &[&str] = &[
+    "vethernet", "hyper-v", "virtual", "vmware", "virtualbox", "loopback", "tailscale", "zerotier",
+    "wireguard", "openvpn", "tap-", "wintun", "bluetooth", "local area connection*",
+    "connexion au réseau local*",
+];
+#[cfg(not(windows))]
+const VIRTUAL_FRAGMENTS: &[&str] = &[];
 
 /// Interface susceptible de porter Livewire.
 pub fn is_candidate(i: &Iface) -> bool {
-    !i.loopback && !VIRTUAL_PREFIXES.iter().any(|p| i.name.starts_with(p))
+    let lower = i.friendly.to_lowercase();
+    !i.loopback
+        && !VIRTUAL_PREFIXES.iter().any(|p| i.name.starts_with(p))
+        && !VIRTUAL_FRAGMENTS.iter().any(|f| lower.contains(f))
 }
 
-/// Dernière annonce entendue par interface (nom BSD).
+/// Dernière annonce entendue par interface (nom système).
 #[derive(Clone, Default)]
 pub struct Heard {
     inner: Arc<Mutex<BTreeMap<String, Instant>>>,
@@ -127,12 +151,35 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    const NAMES: (&[&str], &[&str]) = (&["en7", "en0"], &["utun3", "bridge100", "awdl0"]);
+    #[cfg(target_os = "linux")]
+    const NAMES: (&[&str], &[&str]) = (
+        &["enp3s0", "eth0", "eno1"],
+        &["docker0", "veth12ab", "virbr0", "br-3f2a", "wg0", "tailscale0"],
+    );
+    #[cfg(windows)]
+    const NAMES: (&[&str], &[&str]) = (
+        &["Ethernet", "Ethernet 2", "Studio LAN"],
+        &[
+            "vEthernet (WSL)",
+            "VirtualBox Host-Only Network",
+            "Local Area Connection* 1",
+            "Tailscale",
+            "Bluetooth Network Connection",
+        ],
+    );
+
     #[test]
     fn candidates_exclude_virtual_and_loopback() {
-        assert!(is_candidate(&nic("en7", false)));
-        assert!(!is_candidate(&nic("lo0", true)));
-        assert!(!is_candidate(&nic("utun3", false)));
-        assert!(!is_candidate(&nic("bridge100", false)));
+        let (real, virtual_) = NAMES;
+        for n in real {
+            assert!(is_candidate(&nic(n, false)), "{n}");
+        }
+        for n in virtual_ {
+            assert!(!is_candidate(&nic(n, false)), "{n}");
+        }
+        assert!(!is_candidate(&nic("lo", true)));
     }
 
     #[test]

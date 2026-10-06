@@ -1,6 +1,6 @@
 //! Service réseau d'OpenLW : flux RTP Livewire / AES67 émis et reçus sur l'interface choisie,
-//! annonce et découverte des sources, périphérique virtuel partagé avec le plugin HAL (ADR 0005),
-//! contrôle XPC et supervision (patch à chaud, choix de l'interface).
+//! annonce et découverte des sources, périphérique virtuel partagé avec le client audio (ADR 0005),
+//! canal de contrôle et supervision (patch à chaud, choix de l'interface).
 
 pub mod advertise;
 pub mod bus;

@@ -1,4 +1,5 @@
-//! Côté daemon du périphérique virtuel : région partagée avec le plugin HAL (ADR 0005).
+//! Côté daemon du périphérique virtuel : région partagée avec le client audio (plugin HAL sous macOS,
+//! pilote ASIO sous Windows, nœuds PipeWire du daemon sous Linux ; ADR 0005).
 //!
 //! Un thread temps réel cadencé à 1 ms :
 //! - publie l'horloge dans la région (horloge hôte, rapport 1,0 tant qu'aucune horloge réseau n'asservit) ;
@@ -155,7 +156,7 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
         .name("lw-device".into())
         .spawn(move || {
             if let Err(kr) = lw_sys::rt::promote_for_packet_interval(TICK) {
-                crate::error!("périphérique : temps réel refusé (kern_return {kr})");
+                crate::error!("périphérique : temps réel refusé (code {kr})");
             }
             let (ch_in, ch_out) = (from_apps.channels() as usize, to_apps.channels() as usize);
             let ring = reg.geometry().ring_frames as usize;
@@ -201,10 +202,12 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                 //    Lu au rythme de l'horloge (trames dues, retard reporté jusqu'à OUT_CARRY_MAX) :
                 //    l'hôte écrit par blocs (jusqu'à 4096 trames et plus), que l'anneau partagé lisse ;
                 //    les transmettre d'un coup ferait déborder puis vider les tampons d'émission.
-                owed = (owed + sample.saturating_sub(out_clock) as usize).min(OUT_CARRY_MAX);
+                //    Le plafond ne porte que sur le reliquat non servi : un réveil tardif de ce thread
+                //    (minuteurs grossiers des VM) rattrape toutes ses trames dues.
+                let want = owed + sample.saturating_sub(out_clock) as usize;
                 out_clock = sample;
-                let n = owed.min(from_apps.readable() as usize).min(ring);
-                owed -= n;
+                let n = want.min(from_apps.readable() as usize).min(ring);
+                owed = (want - n).min(OUT_CARRY_MAX);
                 if let (true, Some(block)) = (n > 0 && ch_in > 0, buf.get_mut(..n * ch_in)) {
                     let _ = from_apps.read(block);
                     for frame in block.chunks_exact(ch_in) {

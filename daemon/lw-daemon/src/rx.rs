@@ -137,7 +137,7 @@ pub fn run_into(
     // Le thread bloque dans recv : la politique temps réel ne consomme que le temps de décodage.
     if sink.is_some() {
         if let Err(kr) = lw_sys::rt::promote_for_packet_interval(Duration::from_millis(1)) {
-            crate::error!("réception {group} : temps réel refusé (kern_return {kr})");
+            crate::error!("réception {group} : temps réel refusé (code {kr})");
         }
     }
     let mut stats = RxStats::new(group);

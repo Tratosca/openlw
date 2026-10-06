@@ -1,7 +1,9 @@
 //! Sockets UDP liées à l'interface Livewire choisie (exigence de la spec : bind sur la NIC).
 //!
-//! macOS : `IP_BOUND_IF` (via `bind_device_by_index_v4`) ; Linux : `SO_BINDTODEVICE`.
-//! Toutes les sockets fixent aussi `IP_MULTICAST_IF` et rejoignent les groupes sur l'IP de l'interface.
+//! macOS : `IP_BOUND_IF` (via `bind_device_by_index_v4`) ; Linux : `SO_BINDTODEVICE` ; Windows : pas
+//! d'équivalent, l'interface est fixée par `IP_MULTICAST_IF` et par l'adhésion aux groupes.
+//! Toutes les sockets fixent `IP_MULTICAST_IF` et rejoignent les groupes sur l'IP de l'interface.
+//! Ports partagés (`SO_REUSEADDR`) : OpenLW coexiste avec un autre logiciel Livewire sur la machine.
 
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
@@ -17,7 +19,7 @@ pub struct TxOptions {
     pub ttl: u32,
     /// Octet TOS (DSCP × 4). EF = 0xB8 (défaut usuel Livewire), AF41 = 0x88 (recommandé AES67).
     pub tos: u32,
-    /// Thread d'émission en temps réel (`THREAD_TIME_CONSTRAINT_POLICY`).
+    /// Thread d'émission en temps réel (voir `lw_sys::rt::promote`).
     pub realtime: bool,
 }
 
@@ -58,12 +60,19 @@ fn bind_to_iface(_s: &Socket, _iface: &Iface) -> io::Result<()> {
 pub fn tx_socket(iface: &Iface, src_port: u16, opts: TxOptions) -> io::Result<UdpSocket> {
     let s = base_socket(iface)?;
     s.set_multicast_ttl_v4(opts.ttl)?;
-    s.set_tos_v4(opts.tos)?;
+    // Windows ignore IP_TOS (voir `mark_dscp`) ; ailleurs, un refus est une erreur.
+    if let Err(e) = s.set_tos_v4(opts.tos) {
+        if !cfg!(windows) {
+            return Err(e);
+        }
+    }
     s.bind(&SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, src_port).into())?;
     Ok(s.into())
 }
 
-/// Socket de réception d'un groupe : liée à (groupe, port) pour que le noyau filtre par destination.
+/// Socket de réception d'un groupe. macOS, Linux : liée à (groupe, port), le noyau filtre par
+/// destination. Windows refuse de lier une adresse multicast : liée à (0.0.0.0, port), la socket ne
+/// reçoit que les groupes qu'elle a rejoints sur l'interface.
 pub fn rx_socket(
     iface: &Iface,
     group: Ipv4Addr,
@@ -72,8 +81,38 @@ pub fn rx_socket(
 ) -> io::Result<UdpSocket> {
     let s = base_socket(iface)?;
     s.set_recv_buffer_size(1 << 20)?;
-    s.bind(&SocketAddrV4::new(group, port).into())?;
+    let bind_ip = if cfg!(windows) {
+        Ipv4Addr::UNSPECIFIED
+    } else {
+        group
+    };
+    s.bind(&SocketAddrV4::new(bind_ip, port).into())?;
     s.join_multicast_v4(&group, &iface.ipv4)?;
     s.set_read_timeout(Some(timeout))?;
     Ok(s.into())
+}
+
+/// Marquage DSCP d'un flux émis, actif tant que la valeur vit.
+pub struct DscpGuard {
+    #[cfg(windows)]
+    _flow: lw_sys::qos::Flow,
+}
+
+/// Marque les envois de `sock` vers `dest` avec le DSCP de l'octet `tos`. Windows : qWAVE (service
+/// ou administrateur requis ; l'erreur est le code Windows). Ailleurs, `IP_TOS` (posé par
+/// [`tx_socket`]) suffit : `Ok(None)`.
+pub fn mark_dscp(sock: &UdpSocket, dest: SocketAddrV4, tos: u32) -> Result<Option<DscpGuard>, i32> {
+    #[cfg(windows)]
+    {
+        let dscp = u8::try_from(tos >> 2).unwrap_or(63);
+        if dscp == 0 {
+            return Ok(None);
+        }
+        lw_sys::qos::set_dscp(sock, dest, dscp).map(|f| Some(DscpGuard { _flow: f }))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (sock, dest, tos);
+        Ok(None)
+    }
 }

@@ -10,7 +10,7 @@ use lw_proto::rtp::{ssrc_from_group, Packetizer};
 use serde::Serialize;
 
 use crate::iface::Iface;
-use crate::net::{tx_socket, TxOptions};
+use crate::net::{mark_dscp, tx_socket, TxOptions};
 use crate::Stop;
 
 /// Générateur de sinusoïde, identique sur tous les canaux.
@@ -117,7 +117,11 @@ pub fn run_from(
     let group = stream.group();
     let sock = tx_socket(iface, stream.port, opts)?;
     let dest = SocketAddrV4::new(group, stream.port);
-    // Séquence et horodatage dérivés de l'horloge du Mac : un flux relancé reprend là où un flux
+    let _dscp = mark_dscp(&sock, dest, opts.tos)
+        .map_err(|e| crate::error!("{group} : marquage DSCP refusé (erreur {e})"))
+        .ok()
+        .flatten();
+    // Séquence et horodatage dérivés de l'horloge hôte : un flux relancé reprend là où un flux
     // continu serait (saut vers l'avant, vu comme une perte) au lieu de repartir de zéro.
     let spp = u64::from(stream.format.samples_per_packet()).max(1);
     let frames = lw_sys::rt::host_time_ns() / 1_000 * 48 / 1_000;
@@ -138,7 +142,7 @@ pub fn run_from(
         match lw_sys::rt::promote_for_packet_interval(interval) {
             Ok(()) => report.realtime = true,
             Err(kr) => {
-                crate::error!("{group} : ordonnancement temps réel refusé (kern_return {kr})")
+                crate::error!("{group} : ordonnancement temps réel refusé (code {kr})")
             }
         }
     }

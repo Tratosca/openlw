@@ -6,11 +6,25 @@ use std::time::{Duration, Instant};
 
 use lw_daemon::config::Config;
 use lw_daemon::control::Shared;
-use lw_daemon::{supervisor, Stop};
+use lw_daemon::{iface, supervisor, Stop};
+use lw_sys::ctl::{Client, Endpoint};
 use serde_json::{json, Value};
 
-fn call(client: &lw_sys::xpc::Client, req: Value) -> Value {
+fn call(client: &Client, req: Value) -> Value {
     serde_json::from_str(&client.call(&req.to_string()).unwrap()).unwrap()
+}
+
+/// Canal de contrôle propre au test : socket Unix temporaire ou tube nommé unique.
+fn test_endpoint() -> Endpoint {
+    #[cfg(unix)]
+    return Endpoint::Socket(
+        std::env::temp_dir().join(format!("openlw-supervisor-{}.sock", std::process::id())),
+    );
+    #[cfg(windows)]
+    return Endpoint::Pipe(format!(
+        "fr.francois-brille.openlw.supervisor-test.{}",
+        std::process::id()
+    ));
 }
 
 /// Attend que `f` soit vrai (2 s au plus).
@@ -27,16 +41,19 @@ fn wait(mut f: impl FnMut() -> bool) -> bool {
 
 #[test]
 fn device_geometry_follows_configuration() {
-    if !lw_sys::auth::uid_in_group(current_uid(), "admin") {
-        eprintln!("ignoré : l'utilisateur du test n'est pas administrateur (commandes de modification refusées)");
-        return;
-    }
+    let lo = iface::list()
+        .unwrap()
+        .into_iter()
+        .find(|i| i.loopback)
+        .expect("interface de bouclage");
     let shared = Shared::new(None, 0);
-    let server = shared.serve(None).unwrap();
-    let client = lw_sys::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
-    let cfg: Config = serde_json::from_str(
-        r#"{"iface":"lo0","advertise":false,"device":{"channels_to_net":2,"channels_from_net":2}}"#,
-    )
+    let ep = test_endpoint();
+    let server = shared.serve(&ep).unwrap();
+    let client = Client::connect(&ep).unwrap();
+    let cfg: Config = serde_json::from_value(json!({
+        "iface": lo.name, "advertise": false,
+        "device": {"channels_to_net": 2, "channels_from_net": 2}
+    }))
     .unwrap();
     let stop = Stop::new();
     std::thread::scope(|s| {
@@ -58,7 +75,16 @@ fn device_geometry_follows_configuration() {
         );
         assert!(wait(|| call(&client, json!({"cmd":"status"}))["status"]
             ["iface"]
-            == "lo0"));
+            == lo.name.as_str()));
+
+        // Les commandes de modification exigent les droits d'édition (voir ctl::edit_policy).
+        let probe = call(&client, json!({"cmd":"set_advertise","advertise":false}));
+        if probe["ok"] != true {
+            eprintln!("ignoré : modifications refusées à l'utilisateur du test ({probe})");
+            stop.request();
+            h.join().unwrap().unwrap();
+            return;
+        }
 
         // Nombre de canaux modifié : nouveau périphérique, génération suivante.
         let r = call(
@@ -83,14 +109,14 @@ fn device_geometry_follows_configuration() {
         );
         assert_eq!(r["ok"], false, "au-delà de 32 canaux : refusé");
 
-        // Mode automatique : lo0 n'est jamais candidate.
+        // Mode automatique : l'interface de bouclage n'est jamais candidate.
         assert_eq!(
             call(&client, json!({"cmd":"set_iface","iface":"auto"}))["ok"],
             true
         );
         assert!(wait(|| {
             let st = call(&client, json!({"cmd":"status"}));
-            st["status"]["iface_auto"] == true && st["status"]["iface"] != "lo0"
+            st["status"]["iface_auto"] == true && st["status"]["iface"] != lo.name.as_str()
         }));
         // Un patch seul ne recrée pas le périphérique.
         let r = call(
@@ -104,15 +130,4 @@ fn device_geometry_follows_configuration() {
         stop.request();
         h.join().unwrap().unwrap();
     });
-}
-
-/// UID de l'utilisateur courant (sans `unsafe` : lu par la commande `id`).
-fn current_uid() -> u32 {
-    std::process::Command::new("/usr/bin/id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(u32::MAX)
 }

@@ -1,8 +1,9 @@
 /*
- * Couche C du daemon OpenLW (macOS). Compilée sans ARC : gestion explicite xpc_retain/xpc_release.
+ * Couche C du daemon OpenLW, macOS. Compilée sans ARC : gestion explicite xpc_retain/xpc_release.
  * Disponibilité : thread_policy_set (10.0), os_log (10.12), XPC C API (10.7) — compatible plancher 10.13.
+ * Également compilée dans le plugin HAL (client XPC, mappage de la région).
  */
-#include "lw_sys.h"
+#include "../lw_sys.h"
 
 #include <dispatch/dispatch.h>
 #include <mach/mach.h>
@@ -11,10 +12,7 @@
 #include <os/log.h>
 #include <stdlib.h>
 #include <string.h>
-#include <grp.h>
-#include <pwd.h>
 #include <sys/mman.h>
-#include <unistd.h>
 #include <xpc/xpc.h>
 
 /* ---------- Threads temps réel ---------- */
@@ -282,6 +280,10 @@ void lw_shm_unmap(void *base, size_t size) {
     }
 }
 
+void lw_shm_release(void *handle) {
+    lw_xpc_release(handle);
+}
+
 uint64_t lw_host_time(void) {
     return mach_absolute_time();
 }
@@ -294,37 +296,10 @@ uint64_t lw_host_time_to_ns(uint64_t t) {
     return t * tb.numer / tb.denom;
 }
 
-/* ---------- Autorisation ---------- */
-
-int lw_uid_in_group(uint32_t uid, const char *group) {
-    if (uid == 0) {
-        return 1;
-    }
-    if (group == NULL) {
-        return 0;
-    }
-    struct passwd pw, *pres = NULL;
-    char pwbuf[4096];
-    if (getpwuid_r((uid_t)uid, &pw, pwbuf, sizeof pwbuf, &pres) != 0 || pres == NULL) {
-        return 0;
-    }
-    struct group gr, *gres = NULL;
-    char grbuf[16384];
-    if (getgrnam_r(group, &gr, grbuf, sizeof grbuf, &gres) != 0 || gres == NULL) {
-        return 0;
-    }
-    if (pw.pw_gid == gr.gr_gid) {
-        return 1;
-    }
-    int groups[256];
-    int n = 256;
-    if (getgrouplist(pw.pw_name, (int)pw.pw_gid, groups, &n) == -1) {
-        n = 256;
-    }
-    for (int i = 0; i < n && i < 256; i++) {
-        if ((gid_t)groups[i] == gr.gr_gid) {
-            return 1;
-        }
-    }
-    return 0;
+void lw_host_clock_info(lw_host_clock *clock) {
+    mach_timebase_info_data_t tb;
+    mach_timebase_info(&tb);
+    clock->id = LW_CLOCK_MACH;
+    clock->ns_numer = tb.numer;
+    clock->ns_denom = tb.denom;
 }

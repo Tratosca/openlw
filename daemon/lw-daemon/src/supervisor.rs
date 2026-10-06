@@ -344,34 +344,34 @@ fn join_error(w: Worker) -> Option<String> {
 /// Erreur de démarrage du daemon.
 pub type Error = Box<dyn std::error::Error>;
 
-/// Fait tourner le daemon jusqu'à l'arrêt : service XPC (`xpc`), détecteur, périphérique, sessions.
-/// `path` : fichier où enregistrer les modifications de configuration reçues par XPC.
+/// Fait tourner le daemon jusqu'à l'arrêt : canal de contrôle (`control`), détecteur, périphérique,
+/// sessions. `path` : fichier où enregistrer les modifications de configuration reçues.
 pub fn run(
     cfg: Config,
     path: Option<PathBuf>,
     stop: &Stop,
-    xpc: Option<&str>,
+    control: Option<&lw_sys::ctl::Endpoint>,
 ) -> Result<(), Error> {
     let shared = Shared::new(None, 0);
-    let server = match xpc {
-        Some(name) => {
-            let server = shared.serve(Some(name))?;
-            info!("service de contrôle XPC « {name} » publié");
+    let server = match control {
+        Some(ep) => {
+            let server = shared.serve(ep)?;
+            info!("canal de contrôle publié : {ep}");
             Some(server)
         }
         None => None,
     };
-    let want_device = cfg.device.is_some() || xpc.is_some();
+    let want_device = cfg.device.is_some() || control.is_some();
     supervise(&shared, server.as_ref(), cfg, path, stop, want_device)?;
     drop(server);
     Ok(())
 }
 
-/// Boucle de supervision, avec un état partagé et un service XPC fournis par l'appelant (tests).
+/// Boucle de supervision, avec un état partagé et un canal de contrôle fournis par l'appelant (tests).
 /// `want_device` : crée le périphérique virtuel même si la configuration n'en décrit pas.
 pub fn supervise(
     shared: &Shared,
-    server: Option<&lw_sys::xpc::Server>,
+    server: Option<&lw_sys::ctl::Server>,
     cfg: Config,
     path: Option<PathBuf>,
     stop: &Stop,
@@ -415,7 +415,7 @@ pub fn supervise(
                         .unwrap_or_else(PoisonError::into_inner)
                         .generation = generation;
                     if let Some(s) = server {
-                        s.set_shmem(&d.region);
+                        s.set_region(&d.region);
                     }
                     shared.set_device(d.status.clone());
                     info!(

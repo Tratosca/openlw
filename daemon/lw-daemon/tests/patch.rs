@@ -1,7 +1,6 @@
-//! Patch de bout en bout sur lo0 : découverte/patch par la commande de contrôle, rechargement de
+//! Patch de bout en bout sur l'interface de bouclage : découverte/patch par la commande de contrôle, rechargement de
 //! session, audio réseau → entrées du périphérique et sorties du périphérique → réseau.
 
-#![cfg(target_os = "macos")]
 #![allow(clippy::indexing_slicing)]
 
 use std::sync::mpsc;
@@ -15,6 +14,7 @@ use lw_daemon::supervisor::Session;
 use lw_daemon::{iface, rx, tx, Stop};
 use lw_proto::channel::Channel;
 use lw_proto::format::StreamFormat;
+use lw_sys::ctl::Caller;
 use lw_sys::shm::Dir;
 use serde_json::Value;
 
@@ -43,9 +43,10 @@ fn patch_network_to_device_and_back() {
     let routes = dev.routes_handle();
     let shared = Shared::new(Some(&lo), 0);
     shared.set_device(dev.status.clone());
-    let cfg: Config = serde_json::from_str(
-        r#"{"iface":"lo0","advertise":false,"device":{"channels_to_net":8,"channels_from_net":8}}"#,
-    )
+    let cfg: Config = serde_json::from_value(serde_json::json!({
+        "iface": lo.name, "advertise": false,
+        "device": {"channels_to_net": 8, "channels_from_net": 8}
+    }))
     .unwrap();
     let (reload_tx, reload_rx) = mpsc::channel();
     shared.set_config(cfg.clone(), None, reload_tx);
@@ -73,19 +74,22 @@ fn patch_network_to_device_and_back() {
     // Appelant non autorisé : refusé.
     let denied: Value = serde_json::from_str(&shared.handle(
         r#"{"cmd":"patch_input","channel":21,"device_channels":[3,4]}"#,
-        4_000_000,
+        &Caller {
+            may_edit: false,
+            ..Caller::trusted("invité")
+        },
     ))
     .unwrap();
     assert_eq!(denied["ok"], false);
     assert!(denied["error"]
         .as_str()
         .unwrap()
-        .contains("réservé aux administrateurs"));
+        .contains(lw_sys::ctl::edit_policy()));
 
     // Patch : canal 21 → entrées 3-4.
     let r: Value = serde_json::from_str(&shared.handle(
         r#"{"cmd":"patch_input","channel":21,"device_channels":[3,4]}"#,
-        0,
+        &Caller::trusted("test"),
     ))
     .unwrap();
     assert_eq!(r["ok"], true, "{r}");
@@ -125,7 +129,7 @@ fn patch_network_to_device_and_back() {
     // Patch : sorties 1-2 → canal 4005 (Standard).
     let r: Value = serde_json::from_str(&shared.handle(
         r#"{"cmd":"patch_output","channel":4005,"name":"MAC 1","format":"standard","device_channels":[1,2]}"#,
-        0,
+        &Caller::trusted("test"),
     ))
     .unwrap();
     assert_eq!(r["ok"], true, "{r}");

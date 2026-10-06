@@ -368,8 +368,13 @@ static void attach_locked(void) {
     lw_free(reply);
     size_t size = 0;
     void *base = lw_shm_map(obj, &size);
-    if (base == NULL || lw_shm_validate(base, size) != 0) {
-        plog(3, "région partagée invalide");
+    lw_host_clock clock = {0, 0, 0};
+    if (base != NULL && lw_shm_validate(base, size) == 0) {
+        lw_shm_host_clock(base, &clock);
+    }
+    /* L'horloge publiée doit être en ticks mach_absolute_time, base de GetZeroTimeStamp. */
+    if (base == NULL || clock.id != LW_CLOCK_MACH) {
+        plog(3, "région partagée invalide (magie, version, taille ou horloge hôte)");
         lw_shm_unmap(base, size);
         lw_xpc_release(obj);
         detach_locked();

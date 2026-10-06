@@ -173,6 +173,7 @@ name = "lw-sys"
 version = "0.5.0"
 dependencies = [
  "cc",
+ "serde_json",
 ]
 
 [[package]]

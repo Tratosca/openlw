@@ -1,7 +1,9 @@
-//! Région partagée daemon ↔ plugin HAL : enveloppes sûres autour de `csrc/lw_shm.c`.
+//! Région partagée daemon ↔ client audio : enveloppes sûres autour de `csrc/lw_shm.c`.
 //!
-//! La disposition et la logique (anneaux SPSC, seqlock d'horloge) n'existent qu'en C : le plugin
-//! compile le même fichier. Ici, on garantit côté Rust un seul producteur et un seul consommateur
+//! La disposition et la logique (anneaux SPSC, seqlock d'horloge) n'existent qu'en C : le plugin HAL
+//! et le pilote ASIO compilent le même fichier. Partage : objet `xpc_shmem` (macOS), section
+//! dupliquée dans le processus client (Windows) ; sous Linux, la région reste dans le daemon, qui sert
+//! lui-même les nœuds PipeWire. Ici, on garantit côté Rust un seul producteur et un seul consommateur
 //! par anneau et par processus : les extrémités ([`Producer`], [`Consumer`], [`ClockWriter`]) ne sont
 //! pas clonables et ne s'obtiennent qu'une fois.
 
@@ -33,30 +35,40 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Objet `xpc_shmem` reçu d'un serveur (retenu ; relâché au `drop` s'il n'est pas mappé).
+/// Objet de partage reçu d'un serveur : `xpc_shmem` retenu (macOS) ou handle de section (Windows).
+/// Libéré au `drop` s'il n'est pas mappé.
 pub struct SharedObject(*mut c_void);
 
-// SAFETY: un objet XPC retenu peut être transféré et relâché depuis n'importe quel thread.
+// SAFETY: un objet XPC retenu ou un handle Windows peut être transféré et libéré depuis n'importe
+// quel thread.
 unsafe impl Send for SharedObject {}
 
 impl SharedObject {
-    pub(crate) fn from_retained(p: *mut c_void) -> Option<Self> {
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+    pub(crate) fn from_raw(p: *mut c_void) -> Option<Self> {
         (!p.is_null()).then_some(Self(p))
+    }
+
+    /// Handle de section reçu du daemon (champ `shmem.handle` de la réponse à `attach`), déjà
+    /// dupliqué dans ce processus par le daemon. Le mappage vérifie la région.
+    #[cfg(windows)]
+    pub fn from_handle_value(value: u64) -> Option<Self> {
+        Self::from_raw(usize::try_from(value).ok()? as *mut c_void)
     }
 }
 
 impl Drop for SharedObject {
     fn drop(&mut self) {
-        // SAFETY: objet retenu par la couche C, relâché une seule fois.
-        unsafe { ffi::lw_xpc_release(self.0) };
+        // SAFETY: objet retenu ou handle possédé par cette valeur, libéré une seule fois.
+        unsafe { ffi::lw_shm_release(self.0) };
     }
 }
 
 struct Inner {
     base: *mut c_void,
     size: usize,
-    /// Objet xpc_shmem (créateur) ou objet reçu (client), relâché au drop.
-    obj: *mut c_void,
+    /// Objet de partage (créateur) ou objet reçu (client), libéré au drop ; NULL sous Linux.
+    handle: *mut c_void,
 }
 
 // SAFETY: la mémoire n'est accédée que par les fonctions C, atomiques pour les positions ; le partage
@@ -67,10 +79,11 @@ unsafe impl Sync for Inner {}
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        // SAFETY: `base`/`size` proviennent d'un mappage réussi, démappé une seule fois ; `obj` est retenu.
+        // SAFETY: `base`/`size` proviennent d'un mappage réussi, démappé une seule fois ; `handle` est
+        // possédé par cette région.
         unsafe {
             ffi::lw_shm_unmap(self.base, self.size);
-            ffi::lw_xpc_release(self.obj);
+            ffi::lw_shm_release(self.handle);
         }
     }
 }
@@ -122,12 +135,15 @@ impl Region {
                 "géométrie invalide (anneau puissance de 2 entre 64 et 65536, ≤ 64 canaux)",
             ));
         }
-        let mut obj: *mut c_void = std::ptr::null_mut();
-        // SAFETY: `obj` est un pointeur de sortie valide ; la couche C alloue `size` octets.
-        let base = unsafe { ffi::lw_shm_alloc(size, &mut obj) };
+        let mut handle: *mut c_void = std::ptr::null_mut();
+        // SAFETY: `handle` est un pointeur de sortie valide ; la couche C alloue `size` octets.
+        let base = unsafe { ffi::lw_shm_alloc(size, &mut handle) };
         if base.is_null() {
             return Err(Error("allocation de la région partagée impossible"));
         }
+        let mut clock = ffi::HostClock::default();
+        // SAFETY: pointeur de sortie valide.
+        unsafe { ffi::lw_host_clock_info(&mut clock) };
         // SAFETY: `base` pointe vers `size` octets fraîchement mappés, non partagés à ce stade.
         let rc = unsafe {
             ffi::lw_shm_init(
@@ -137,19 +153,20 @@ impl Region {
                 ring_frames,
                 channels_to_net,
                 channels_from_net,
+                &clock,
             )
         };
-        let region = Self::wrap(base, size, obj);
+        let region = Self::wrap(base, size, handle);
         if rc != 0 {
             return Err(Error("initialisation de la région impossible"));
         }
         Ok(region)
     }
 
-    /// Mappe une région reçue par XPC (côté plugin, ou test) et la valide.
+    /// Mappe une région reçue du daemon (côté client, ou test) et la valide.
     pub fn map(object: SharedObject) -> Result<Self, Error> {
         let mut size = 0usize;
-        // SAFETY: `object.0` est un objet xpc_shmem retenu ; `size` est un pointeur de sortie valide.
+        // SAFETY: `object.0` est un objet de partage possédé ; `size` est un pointeur de sortie valide.
         let base = unsafe { ffi::lw_shm_map(object.0, &mut size) };
         if base.is_null() {
             return Err(Error("mappage de la région impossible"));
@@ -164,15 +181,33 @@ impl Region {
         Ok(region)
     }
 
-    fn wrap(base: *mut c_void, size: usize, obj: *mut c_void) -> Self {
+    fn wrap(base: *mut c_void, size: usize, handle: *mut c_void) -> Self {
         Self {
-            inner: Arc::new(Inner { base, size, obj }),
+            inner: Arc::new(Inner { base, size, handle }),
             taken: Default::default(),
         }
     }
 
-    pub(crate) fn xpc_object(&self) -> *mut c_void {
-        self.inner.obj
+    #[cfg(target_os = "macos")]
+    pub(crate) fn handle(&self) -> *mut c_void {
+        self.inner.handle
+    }
+
+    /// Duplique la section dans le processus `pid` ; renvoie la valeur du handle dans ce processus.
+    #[cfg(windows)]
+    pub fn share_with(&self, pid: u32) -> Option<u64> {
+        // SAFETY: `handle` est la section de cette région, valide tant qu'elle vit.
+        let h = unsafe { ffi::lw_shm_share_with(self.inner.handle, pid) };
+        (h != 0).then_some(h)
+    }
+
+    /// Horloge hôte déclarée dans l'en-tête : (identifiant `lw_host_clock_id`, numérateur,
+    /// dénominateur de la conversion en ns).
+    pub fn host_clock(&self) -> (u32, u64, u64) {
+        let mut c = ffi::HostClock::default();
+        // SAFETY: région valide ; pointeur de sortie valide.
+        unsafe { ffi::lw_shm_host_clock(self.inner.base, &mut c) };
+        (c.id, c.ns_numer, c.ns_denom)
     }
 
     /// Taille de la région en octets.
@@ -356,7 +391,7 @@ pub struct ClockWriter {
 }
 
 impl ClockWriter {
-    /// Publie : à l'instant hôte `host_time` (brut, `mach_absolute_time`), la position vaut `sample_time`.
+    /// Publie : à l'instant hôte `host_time` (brut, [`crate::rt::host_time`]), la position vaut `sample_time`.
     pub fn publish(&mut self, host_time: u64, sample_time: u64, rate_scalar: f64) {
         // SAFETY: écrivain unique (garanti par `Region::clock_writer`).
         unsafe { ffi::lw_clock_publish(self.inner.base, host_time, sample_time, rate_scalar) };
@@ -430,16 +465,44 @@ mod tests {
     }
 
     #[test]
-    fn spsc_across_two_mappings() {
-        // Le daemon crée, le « plugin » mappe l'objet xpc_shmem : deux adresses, même mémoire.
-        let daemon = Region::create(48_000, 1024, 2, 2).unwrap();
+    fn host_clock_is_declared() {
+        let r = Region::create(48_000, 256, 2, 2).unwrap();
+        let (id, numer, denom) = r.host_clock();
+        let expected = if cfg!(target_os = "macos") {
+            1
+        } else if cfg!(windows) {
+            2
+        } else {
+            3
+        };
+        assert_eq!(id, expected);
+        assert!(numer > 0 && denom > 0);
+    }
+
+    /// Le daemon crée, le client mappe l'objet de partage : deux adresses, même mémoire.
+    #[cfg(target_os = "macos")]
+    fn second_mapping(daemon: &Region) -> Region {
         let server =
             crate::xpc::Server::start(None, Box::new(|_, _| "{\"ok\":true}".into())).unwrap();
-        server.set_shmem(&daemon);
+        server.set_shmem(daemon);
         let client = crate::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
         let (_, obj) = client.call_with_shmem("{}").unwrap();
-        let plugin = Region::map(obj.expect("objet xpc_shmem reçu")).unwrap();
+        Region::map(obj.expect("objet xpc_shmem reçu")).unwrap()
+    }
+
+    #[cfg(windows)]
+    fn second_mapping(daemon: &Region) -> Region {
+        let h = daemon.share_with(std::process::id()).expect("section dupliquée");
+        Region::map(SharedObject::from_handle_value(h).unwrap()).unwrap()
+    }
+
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn spsc_across_two_mappings() {
+        let daemon = Region::create(48_000, 1024, 2, 2).unwrap();
+        let plugin = second_mapping(&daemon);
         assert_eq!(plugin.geometry(), daemon.geometry());
+        assert_eq!(plugin.host_clock(), daemon.host_clock());
 
         let mut producer = plugin.producer(Dir::ToNet).unwrap();
         let mut consumer = daemon.consumer(Dir::ToNet).unwrap();

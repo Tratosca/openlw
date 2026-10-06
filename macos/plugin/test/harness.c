@@ -215,9 +215,11 @@ int main(int argc, char **argv) {
 
     printf("IO avec daemon simulé (région partagée par XPC)\n");
     size_t rsize = lw_shm_size(8192, ch, ch);
+    lw_host_clock clock;
+    lw_host_clock_info(&clock);
     void *shmem = NULL;
     void *region = lw_shm_alloc(rsize, &shmem);
-    CHECK(region && lw_shm_init(region, rsize, 48000, 8192, ch, ch) == 0, "région créée (%zu octets)", rsize);
+    CHECK(region && lw_shm_init(region, rsize, 48000, 8192, ch, ch, &clock) == 0, "région créée (%zu octets)", rsize);
     lw_server *server = lw_xpc_server_start(NULL, handler, free_resp, NULL);
     lw_xpc_server_set_shmem(server, shmem);
     void *endpoint = lw_xpc_server_endpoint(server);
@@ -300,7 +302,7 @@ int main(int argc, char **argv) {
     size_t rsize2 = lw_shm_size(8192, 4, 6);
     void *shmem2 = NULL;
     void *region2 = lw_shm_alloc(rsize2, &shmem2);
-    CHECK(region2 && lw_shm_init(region2, rsize2, 48000, 8192, 4, 6) == 0, "région n° 2 créée (4 x 6)");
+    CHECK(region2 && lw_shm_init(region2, rsize2, 48000, 8192, 4, 6, &clock) == 0, "région n° 2 créée (4 x 6)");
     lw_xpc_server_set_shmem(server, shmem2);
     CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (rattachement)");
     float six[512 * 6], back[512 * 6];

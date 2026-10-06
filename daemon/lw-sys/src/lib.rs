@@ -1,63 +1,40 @@
-//! Couche système du daemon : enveloppes sûres autour de `csrc/lw_sys.c` (macOS).
+//! Couche système du daemon : enveloppes sûres autour de la couche C (`csrc/`), une implémentation
+//! par système (macOS, Linux, Windows).
 //!
-//! - [`rt::promote`] : thread courant en `THREAD_TIME_CONSTRAINT_POLICY` (comme les threads IO de CoreAudio).
-//! - [`log`] : journal unifié (`os_log`, sous-système `fr.francois-brille.openlw`).
-//! - [`xpc`] : service de contrôle XPC, requêtes et réponses JSON.
-//! - [`shm`] : région partagée avec le plugin HAL (anneaux audio, horloge), contrat `csrc/lw_shm.h`.
-//!
-//! Sur les autres systèmes (nodes Linux), les fonctions sont des replis sans effet ou renvoient une erreur.
+//! - [`rt`] : threads temps réel, sommeil précis, horloge hôte.
+//! - [`log`] : journal du système (`os_log`, journal des événements Windows).
+//! - [`shm`] : région partagée avec le client audio (anneaux, horloge), contrat `csrc/lw_shm.h`.
+//! - [`ctl`] : canal de contrôle (JSON) : XPC (macOS), socket Unix (macOS, Linux), tube nommé (Windows).
+//! - [`xpc`] : service XPC (macOS), utilisé par [`ctl`] et par le plugin HAL.
 
-#[cfg(target_os = "macos")]
+pub mod ctl;
 pub mod shm;
 
-#[cfg(target_os = "macos")]
 mod ffi {
     use std::ffi::{c_char, c_int, c_void};
 
-    pub type HandlerFn = extern "C" fn(*const c_char, u32, *mut c_void) -> *mut c_char;
-    pub type FreeFn = extern "C" fn(*mut c_char);
-
+    /// Description de l'horloge hôte (`lw_host_clock`).
     #[repr(C)]
-    pub struct Server {
-        _private: [u8; 0],
-    }
-    #[repr(C)]
-    pub struct Client {
-        _private: [u8; 0],
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct HostClock {
+        pub id: u32,
+        pub ns_numer: u64,
+        pub ns_denom: u64,
     }
 
     extern "C" {
         pub fn lw_rt_promote(period_ns: u64, computation_ns: u64, constraint_ns: u64) -> c_int;
         pub fn lw_sleep_ns(ns: u64);
         pub fn lw_log(level: c_int, category: *const c_char, message: *const c_char);
-        pub fn lw_xpc_server_start(
-            name: *const c_char,
-            h: HandlerFn,
-            f: FreeFn,
-            ctx: *mut c_void,
-        ) -> *mut Server;
-        pub fn lw_xpc_server_endpoint(s: *mut Server) -> *mut c_void;
-        pub fn lw_xpc_server_stop(s: *mut Server);
-        pub fn lw_xpc_client_mach(name: *const c_char, privileged: c_int) -> *mut Client;
-        pub fn lw_xpc_client_endpoint(endpoint: *mut c_void) -> *mut Client;
-        pub fn lw_xpc_call(
-            c: *mut Client,
-            req: *const c_char,
-            err: *mut *const c_char,
-        ) -> *mut c_char;
-        pub fn lw_xpc_client_close(c: *mut Client);
-        pub fn lw_xpc_server_set_shmem(s: *mut Server, shmem: *mut c_void);
-        pub fn lw_xpc_call_shmem(
-            c: *mut Client,
-            req: *const c_char,
-            err: *mut *const c_char,
-            shmem: *mut *mut c_void,
-        ) -> *mut c_char;
-        pub fn lw_shm_alloc(size: usize, shmem: *mut *mut c_void) -> *mut c_void;
-        pub fn lw_shm_map(shmem: *mut c_void, size: *mut usize) -> *mut c_void;
-        pub fn lw_shm_unmap(base: *mut c_void, size: usize);
         pub fn lw_host_time() -> u64;
         pub fn lw_host_time_to_ns(t: u64) -> u64;
+        pub fn lw_host_clock_info(clock: *mut HostClock);
+        pub fn lw_shm_alloc(size: usize, handle: *mut *mut c_void) -> *mut c_void;
+        pub fn lw_shm_map(handle: *mut c_void, size: *mut usize) -> *mut c_void;
+        pub fn lw_shm_unmap(base: *mut c_void, size: usize);
+        pub fn lw_shm_release(handle: *mut c_void);
+        #[cfg(any(target_os = "macos", windows))]
+        pub fn lw_free(p: *mut c_char);
         pub fn lw_shm_size(ring_frames: u32, c0: u32, c1: u32) -> usize;
         pub fn lw_shm_init(
             base: *mut c_void,
@@ -66,8 +43,10 @@ mod ffi {
             ring_frames: u32,
             c0: u32,
             c1: u32,
+            clock: *const HostClock,
         ) -> c_int;
         pub fn lw_shm_validate(base: *const c_void, size: usize) -> c_int;
+        pub fn lw_shm_host_clock(base: *const c_void, clock: *mut HostClock);
         pub fn lw_ring_write(base: *mut c_void, dir: c_int, src: *const f32, frames: u32) -> u32;
         pub fn lw_ring_read(base: *mut c_void, dir: c_int, dst: *mut f32, frames: u32) -> u32;
         pub fn lw_ring_readable(base: *const c_void, dir: c_int) -> u32;
@@ -87,92 +66,171 @@ mod ffi {
             sample: *mut u64,
             rate: *mut f64,
         ) -> c_int;
-        pub fn lw_xpc_release(o: *mut c_void);
-        pub fn lw_free(p: *mut c_char);
+    }
+
+    #[cfg(unix)]
+    extern "C" {
         pub fn lw_uid_in_group(uid: u32, group: *const c_char) -> c_int;
+        pub fn lw_peer_cred(fd: c_int, uid: *mut u32, pid: *mut u32) -> c_int;
+        pub fn lw_geteuid() -> u32;
+    }
+
+    #[cfg(target_os = "macos")]
+    pub use mac::*;
+
+    #[cfg(target_os = "macos")]
+    mod mac {
+        use std::ffi::{c_char, c_int, c_void};
+
+        pub type HandlerFn = extern "C" fn(*const c_char, u32, *mut c_void) -> *mut c_char;
+        pub type FreeFn = extern "C" fn(*mut c_char);
+
+        #[repr(C)]
+        pub struct Server {
+            _private: [u8; 0],
+        }
+        #[repr(C)]
+        pub struct Client {
+            _private: [u8; 0],
+        }
+
+        extern "C" {
+            pub fn lw_xpc_server_start(
+                name: *const c_char,
+                h: HandlerFn,
+                f: FreeFn,
+                ctx: *mut c_void,
+            ) -> *mut Server;
+            pub fn lw_xpc_server_endpoint(s: *mut Server) -> *mut c_void;
+            pub fn lw_xpc_server_stop(s: *mut Server);
+            pub fn lw_xpc_client_mach(name: *const c_char, privileged: c_int) -> *mut Client;
+            pub fn lw_xpc_client_endpoint(endpoint: *mut c_void) -> *mut Client;
+            pub fn lw_xpc_call(
+                c: *mut Client,
+                req: *const c_char,
+                err: *mut *const c_char,
+            ) -> *mut c_char;
+            pub fn lw_xpc_client_close(c: *mut Client);
+            pub fn lw_xpc_server_set_shmem(s: *mut Server, shmem: *mut c_void);
+            pub fn lw_xpc_call_shmem(
+                c: *mut Client,
+                req: *const c_char,
+                err: *mut *const c_char,
+                shmem: *mut *mut c_void,
+            ) -> *mut c_char;
+            pub fn lw_xpc_release(o: *mut c_void);
+        }
+    }
+
+    #[cfg(windows)]
+    pub use win::*;
+
+    #[cfg(windows)]
+    mod win {
+        use std::ffi::{c_char, c_int, c_void};
+
+        /// Appelant d'un tube nommé (`lw_caller`).
+        #[repr(C)]
+        pub struct Caller {
+            pub pid: u32,
+            pub may_edit: c_int,
+            pub user: [c_char; 256],
+        }
+
+        pub type PipeHandlerFn =
+            extern "C" fn(*const c_char, *const Caller, *mut c_void) -> *mut c_char;
+        pub type PipeFreeFn = extern "C" fn(*mut c_char);
+
+        #[repr(C)]
+        pub struct PipeServer {
+            _private: [u8; 0],
+        }
+        #[repr(C)]
+        pub struct PipeClient {
+            _private: [u8; 0],
+        }
+
+        extern "C" {
+            pub fn lw_pipe_server_start(
+                name: *const c_char,
+                edit_group: *const c_char,
+                h: PipeHandlerFn,
+                f: PipeFreeFn,
+                ctx: *mut c_void,
+            ) -> *mut PipeServer;
+            pub fn lw_pipe_server_stop(s: *mut PipeServer);
+            pub fn lw_pipe_client_connect(
+                name: *const c_char,
+                timeout_ms: u32,
+                err: *mut *const c_char,
+            ) -> *mut PipeClient;
+            pub fn lw_pipe_call(
+                c: *mut PipeClient,
+                req: *const c_char,
+                err: *mut *const c_char,
+            ) -> *mut c_char;
+            pub fn lw_pipe_client_close(c: *mut PipeClient);
+            pub fn lw_shm_share_with(handle: *mut c_void, pid: u32) -> u64;
+            pub fn lw_qos_dscp(
+                sock: u64,
+                dest_ip: *const u8,
+                dest_port: u16,
+                dscp: u32,
+                error: *mut c_int,
+            ) -> *mut c_void;
+            pub fn lw_qos_close(flow: *mut c_void);
+        }
     }
 }
 
-/// Ordonnancement temps réel.
+/// Ordonnancement temps réel et horloge hôte.
 pub mod rt {
     use std::time::Duration;
 
     /// Passe le thread appelant en temps réel : il doit pouvoir s'exécuter `computation` au sein de
     /// chaque `period`, terminé au plus tard `constraint` après le début de la période.
+    /// macOS : `THREAD_TIME_CONSTRAINT_POLICY` ; Linux : `SCHED_FIFO` (exige `CAP_SYS_NICE` ou une
+    /// limite `RLIMIT_RTPRIO`) ; Windows : MMCSS « Pro Audio ». L'erreur est le code du système.
     pub fn promote(
         period: Duration,
         computation: Duration,
         constraint: Duration,
     ) -> Result<(), i32> {
-        #[cfg(target_os = "macos")]
-        {
-            let ns = |d: Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
-            // SAFETY: fonction C sans pointeur ; elle ne touche que le thread appelant.
-            let kr =
-                unsafe { super::ffi::lw_rt_promote(ns(period), ns(computation), ns(constraint)) };
-            if kr == 0 {
-                Ok(())
-            } else {
-                Err(kr)
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (period, computation, constraint);
-            Err(-1)
+        let ns = |d: Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+        // SAFETY: fonction C sans pointeur ; elle ne touche que le thread appelant.
+        let rc =
+            unsafe { super::ffi::lw_rt_promote(ns(period), ns(computation), ns(constraint)) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(rc)
         }
     }
 
-    /// Sommeil précis (`mach_wait_until`), sans attente active : seul mode d'attente admissible
-    /// dans un thread temps réel. Ailleurs, repli sur `std::thread::sleep`.
+    /// Sommeil précis, sans attente active : seul mode d'attente admissible dans un thread temps réel.
     pub fn sleep(d: Duration) {
-        #[cfg(target_os = "macos")]
-        {
-            let ns = u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
-            // SAFETY: fonction C sans pointeur ; elle ne bloque que le thread appelant.
-            unsafe { super::ffi::lw_sleep_ns(ns) };
-        }
-        #[cfg(not(target_os = "macos"))]
-        std::thread::sleep(d);
+        let ns = u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
+        // SAFETY: fonction C sans pointeur ; elle ne bloque que le thread appelant.
+        unsafe { super::ffi::lw_sleep_ns(ns) };
     }
 
-    /// Horloge hôte en nanosecondes (`mach_absolute_time` converti), base de temps de CoreAudio.
+    /// Horloge hôte en nanosecondes (base de temps du client audio).
     pub fn host_time_ns() -> u64 {
-        #[cfg(target_os = "macos")]
-        {
-            // SAFETY: fonctions C sans pointeur.
-            unsafe { super::ffi::lw_host_time_to_ns(super::ffi::lw_host_time()) }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            0
-        }
+        // SAFETY: fonctions C sans pointeur.
+        unsafe { super::ffi::lw_host_time_to_ns(super::ffi::lw_host_time()) }
     }
 
-    /// Convertit une durée en ticks hôte bruts (`mach_absolute_time`) en nanosecondes.
+    /// Convertit une durée en ticks hôte bruts en nanosecondes.
     pub fn host_time_ns_of(raw: u64) -> u64 {
-        #[cfg(target_os = "macos")]
-        {
-            // SAFETY: fonction C pure.
-            unsafe { super::ffi::lw_host_time_to_ns(raw) }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            raw
-        }
+        // SAFETY: fonction C pure.
+        unsafe { super::ffi::lw_host_time_to_ns(raw) }
     }
 
-    /// Horloge hôte brute (`mach_absolute_time`), unité attendue dans la région partagée.
+    /// Horloge hôte brute (`mach_absolute_time`, `QueryPerformanceCounter`, `CLOCK_MONOTONIC`),
+    /// unité attendue dans la région partagée.
     pub fn host_time() -> u64 {
-        #[cfg(target_os = "macos")]
-        {
-            // SAFETY: fonction C sans pointeur.
-            unsafe { super::ffi::lw_host_time() }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            0
-        }
+        // SAFETY: fonction C sans pointeur.
+        unsafe { super::ffi::lw_host_time() }
     }
 
     /// Paramètres usuels pour un thread qui émet un paquet par `interval` :
@@ -184,7 +242,7 @@ pub mod rt {
     }
 }
 
-/// Journal unifié.
+/// Journal du système.
 pub mod log {
     /// Niveau d'un message.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,44 +259,82 @@ pub mod log {
         Fault = 4,
     }
 
-    /// Écrit `message` dans le journal unifié (`log stream --predicate 'subsystem == "fr.francois-brille.openlw"'`).
+    /// Écrit `message` dans le journal du système : journal unifié sur macOS
+    /// (`log stream --predicate 'subsystem == "fr.francois-brille.openlw"'`), débogueur et journal des
+    /// événements (source OpenLW) sur Windows. Sans effet sur Linux, où journald recueille stderr.
     pub fn write(level: Level, category: &str, message: &str) {
-        #[cfg(target_os = "macos")]
-        {
-            use std::ffi::CString;
-            let cat = CString::new(category.replace('\0', " ")).unwrap_or_default();
-            let msg = CString::new(message.replace('\0', " ")).unwrap_or_default();
-            // SAFETY: deux chaînes C valides et terminées, vivantes pendant l'appel ; os_log copie le message.
-            unsafe { super::ffi::lw_log(level as i32, cat.as_ptr(), msg.as_ptr()) };
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (level, category, message);
-        }
+        use std::ffi::CString;
+        let cat = CString::new(category.replace('\0', " ")).unwrap_or_default();
+        let msg = CString::new(message.replace('\0', " ")).unwrap_or_default();
+        // SAFETY: deux chaînes C valides et terminées, vivantes pendant l'appel ; la couche C les copie.
+        unsafe { super::ffi::lw_log(level as i32, cat.as_ptr(), msg.as_ptr()) };
     }
 }
 
-/// Autorisation des appelants XPC.
+/// Autorisation des appelants identifiés par leur UID (macOS, Linux).
+#[cfg(unix)]
 pub mod auth {
     /// `true` si `uid` est root ou membre du groupe `group` (« admin » : administrateurs macOS).
     pub fn uid_in_group(uid: u32, group: &str) -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            let Ok(g) = std::ffi::CString::new(group) else {
-                return false;
-            };
-            // SAFETY: chaîne C valide pendant l'appel ; la fonction C n'utilise que des tampons locaux.
-            unsafe { super::ffi::lw_uid_in_group(uid, g.as_ptr()) == 1 }
+        let Ok(g) = std::ffi::CString::new(group) else {
+            return false;
+        };
+        // SAFETY: chaîne C valide pendant l'appel ; la fonction C n'utilise que des tampons locaux.
+        unsafe { super::ffi::lw_uid_in_group(uid, g.as_ptr()) == 1 }
+    }
+
+    /// UID effectif du processus courant.
+    pub fn euid() -> u32 {
+        // SAFETY: fonction C sans argument.
+        unsafe { super::ffi::lw_geteuid() }
+    }
+}
+
+/// Marquage DSCP par qWAVE (Windows ignore `IP_TOS`).
+#[cfg(windows)]
+pub mod qos {
+    use std::net::{SocketAddrV4, UdpSocket};
+    use std::os::windows::io::AsRawSocket;
+
+    /// Flux qWAVE d'une socket : le marquage dure tant que la valeur vit (à libérer avant la socket).
+    pub struct Flow(*mut std::ffi::c_void);
+
+    // SAFETY: le flux n'est manipulé qu'à sa fermeture, depuis n'importe quel thread.
+    unsafe impl Send for Flow {}
+
+    /// Marque `dscp` (0 à 63) sur les envois de `sock` vers `dest`. L'erreur est le code Windows
+    /// (accès refusé hors administrateur ou service).
+    pub fn set_dscp(sock: &UdpSocket, dest: SocketAddrV4, dscp: u8) -> Result<Flow, i32> {
+        let ip = dest.ip().octets();
+        let mut err = 0;
+        // SAFETY: socket valide (empruntée pendant l'appel) ; `ip` contient 4 octets ; pointeur de
+        // sortie valide.
+        let f = unsafe {
+            super::ffi::lw_qos_dscp(
+                sock.as_raw_socket(),
+                ip.as_ptr(),
+                dest.port(),
+                u32::from(dscp.min(63)),
+                &mut err,
+            )
+        };
+        if f.is_null() {
+            Err(err)
+        } else {
+            Ok(Flow(f))
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = group;
-            uid == 0
+    }
+
+    impl Drop for Flow {
+        fn drop(&mut self) {
+            // SAFETY: flux créé par `lw_qos_dscp`, fermé une seule fois.
+            unsafe { super::ffi::lw_qos_close(self.0) };
         }
     }
 }
 
-/// Contrôle XPC (requêtes et réponses JSON).
+/// Contrôle XPC (requêtes et réponses JSON), macOS.
+#[cfg(target_os = "macos")]
 pub mod xpc {
     use std::ffi::{c_char, c_void, CStr, CString};
     use std::fmt;
@@ -260,7 +356,6 @@ pub mod xpc {
 
     impl std::error::Error for Error {}
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     extern "C" fn trampoline(req: *const c_char, uid: u32, ctx: *mut c_void) -> *mut c_char {
         let run = || {
             // SAFETY: `ctx` est le `Box<Handler>` créé par `Server::start`, libéré seulement après
@@ -279,7 +374,6 @@ pub mod xpc {
             .into_raw()
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     extern "C" fn free_response(p: *mut c_char) {
         if !p.is_null() {
             // SAFETY: `p` provient de `CString::into_raw` dans `trampoline` et n'est libéré qu'ici, une fois.
@@ -289,7 +383,6 @@ pub mod xpc {
 
     /// Écouteur XPC. Arrêté et libéré au `drop`.
     pub struct Server {
-        #[cfg(target_os = "macos")]
         raw: *mut super::ffi::Server,
         ctx: *mut Handler,
     }
@@ -304,69 +397,44 @@ pub mod xpc {
     impl Server {
         /// Démarre un écouteur Mach nommé (`Some`, service déclaré dans le plist launchd) ou anonyme (`None`).
         pub fn start(mach_name: Option<&str>, handler: Handler) -> Result<Self, Error> {
+            let name = mach_name
+                .map(CString::new)
+                .transpose()
+                .map_err(|_| Error("nom de service invalide".into()))?;
             let ctx = Box::into_raw(Box::new(handler));
-            #[cfg(target_os = "macos")]
-            {
-                let name = match mach_name.map(CString::new).transpose() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        // SAFETY: `ctx` vient de `Box::into_raw` juste au-dessus et n'a pas été transmis.
-                        drop(unsafe { Box::from_raw(ctx) });
-                        return Err(Error("nom de service invalide".into()));
-                    }
-                };
-                let name_ptr = name.as_ref().map_or(std::ptr::null(), |n| n.as_ptr());
-                // SAFETY: chaîne valide ou nulle ; fonctions de rappel `extern "C"` ; `ctx` reste valide
-                // jusqu'à `lw_xpc_server_stop` (voir `Drop`).
-                let raw = unsafe {
-                    super::ffi::lw_xpc_server_start(name_ptr, trampoline, free_response, ctx.cast())
-                };
-                if raw.is_null() {
-                    // SAFETY: l'écouteur n'a pas été créé, `ctx` n'est référencé nulle part ailleurs.
-                    drop(unsafe { Box::from_raw(ctx) });
-                    return Err(Error("création de l'écouteur XPC impossible".into()));
-                }
-                Ok(Self { raw, ctx })
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = mach_name;
-                // SAFETY: `ctx` vient de `Box::into_raw` et n'a pas été transmis.
+            let name_ptr = name.as_ref().map_or(std::ptr::null(), |n| n.as_ptr());
+            // SAFETY: chaîne valide ou nulle ; fonctions de rappel `extern "C"` ; `ctx` reste valide
+            // jusqu'à `lw_xpc_server_stop` (voir `Drop`).
+            let raw = unsafe {
+                super::ffi::lw_xpc_server_start(name_ptr, trampoline, free_response, ctx.cast())
+            };
+            if raw.is_null() {
+                // SAFETY: l'écouteur n'a pas été créé, `ctx` n'est référencé nulle part ailleurs.
                 drop(unsafe { Box::from_raw(ctx) });
-                Err(Error("XPC indisponible sur ce système".into()))
+                return Err(Error("création de l'écouteur XPC impossible".into()));
             }
+            Ok(Self { raw, ctx })
         }
 
         /// Région partagée remise aux clients qui la demandent ([`Client::call_with_shmem`]).
-        #[cfg(target_os = "macos")]
         pub fn set_shmem(&self, region: &crate::shm::Region) {
             // SAFETY: `raw` est un écouteur actif ; l'objet xpc_shmem de la région est valide et la couche C
             // le retient (le relâche à l'arrêt ou au remplacement).
-            unsafe { super::ffi::lw_xpc_server_set_shmem(self.raw, region.xpc_object()) };
+            unsafe { super::ffi::lw_xpc_server_set_shmem(self.raw, region.handle()) };
         }
 
         /// Point d'accès de l'écouteur, pour un client du même processus (tests).
         pub fn endpoint(&self) -> Endpoint {
-            #[cfg(target_os = "macos")]
-            {
-                // SAFETY: `raw` est un écouteur actif ; l'objet renvoyé est retenu, libéré par `Endpoint::drop`.
-                Endpoint(unsafe { super::ffi::lw_xpc_server_endpoint(self.raw) })
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Endpoint(std::ptr::null_mut())
-            }
+            // SAFETY: `raw` est un écouteur actif ; l'objet renvoyé est retenu, libéré par `Endpoint::drop`.
+            Endpoint(unsafe { super::ffi::lw_xpc_server_endpoint(self.raw) })
         }
     }
 
     impl Drop for Server {
         fn drop(&mut self) {
-            #[cfg(target_os = "macos")]
             // SAFETY: `raw` est valide et arrêté une seule fois ; après le retour, plus aucun gestionnaire
             // ne s'exécute, `ctx` peut donc être libéré.
-            unsafe {
-                super::ffi::lw_xpc_server_stop(self.raw);
-            }
+            unsafe { super::ffi::lw_xpc_server_stop(self.raw) };
             // SAFETY: `ctx` vient de `Box::into_raw` dans `start` et n'est plus utilisé (barrière ci-dessus).
             drop(unsafe { Box::from_raw(self.ctx) });
         }
@@ -377,65 +445,63 @@ pub mod xpc {
 
     impl Drop for Endpoint {
         fn drop(&mut self) {
-            #[cfg(target_os = "macos")]
             // SAFETY: objet XPC retenu par `lw_xpc_server_endpoint`, relâché une seule fois.
-            unsafe {
-                super::ffi::lw_xpc_release(self.0);
-            }
+            unsafe { super::ffi::lw_xpc_release(self.0) };
         }
     }
 
     /// Connexion cliente.
     pub struct Client {
-        #[cfg(target_os = "macos")]
         raw: *mut super::ffi::Client,
     }
 
     // SAFETY: une connexion XPC peut être utilisée depuis n'importe quel thread.
     unsafe impl Send for Client {}
+    // SAFETY: `xpc_connection_send_message_with_reply_sync` peut être appelée depuis plusieurs threads.
+    unsafe impl Sync for Client {}
+
+    fn error_from(err: *const c_char) -> Error {
+        if err.is_null() {
+            Error("erreur XPC".into())
+        } else {
+            // SAFETY: `err` pointe vers une chaîne statique de la couche C.
+            Error(unsafe { CStr::from_ptr(err) }.to_string_lossy().into_owned())
+        }
+    }
+
+    fn take_string(out: *mut c_char) -> String {
+        // SAFETY: `out` est une chaîne allouée par strdup, terminée ; libérée juste après la copie.
+        let s = unsafe { CStr::from_ptr(out) }.to_string_lossy().into_owned();
+        // SAFETY: `out` vient de strdup dans la couche C, libéré une seule fois par `lw_free`.
+        unsafe { super::ffi::lw_free(out) };
+        s
+    }
 
     impl Client {
         /// Connexion à un service Mach (`privileged` : service du domaine système, LaunchDaemon).
         pub fn connect(mach_name: &str, privileged: bool) -> Result<Self, Error> {
-            #[cfg(target_os = "macos")]
-            {
-                let name =
-                    CString::new(mach_name).map_err(|_| Error("nom de service invalide".into()))?;
-                // SAFETY: chaîne valide pendant l'appel ; la couche C copie le nom.
-                let raw =
-                    unsafe { super::ffi::lw_xpc_client_mach(name.as_ptr(), i32::from(privileged)) };
-                if raw.is_null() {
-                    return Err(Error("connexion XPC impossible".into()));
-                }
-                Ok(Self { raw })
+            let name =
+                CString::new(mach_name).map_err(|_| Error("nom de service invalide".into()))?;
+            // SAFETY: chaîne valide pendant l'appel ; la couche C copie le nom.
+            let raw =
+                unsafe { super::ffi::lw_xpc_client_mach(name.as_ptr(), i32::from(privileged)) };
+            if raw.is_null() {
+                return Err(Error("connexion XPC impossible".into()));
             }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = (mach_name, privileged);
-                Err(Error("XPC indisponible sur ce système".into()))
-            }
+            Ok(Self { raw })
         }
 
         /// Connexion à un point d'accès (même processus).
         pub fn from_endpoint(endpoint: &Endpoint) -> Result<Self, Error> {
-            #[cfg(target_os = "macos")]
-            {
-                // SAFETY: `endpoint` est un objet XPC valide tant que l'`Endpoint` vit ; la couche C le retient.
-                let raw = unsafe { super::ffi::lw_xpc_client_endpoint(endpoint.0) };
-                if raw.is_null() {
-                    return Err(Error("connexion au point d'accès impossible".into()));
-                }
-                Ok(Self { raw })
+            // SAFETY: `endpoint` est un objet XPC valide tant que l'`Endpoint` vit ; la couche C le retient.
+            let raw = unsafe { super::ffi::lw_xpc_client_endpoint(endpoint.0) };
+            if raw.is_null() {
+                return Err(Error("connexion au point d'accès impossible".into()));
             }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = endpoint;
-                Err(Error("XPC indisponible sur ce système".into()))
-            }
+            Ok(Self { raw })
         }
 
         /// Requête synchrone qui demande aussi la région partagée du serveur.
-        #[cfg(target_os = "macos")]
         pub fn call_with_shmem(
             &self,
             request: &str,
@@ -448,90 +514,68 @@ pub mod xpc {
             let out = unsafe {
                 super::ffi::lw_xpc_call_shmem(self.raw, req.as_ptr(), &mut err, &mut obj)
             };
-            let shm = crate::shm::SharedObject::from_retained(obj);
+            let shm = crate::shm::SharedObject::from_raw(obj);
             if out.is_null() {
-                let msg = if err.is_null() {
-                    "erreur XPC".to_string()
-                } else {
-                    // SAFETY: `err` pointe vers une chaîne statique de la couche C.
-                    unsafe { CStr::from_ptr(err) }
-                        .to_string_lossy()
-                        .into_owned()
-                };
-                return Err(Error(msg));
+                return Err(error_from(err));
             }
-            // SAFETY: chaîne allouée par strdup, terminée.
-            let s = unsafe { CStr::from_ptr(out) }
-                .to_string_lossy()
-                .into_owned();
-            // SAFETY: `out` vient de strdup, libéré une seule fois.
-            unsafe { super::ffi::lw_free(out) };
-            Ok((s, shm))
+            Ok((take_string(out), shm))
         }
 
         /// Requête synchrone : JSON envoyé, JSON reçu.
         pub fn call(&self, request: &str) -> Result<String, Error> {
-            #[cfg(target_os = "macos")]
-            {
-                let req = CString::new(request)
-                    .map_err(|_| Error("requête contenant un octet nul".into()))?;
-                let mut err: *const c_char = std::ptr::null();
-                // SAFETY: `raw` est une connexion ouverte ; `req` et `err` sont valides pendant l'appel.
-                let out = unsafe { super::ffi::lw_xpc_call(self.raw, req.as_ptr(), &mut err) };
-                if out.is_null() {
-                    let msg = if err.is_null() {
-                        "erreur XPC".to_string()
-                    } else {
-                        // SAFETY: `err` pointe vers une chaîne statique de la couche C.
-                        unsafe { CStr::from_ptr(err) }
-                            .to_string_lossy()
-                            .into_owned()
-                    };
-                    return Err(Error(msg));
-                }
-                // SAFETY: `out` est une chaîne allouée par strdup, terminée ; libérée juste après la copie.
-                let s = unsafe { CStr::from_ptr(out) }
-                    .to_string_lossy()
-                    .into_owned();
-                // SAFETY: `out` vient de strdup dans la couche C, libéré une seule fois par `lw_free`.
-                unsafe { super::ffi::lw_free(out) };
-                Ok(s)
+            let req = CString::new(request)
+                .map_err(|_| Error("requête contenant un octet nul".into()))?;
+            let mut err: *const c_char = std::ptr::null();
+            // SAFETY: `raw` est une connexion ouverte ; `req` et `err` sont valides pendant l'appel.
+            let out = unsafe { super::ffi::lw_xpc_call(self.raw, req.as_ptr(), &mut err) };
+            if out.is_null() {
+                return Err(error_from(err));
             }
-            #[cfg(not(target_os = "macos"))]
-            {
-                let _ = request;
-                Err(Error("XPC indisponible sur ce système".into()))
-            }
+            Ok(take_string(out))
         }
     }
 
     impl Drop for Client {
         fn drop(&mut self) {
-            #[cfg(target_os = "macos")]
             // SAFETY: connexion ouverte par `connect` ou `from_endpoint`, fermée une seule fois.
-            unsafe {
-                super::ffi::lw_xpc_client_close(self.raw);
-            }
+            unsafe { super::ffi::lw_xpc_client_close(self.raw) };
         }
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 mod tests {
     use std::time::Duration;
 
+    /// macOS et Windows accordent le temps réel sans privilège ; Linux exige `CAP_SYS_NICE` ou une
+    /// limite `RLIMIT_RTPRIO`, rarement présentes en CI.
     #[test]
-    fn rt_promotion_succeeds() {
-        std::thread::spawn(|| super::rt::promote_for_packet_interval(Duration::from_millis(1)))
-            .join()
-            .unwrap()
-            .expect("THREAD_TIME_CONSTRAINT_POLICY refusée");
+    fn rt_promotion() {
+        let r =
+            std::thread::spawn(|| super::rt::promote_for_packet_interval(Duration::from_millis(1)))
+                .join()
+                .unwrap();
+        if cfg!(target_os = "linux") {
+            assert!(r.is_ok() || r == Err(1), "seul EPERM est admis sous Linux : {r:?}");
+        } else {
+            r.expect("passage en temps réel refusé");
+        }
+    }
+
+    #[test]
+    fn host_clock_advances_in_nanoseconds() {
+        let (t0, n0) = (super::rt::host_time(), super::rt::host_time_ns());
+        std::thread::sleep(Duration::from_millis(50));
+        let (t1, n1) = (super::rt::host_time(), super::rt::host_time_ns());
+        let dt = super::rt::host_time_ns_of(t1 - t0);
+        assert!((45_000_000..500_000_000).contains(&dt), "écart hôte {dt} ns");
+        assert!((45_000_000..500_000_000).contains(&(n1 - n0)));
     }
 
     #[test]
     fn rt_thread_sleeps_precisely() {
         let worst = std::thread::spawn(|| {
-            super::rt::promote_for_packet_interval(Duration::from_millis(1)).unwrap();
+            let _ = super::rt::promote_for_packet_interval(Duration::from_millis(1));
             let mut worst = Duration::ZERO;
             for _ in 0..200 {
                 let t0 = std::time::Instant::now();
@@ -542,17 +586,24 @@ mod tests {
         })
         .join()
         .unwrap();
-        assert!(
-            worst < Duration::from_millis(5),
-            "réveil tardif de {worst:?}"
-        );
+        // Les VM et conteneurs Linux (CI, OrbStack) ont des minuteurs grossiers : retard médian de
+        // 2,5 ms mesuré pour un sommeil de 500 µs, en C pur, avec ou sans SCHED_FIFO. Même tolérance
+        // sous Wine émulé (OPENLW_COARSE_TIMERS, posée par tools/ci/wine.Dockerfile).
+        let coarse = std::env::var_os("OPENLW_COARSE_TIMERS").is_some();
+        let bound = if cfg!(target_os = "linux") || coarse {
+            Duration::from_millis(50)
+        } else {
+            Duration::from_millis(5)
+        };
+        assert!(worst < bound, "réveil tardif de {worst:?}");
     }
 
     #[test]
-    fn os_log_does_not_crash() {
+    fn log_does_not_crash() {
         super::log::write(super::log::Level::Info, "test", "lw-sys : message de test");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn xpc_anonymous_roundtrip() {
         let server = super::xpc::Server::start(
@@ -569,6 +620,7 @@ mod tests {
         drop(server);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn xpc_handler_panic_is_contained() {
         let server =
@@ -578,6 +630,7 @@ mod tests {
         assert!(client.call("{}").unwrap().contains("panique"));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn xpc_passes_caller_uid() {
         let server =
@@ -591,6 +644,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn group_membership() {
         assert!(
@@ -603,6 +657,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn xpc_unknown_service_is_an_error() {
         let client =

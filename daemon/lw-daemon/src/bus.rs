@@ -2,7 +2,7 @@
 //! en Rust sûr (échantillons stockés en `AtomicU32`), et lecteur à tampon de gigue.
 //!
 //! Usage : flux RTP reçu → bus → entrées du périphérique ; sorties du périphérique → bus → flux émis.
-//! Les deux extrémités tournent sur des horloges différentes (émetteur distant contre horloge du Mac) :
+//! Les deux extrémités tournent sur des horloges différentes (émetteur distant contre horloge hôte) :
 //! le [`JitterReader`] se pré-remplit, glisse (jette l'excédent) quand l'écart dépasse le seuil haut et
 //! repart en pré-remplissage après un manque. C'est un rattrapage par glissement, pas un
 //! rééchantillonnage : il produit un saut audible rare, jusqu'à l'asservissement d'horloge (ADR 0003).

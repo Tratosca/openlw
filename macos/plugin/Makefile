@@ -9,7 +9,7 @@ NAME     := OpenLW
 BUNDLE   := build/$(NAME).driver
 EXE      := $(BUNDLE)/Contents/MacOS/$(NAME)
 LWSYS    := ../../daemon/lw-sys/csrc
-SRC      := src/OpenLWPlugIn.c $(LWSYS)/lw_shm.c $(LWSYS)/lw_sys.c
+SRC      := src/OpenLWPlugIn.c $(LWSYS)/lw_shm.c $(LWSYS)/macos/lw_sys_macos.c
 CFLAGS   := -std=gnu11 -O2 -g -Wall -Wextra -Werror -fblocks -fvisibility=hidden -I$(LWSYS)
 FRAMEWKS := -framework CoreAudio -framework CoreFoundation
 HAL_DIR  := /Library/Audio/Plug-Ins/HAL
@@ -31,8 +31,8 @@ $(BUNDLE): build/x86_64/$(NAME) build/arm64/$(NAME) Info.plist
 	cp Info.plist $(BUNDLE)/Contents/Info.plist
 	codesign --force --sign "$(SIGN_ID)" --timestamp=none $(BUNDLE)
 
-build/harness: test/harness.c $(LWSYS)/lw_shm.c $(LWSYS)/lw_sys.c $(BUNDLE)
-	clang -std=gnu11 -O1 -g -Wall -Wextra -Werror -fblocks -I$(LWSYS) test/harness.c $(LWSYS)/lw_shm.c $(LWSYS)/lw_sys.c \
+build/harness: test/harness.c $(LWSYS)/lw_shm.c $(LWSYS)/macos/lw_sys_macos.c $(BUNDLE)
+	clang -std=gnu11 -O1 -g -Wall -Wextra -Werror -fblocks -I$(LWSYS) test/harness.c $(LWSYS)/lw_shm.c $(LWSYS)/macos/lw_sys_macos.c \
 	  $(FRAMEWKS) -o $@
 
 test: build/harness

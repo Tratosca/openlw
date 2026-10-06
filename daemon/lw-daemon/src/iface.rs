@@ -1,8 +1,11 @@
-//! Interfaces réseau : nom BSD (enX), nom convivial, index, adresse IPv4.
+//! Interfaces réseau : nom système, nom convivial, index, adresse IPv4.
+//!
+//! Nom système : `en7` (macOS), `enp3s0` (Linux), nom de la connexion (« Ethernet 2 », Windows).
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use serde::Serialize;
@@ -10,9 +13,9 @@ use serde::Serialize;
 /// Interface utilisable pour Livewire (IPv4 configurée).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Iface {
-    /// Nom BSD, ex. `en7`.
+    /// Nom système, ex. `en7`, `enp3s0`, « Ethernet 2 ».
     pub name: String,
-    /// Nom convivial, ex. « Thunderbolt Ethernet » (macOS : `networksetup`) ; à défaut le nom BSD.
+    /// Nom convivial, ex. « Thunderbolt Ethernet » (macOS : `networksetup`) ; ailleurs le nom système.
     pub friendly: String,
     pub index: u32,
     pub ipv4: Ipv4Addr,
@@ -49,7 +52,7 @@ pub fn list() -> std::io::Result<Vec<Iface>> {
     Ok(out)
 }
 
-/// Résout une interface par nom BSD ou nom convivial.
+/// Résout une interface par nom système ou nom convivial.
 pub fn find(name: &str) -> std::io::Result<Iface> {
     list()?
         .into_iter()
@@ -62,7 +65,15 @@ pub fn find(name: &str) -> std::io::Result<Iface> {
         })
 }
 
-/// Correspondance nom BSD → nom convivial (macOS : `networksetup -listallhardwareports`).
+/// Correspondance nom système → nom convivial (macOS : `networksetup -listallhardwareports`).
+/// Linux n'en a pas ; sous Windows, le nom système est déjà le nom de la connexion.
+#[cfg(not(target_os = "macos"))]
+fn friendly_names() -> BTreeMap<String, String> {
+    BTreeMap::new()
+}
+
+/// Correspondance nom système → nom convivial (macOS : `networksetup -listallhardwareports`).
+#[cfg(target_os = "macos")]
 fn friendly_names() -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     let Ok(out) = Command::new("/usr/sbin/networksetup")

@@ -73,7 +73,7 @@ pub enum Latency {
     /// ≈ 17 ms ajoutées.
     #[default]
     Normal,
-    /// ≈ 35 ms ajoutées : réseau partagé ou Mac chargé.
+    /// ≈ 35 ms ajoutées : réseau partagé ou ordinateur chargé.
     Safe,
 }
 
@@ -193,7 +193,7 @@ pub struct Config {
     pub sources: Vec<SourceConfig>,
     #[serde(default)]
     pub destinations: Vec<DestinationConfig>,
-    /// Périphérique virtuel partagé avec le plugin HAL (activé par défaut avec `--xpc`).
+    /// Périphérique virtuel partagé avec le client audio (activé par défaut avec `--control`).
     #[serde(default)]
     pub device: Option<crate::device::DeviceConfig>,
     /// Présentation du périphérique dans macOS.
@@ -223,31 +223,49 @@ fn default_iface() -> String {
     AUTO_IFACE.into()
 }
 
+/// Nom par défaut d'une source émise (patch de sortie sans nom).
+pub const DEFAULT_SOURCE_NAME: &str = if cfg!(target_os = "macos") { "MAC" } else { "PC" };
+
 /// Valeur de `iface` pour le choix automatique de l'interface.
 pub const AUTO_IFACE: &str = "auto";
 
 /// Nombre maximal de canaux du périphérique dans chaque sens (16 canaux Livewire stéréo).
 pub const MAX_DEVICE_CHANNELS: u32 = 32;
 
-/// Nom de l'ordinateur (Réglages Système > Général > Partage), à défaut le nom d'hôte.
+/// Nom de l'ordinateur, annoncé par défaut sur le réseau.
+/// macOS : Réglages Système > Général > Partage, à défaut le nom d'hôte ; Linux : nom convivial de
+/// `/etc/machine-info` (`hostnamectl --pretty`), à défaut le nom d'hôte ; Windows : nom NetBIOS.
 pub fn computer_name() -> String {
-    std::process::Command::new("/usr/sbin/scutil")
-        .args(["--get", "ComputerName"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            std::process::Command::new("/bin/hostname")
-                .arg("-s")
+    let clean = |s: String| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+    #[cfg(target_os = "macos")]
+    let name = {
+        let run = |cmd: &str, args: &[&str]| {
+            std::process::Command::new(cmd)
+                .args(args)
                 .output()
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_string())
+                .and_then(clean)
+        };
+        run("/usr/sbin/scutil", &["--get", "ComputerName"]).or_else(|| run("/bin/hostname", &["-s"]))
+    };
+    #[cfg(target_os = "linux")]
+    let name = std::fs::read_to_string("/etc/machine-info")
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find_map(|l| l.strip_prefix("PRETTY_HOSTNAME="))
+                .map(|v| v.trim_matches('"').to_string())
         })
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "Mac".into())
+        .and_then(clean)
+        .or_else(|| {
+            std::fs::read_to_string("/proc/sys/kernel/hostname")
+                .ok()
+                .and_then(clean)
+        });
+    #[cfg(windows)]
+    let name = std::env::var("COMPUTERNAME").ok().and_then(clean);
+    name.unwrap_or_else(|| "OpenLW".into())
 }
 fn default_true() -> bool {
     true
@@ -278,9 +296,15 @@ impl Config {
         Ok(cfg)
     }
 
+    /// Enregistre de façon atomique : écriture d'un fichier voisin, puis renommage (un arrêt brutal
+    /// laisse l'ancienne ou la nouvelle configuration, jamais un fichier tronqué).
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, text + "\n")
+        let mut tmp = path.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = std::path::PathBuf::from(tmp);
+        std::fs::write(&tmp, text + "\n")?;
+        std::fs::rename(&tmp, path)
     }
 
     /// Choix automatique de l'interface ?

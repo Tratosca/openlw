@@ -3,8 +3,8 @@
 //!     lw-daemon ifaces
 //!     lw-daemon send --iface en7 --channel 4001 --format standard [--advertise --name "MAC 1"]
 //!     lw-daemon recv --iface en7 --channel 1
-//!     lw-daemon run --config lw-daemon.json [--xpc]
-//!     lw-daemon ctl status
+//!     lw-daemon run --config lw-daemon.json [--control [ENDPOINT]]
+//!     lw-daemon ctl status [--endpoint ENDPOINT]
 
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use lw_daemon::config::{Config, Format, Kind};
-use lw_daemon::control::SERVICE_NAME;
+use lw_sys::ctl::Endpoint;
 use lw_daemon::net::TxOptions;
 use lw_daemon::rx::RxStats;
 use lw_daemon::{advertise, iface, info, rx, tx, Stop};
@@ -21,7 +21,7 @@ use lw_proto::adv::{AdvStreamType, Source};
 use lw_proto::channel::{Channel, AUDIO_PORT};
 
 #[derive(Parser)]
-#[command(version, about = "Daemon et outil Livewire / AES67 du driver Mac")]
+#[command(version, about = "Daemon et outil Livewire / AES67 d'OpenLW")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -29,7 +29,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Liste les interfaces IPv4 (nom BSD, nom convivial, adresse).
+    /// Liste les interfaces IPv4 (nom système, nom convivial, adresse).
     Ifaces {
         #[arg(long)]
         json: bool,
@@ -86,8 +86,12 @@ enum Cmd {
         config: PathBuf,
         #[arg(long, default_value_t = 0.0)]
         seconds: f64,
-        /// Publie le service de contrôle XPC (nom déclaré dans le plist launchd).
-        #[arg(long, num_args = 0..=1, default_missing_value = SERVICE_NAME)]
+        /// Publie le canal de contrôle : sans valeur, celui du service installé (XPC sous macOS,
+        /// socket Unix sous Linux, tube nommé sous Windows) ; sinon `unix:CHEMIN`, `pipe:NOM`, `mach:NOM`.
+        #[arg(long, num_args = 0..=1, default_missing_value = "service")]
+        control: Option<String>,
+        /// Ancienne forme de `--control mach:NOM` (plist launchd).
+        #[arg(long, num_args = 0..=1, default_missing_value = lw_sys::ctl::SERVICE_NAME, hide = true)]
         xpc: Option<String>,
     },
     /// Écoute les annonces Livewire et liste les sources du réseau.
@@ -100,13 +104,17 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Interroge ou repatche un daemon en cours, par XPC.
+    /// Interroge ou repatche un daemon en cours, par le canal de contrôle.
     Ctl {
         #[command(subcommand)]
         action: CtlCmd,
-        #[arg(long, global = true, default_value = SERVICE_NAME)]
-        service: String,
-        /// Service du domaine utilisateur (LaunchAgent) plutôt que système (LaunchDaemon).
+        /// Point d'accès : `service` (défaut), `unix:CHEMIN`, `pipe:NOM`, `mach:NOM`, `mach-user:NOM`.
+        #[arg(long, global = true, default_value = "service")]
+        endpoint: String,
+        /// macOS : nom du service Mach (remplace `--endpoint`).
+        #[arg(long, global = true)]
+        service: Option<String>,
+        /// macOS : service du domaine utilisateur (LaunchAgent) plutôt que système (LaunchDaemon).
         #[arg(long, global = true)]
         user: bool,
     },
@@ -146,7 +154,7 @@ enum CtlCmd {
         from: Vec<u16>,
         #[arg(long)]
         channel: u16,
-        #[arg(long, default_value = "MAC")]
+        #[arg(long, default_value = lw_daemon::config::DEFAULT_SOURCE_NAME)]
         name: String,
         #[arg(long, value_enum, default_value = "standard")]
         format: CliFormat,
@@ -174,7 +182,7 @@ enum CtlCmd {
     },
     /// Réglages avancés : nom annoncé, latence de réception, priorité réseau.
     SetAdvanced {
-        /// Nom annoncé du Mac (vide : nom de l'ordinateur).
+        /// Nom annoncé (vide : nom de l'ordinateur).
         #[arg(long)]
         name: Option<String>,
         /// low, normal ou safe.
@@ -407,13 +415,21 @@ fn run(cli: Cli) -> Res {
         Cmd::Run {
             config,
             seconds,
+            control,
             xpc,
-        } => run_config(
-            &Config::load(&config)?,
-            Some(&config),
-            seconds,
-            xpc.as_deref(),
-        ),
+        } => {
+            let endpoint = match (control, xpc) {
+                (Some(c), _) => Some(Endpoint::parse(&c)?),
+                (None, Some(name)) => Some(Endpoint::parse(&format!("mach:{name}"))?),
+                (None, None) => None,
+            };
+            run_config(
+                &Config::load(&config)?,
+                Some(&config),
+                seconds,
+                endpoint.as_ref(),
+            )
+        }
         Cmd::Discover {
             iface,
             seconds,
@@ -431,6 +447,7 @@ fn run(cli: Cli) -> Res {
         }
         Cmd::Ctl {
             action,
+            endpoint,
             service,
             user,
         } => {
@@ -493,7 +510,15 @@ fn run(cli: Cli) -> Res {
                 CtlCmd::Ifaces => serde_json::json!({ "cmd": "ifaces" }),
                 CtlCmd::Geometry => serde_json::json!({ "cmd": "geometry" }),
             };
-            let client = lw_sys::xpc::Client::connect(&service, !user)?;
+            let endpoint = match (service, user) {
+                (Some(name), true) => Endpoint::parse(&format!("mach-user:{name}"))?,
+                (Some(name), false) => Endpoint::parse(&format!("mach:{name}"))?,
+                (None, true) => {
+                    Endpoint::parse(&format!("mach-user:{}", lw_sys::ctl::SERVICE_NAME))?
+                }
+                (None, false) => Endpoint::parse(&endpoint)?,
+            };
+            let client = lw_sys::ctl::Client::connect(&endpoint)?;
             let reply: serde_json::Value =
                 serde_json::from_str(&client.call(&request.to_string())?)?;
             if let (CtlCmd::Sources, Some(list)) =
@@ -531,8 +556,8 @@ fn run_config(
     cfg: &Config,
     path: Option<&std::path::Path>,
     seconds: f64,
-    xpc: Option<&str>,
+    control: Option<&Endpoint>,
 ) -> Res {
     let stop = stop_after(seconds);
-    lw_daemon::supervisor::run(cfg.clone(), path.map(|p| p.to_path_buf()), &stop, xpc)
+    lw_daemon::supervisor::run(cfg.clone(), path.map(|p| p.to_path_buf()), &stop, control)
 }

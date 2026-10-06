@@ -1,11 +1,12 @@
-//! Boucle audio interne : un « faux plugin » joue le rôle du plugin HAL.
-//! Il obtient la région par XPC (`attach`), écrit l'audio des applications, relit le retour
-//! en boucle interne, lit l'horloge partagée ; le daemon expose crêtes et compteurs par `status`.
+//! Boucle audio interne : un « faux client audio » joue le rôle du plugin HAL ou du pilote ASIO.
+//! Il obtient la région par le canal de contrôle (`attach` : XPC sous macOS, tube nommé sous
+//! Windows ; sous Linux la région reste dans le processus), écrit l'audio des applications, relit le
+//! retour en boucle interne, lit l'horloge partagée ; le daemon expose crêtes et compteurs par `status`.
 
-#![cfg(target_os = "macos")]
 #![allow(clippy::indexing_slicing)]
 
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lw_daemon::control::Shared;
@@ -14,6 +15,66 @@ use lw_daemon::iface::Iface;
 use lw_daemon::Stop;
 use lw_sys::shm::{Dir, Region};
 use serde_json::Value;
+
+/// Côté client : canal de contrôle (gardé ouvert) et région obtenue par `attach`.
+struct FakeClient {
+    _server: lw_sys::ctl::Server,
+    call: Box<dyn Fn(&str) -> String>,
+    attach_reply: Value,
+    region: Arc<Region>,
+}
+
+#[cfg(target_os = "macos")]
+fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
+    let server = shared.serve_anonymous_xpc().unwrap();
+    server.set_region(&dev.region);
+    let client = lw_sys::xpc::Client::from_endpoint(&server.xpc().unwrap().endpoint()).unwrap();
+    let (reply, obj) = client.call_with_shmem(r#"{"cmd":"attach"}"#).unwrap();
+    let region = Region::map(obj.expect("région jointe à la réponse attach")).unwrap();
+    FakeClient {
+        _server: server,
+        call: Box::new(move |r| client.call(r).unwrap()),
+        attach_reply: serde_json::from_str(&reply).unwrap(),
+        region: Arc::new(region),
+    }
+}
+
+#[cfg(windows)]
+fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
+    let ep = lw_sys::ctl::Endpoint::Pipe(format!(
+        "fr.francois-brille.openlw.device-test.{}",
+        std::process::id()
+    ));
+    let server = shared.serve(&ep).unwrap();
+    server.set_region(&dev.region);
+    let client = lw_sys::ctl::Client::connect(&ep).unwrap();
+    let (reply, obj) = client.call_with_region(r#"{"cmd":"attach"}"#).unwrap();
+    let region = Region::map(obj.expect("section jointe à la réponse attach")).unwrap();
+    FakeClient {
+        _server: server,
+        call: Box::new(move |r| client.call(r).unwrap()),
+        attach_reply: serde_json::from_str(&reply).unwrap(),
+        region: Arc::new(region),
+    }
+}
+
+/// Linux : le daemon sert lui-même les nœuds PipeWire, la région ne quitte pas le processus.
+#[cfg(target_os = "linux")]
+fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
+    let ep = lw_sys::ctl::Endpoint::Socket(
+        std::env::temp_dir().join(format!("openlw-device-{}.sock", std::process::id())),
+    );
+    let server = shared.serve(&ep).unwrap();
+    server.set_region(&dev.region);
+    let client = lw_sys::ctl::Client::connect(&ep).unwrap();
+    let reply = client.call(r#"{"cmd":"attach"}"#).unwrap();
+    FakeClient {
+        _server: server,
+        call: Box::new(move |r| client.call(r).unwrap()),
+        attach_reply: serde_json::from_str(&reply).unwrap(),
+        region: dev.region.clone(),
+    }
+}
 
 #[test]
 fn fake_plugin_loopback_roundtrip() {
@@ -34,16 +95,13 @@ fn fake_plugin_loopback_roundtrip() {
     };
     let shared = Shared::new(Some(&lo), 0);
     shared.set_device(dev.status.clone());
-    let server = shared.serve(None).unwrap();
-    server.set_shmem(&dev.region);
 
-    // --- côté « plugin » ---
-    let client = lw_sys::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
-    let (reply, obj) = client.call_with_shmem(r#"{"cmd":"attach"}"#).unwrap();
-    let reply: Value = serde_json::from_str(&reply).unwrap();
+    // --- côté client audio ---
+    let client = attach(&shared, &dev);
+    let reply = &client.attach_reply;
     assert_eq!(reply["ok"], true);
     assert_eq!(reply["device"]["channels_to_net"], 2);
-    let region = Region::map(obj.expect("région jointe à la réponse attach")).unwrap();
+    let region = &client.region;
     let mut to_net = region.producer(Dir::ToNet).unwrap();
     let mut from_net = region.consumer(Dir::FromNet).unwrap();
 
@@ -98,9 +156,9 @@ fn fake_plugin_loopback_roundtrip() {
     );
     assert_eq!(received, sent, "échantillons identiques, dans l'ordre");
 
-    // État vu par XPC : crêtes ≈ −6 dBFS, aucun débordement.
+    // État vu par le canal de contrôle : aucun débordement.
     std::thread::sleep(Duration::from_millis(150));
-    let status: Value = serde_json::from_str(&client.call(r#"{"cmd":"status"}"#).unwrap()).unwrap();
+    let status: Value = serde_json::from_str(&(client.call)(r#"{"cmd":"status"}"#)).unwrap();
     let d = &status["status"]["device"];
     assert_eq!(d["to_net_overruns"], 0);
     assert_eq!(d["from_net_overruns"], 0);

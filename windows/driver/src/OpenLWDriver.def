@@ -1,4 +1,3 @@
-LIBRARY OpenLWDriver
 EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE

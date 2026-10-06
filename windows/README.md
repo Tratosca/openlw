@@ -6,10 +6,18 @@ Windows 10 22H2 and 11, x64 and ARM64. Audio device: ASIO® driver, displayed as
 
 | Component | Directory | Status |
 |---|---|---|
-| Network service | `daemon/` (`lw-daemon service`) | Implemented; validation on real Windows pending |
-| ASIO driver | [`windows/driver`](driver/README.md) (`OpenLWDriver.dll`, GPLv3, Steinberg SDK downloaded at build time) | Implemented; full Wine ARM64 test; real Windows and commercial hosts remain to be tested |
-| OpenLW app | `windows/app` (WinUI 3, C#) | Planned |
-| Installer | `windows/installer` (x64 and ARM64 MSI) | Planned |
+| Network service | `daemon/` (`lw-daemon service`) | Implemented; validated on Windows 11 ARM64 (tests, network, SCM) |
+| ASIO driver | [`windows/driver`](driver/README.md) (`OpenLWDriver.dll`, GPLv3, Steinberg SDK downloaded at build time) | Implemented; validated on Windows 11 ARM64 with the test host (ARM64 and emulated x64); commercial hosts remain to be tested |
+| OpenLW app | [`windows/app`](app/README.md) (WinUI 3, C#) | Implemented; starts and connects on Windows 11 ARM64; full UI review pending |
+| Installer | `windows/installer` (x64 and ARM64 MSI, WiX 5.0.2) | Implemented; install, driver test and clean removal validated (ARM64 natively, x64 under emulation) |
+
+## Installer
+
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\installer\build-msi.ps1 -Arch arm64   # or x64
+```
+
+Output: `build\OpenLW-<version>-<arch>.msi` (service, driver, app, Start menu shortcut, firewall rules, `OpenLW Users` group with the installing user). Prerequisites are listed at the top of the script. Uninstalling keeps `%ProgramData%\OpenLW`.
 
 ## Development service installation
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- OpenLW for Windows installer (WiX Toolset 5 or later), one MSI per architecture (x64, arm64).
-     Built by build-msi.ps1, which passes DaemonExe, DriverDll, AppDir and Version. -->
+     Built by build-msi.ps1, which passes DaemonExe, DriverDir, AppDir and Version. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
      xmlns:fire="http://wixtoolset.org/schemas/v4/wxs/firewall">
@@ -60,7 +60,7 @@
   <Fragment>
     <ComponentGroup Id="Driver" Directory="INSTALLFOLDER">
       <Component Id="DriverComponent">
-        <File Id="driver_dll" Source="$(DriverDll)" Name="OpenLWDriver.dll" KeyPath="yes" />
+        <File Id="driver_dll" Source="$(DriverDir)\OpenLWDriver.dll" KeyPath="yes" />
         <RegistryKey Root="HKCR" Key="CLSID\{4F9DD084-E18A-4E0E-8D38-C2854029E846}">
           <RegistryValue Type="string" Value="OpenLW" />
           <RegistryKey Key="InprocServer32">
@@ -73,6 +73,15 @@
           <RegistryValue Type="string" Name="Description" Value="OpenLW" />
         </RegistryKey>
       </Component>
+<?if $(sys.BUILDARCH) = arm64 ?>
+      <!-- OpenLWDriver.dll is an ARM64X forwarder to these: x64 host applications emulated on ARM64. -->
+      <Component Id="DriverArm64Component">
+        <File Id="driver_arm64" Source="$(DriverDir)\OpenLWDriver_arm64.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="DriverX64Component">
+        <File Id="driver_x64" Source="$(DriverDir)\OpenLWDriver_x64.dll" KeyPath="yes" />
+      </Component>
+<?endif?>
     </ComponentGroup>
   </Fragment>
 

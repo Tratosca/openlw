@@ -16,3 +16,7 @@ __pycache__/
 
 # ASIO SDK, downloaded by windows/driver/fetch-sdk.*
 windows/driver/sdk/
+
+# .NET build output (Windows app)
+windows/app/bin/
+windows/app/obj/

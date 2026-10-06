@@ -10,3 +10,9 @@ avec le protocole Livewire.
 
 OpenLW contient du code écrit pour ce projet. Il ne contient aucun code, binaire ou
 document de TLS Corp.
+
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.
+Le pilote Windows d'OpenLW (windows/driver) est construit avec le SDK ASIO de
+Steinberg Media Technologies GmbH, utilisé sous la licence GPL version 3 ; ce
+pilote est distribué sous la licence GPL version 3. Le reste d'OpenLW est sous
+licence Apache, version 2.0.

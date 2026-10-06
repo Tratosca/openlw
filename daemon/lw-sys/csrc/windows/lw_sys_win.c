@@ -1,6 +1,6 @@
 /*
  * Couche C du daemon OpenLW, Windows (10 22H2 et plus, x64 et ARM64). Le daemon tourne en service ;
- * les clients (app, pilote ASIO, `lw-daemon ctl`) le joignent par un tube nommé local.
+ * les clients (app, pilote audio, `lw-daemon ctl`) le joignent par un tube nommé local.
  *
  * Sécurité du tube :
  * - DACL : SYSTEM et Administrateurs en contrôle total ; utilisateurs authentifiés en lecture et

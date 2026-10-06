@@ -1,6 +1,6 @@
 # OpenLW
 
-**English summary.** OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-over-IP networks. On macOS (10.13 and later, Intel and Apple Silicon) it adds a virtual CoreAudio device: any application can record network channels from it and play audio that OpenLW sends to the network on the channels you choose. It discovers the sources announced on the network, lets you patch them to the computer's inputs, and announces its outputs. Windows (ASIO, x64 and ARM64) and Linux (PipeWire, x86_64 and ARM64) support is in progress: the network service already runs on all three systems. Licensed under Apache-2.0. Not affiliated with or endorsed by TLS Corp. (Telos Alliance). The documentation below is in French.
+**English summary.** OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-over-IP networks. On macOS (10.13 and later, Intel and Apple Silicon) it adds a virtual CoreAudio device: any application can record network channels from it and play audio that OpenLW sends to the network on the channels you choose. It discovers the sources announced on the network, lets you patch them to the computer's inputs, and announces its outputs. Windows (ASIO®, x64 and ARM64) and Linux (PipeWire, x86_64 and ARM64) support is in progress: the network service already runs on all three systems. Licensed under Apache-2.0. Not affiliated with or endorsed by TLS Corp. (Telos Alliance). The documentation below is in French.
 
 ---
 
@@ -9,7 +9,7 @@ OpenLW est un driver audio libre, compatible avec les réseaux Livewire® et AES
 | Système | Architectures | Périphérique audio | App | État |
 |---|---|---|---|---|
 | macOS 10.13 et plus | Intel, Apple Silicon | CoreAudio (toutes les applications) | OpenLW (AppKit, Liquid Glass sous macOS 26) | disponible |
-| Windows 10 22H2 et 11 | x64, ARM64 | ASIO (applications compatibles ASIO) | OpenLW (WinUI 3) | en cours : service réseau prêt |
+| Windows 10 22H2 et 11 | x64, ARM64 | pilote ASIO, affiché « OpenLW » (applications compatibles ASIO) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3) | en cours : service réseau prêt |
 | Linux (PipeWire) | x86_64, ARM64 | nœuds PipeWire (applications PipeWire, PulseAudio, JACK) | OpenLW (GTK4) | en cours : service réseau prêt |
 
 Feuille de route : [docs/roadmap.md](docs/roadmap.md). Ce qui suit décrit la version macOS.
@@ -67,7 +67,7 @@ La CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) teste le daemon sur
 | `macos/plugin/` | plugin CoreAudio (AudioServerPlugIn, C) : le périphérique audio |
 | `macos/app/` | app OpenLW (Swift, AppKit) |
 | `macos/installer/` | paquet `.pkg` |
-| `windows/` | service, pilote ASIO, app et installeur Windows (en cours) |
+| `windows/` | service, pilote audio, app et installeur Windows (en cours) |
 | `linux/` | unité systemd, app et paquets Linux (en cours) |
 | `docs/protocol/` | spécification réseau (ce qu'OpenLW émet et accepte) |
 | `docs/adr/` | décisions d'architecture |
@@ -86,5 +86,7 @@ La CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) teste le daemon sur
 Licence Apache, version 2.0 : voir [LICENSE](LICENSE) et [NOTICE](NOTICE).
 
 Livewire, Livewire+ et Axia sont des marques de TLS Corp. (Telos Alliance). OpenLW est un projet indépendant, ni affilié à TLS Corp., ni approuvé par elle ; ces noms n'indiquent que la compatibilité. OpenLW ne contient aucun code, binaire ou document de TLS Corp.
+
+ASIO is a registered trademark of Steinberg Media Technologies GmbH. Le pilote Windows d'OpenLW est construit avec le SDK ASIO de Steinberg, sous licence GPLv3 ; il est distribué sous cette licence.
 
 Copyright 2026 François Brille (Tratosca).

@@ -1,6 +1,6 @@
 /*
  * Région partagée daemon ↔ client audio (ADR 0005). Contrat unique : le plugin HAL (macOS), le
- * pilote ASIO (Windows) et le daemon (Rust, par FFI) compilent ce fichier et lw_shm.c. Aucune autre
+ * pilote Windows et le daemon (Rust, par FFI) compilent ce fichier et lw_shm.c. Aucune autre
  * définition de la disposition.
  *
  * Disposition : [en-tête 4096 octets][anneau TO_NET][anneau FROM_NET], échantillons float32 entrelacés.
@@ -10,7 +10,7 @@
  * jamais remises à zéro ; index = position & (ring_frames - 1).
  *
  * Règle temps réel : aucune fonction ne bloque, n'alloue ni n'appelle le système (utilisable dans
- * le thread IO de CoreAudio ou le callback ASIO).
+ * le thread IO de CoreAudio ou le rappel audio du pilote Windows).
  *
  * Compilateurs : Clang ou GCC (C11), MSVC (/std:c11 ou C++).
  */

@@ -1,11 +1,13 @@
 # OpenLW pour Windows
 
-Windows 10 22H2 et 11, x64 et ARM64. Périphérique audio : pilote ASIO ([ADR 0008](../docs/adr/0008-audio-windows.md)).
+<img src="../docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="48" align="right">
+
+Windows 10 22H2 et 11, x64 et ARM64. Périphérique audio : pilote ASIO®, affiché « OpenLW » dans les logiciels hôtes ([ADR 0008](../docs/adr/0008-audio-windows.md)).
 
 | Composant | Dossier | État |
 |---|---|---|
 | Service réseau | `daemon/` (`lw-daemon service`) | prêt, à valider sur Windows réel |
-| Pilote ASIO | `windows/asio` (GPLv3, SDK Steinberg) | à faire |
+| Pilote ASIO | `windows/driver` (`OpenLWDriver.dll`, GPLv3, SDK Steinberg téléchargé à la compilation) | à faire |
 | App OpenLW | `windows/app` (WinUI 3, C#) | à faire |
 | Installeur | `windows/installer` (MSI x64 et ARM64) | à faire |
 
@@ -38,3 +40,6 @@ OpenLW partage les ports Livewire (`SO_REUSEADDR`) et n'en occupe aucun en exclu
 ## Tests sans machine Windows
 
 `tools/ci/test-wine.sh` (ARM64, Wine natif sur hôte arm64) ou `tools/ci/test-wine.sh x64` : couche système, canal de contrôle, région partagée et périphérique. Wine n'énumère pas les cartes réseau du conteneur : les tests réseau tournent en CI, sur Windows réel.
+
+---
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.

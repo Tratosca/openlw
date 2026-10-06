@@ -54,7 +54,7 @@ Les threads d'émission passent en temps réel et attendent l'échéance sans at
 
 ## Périphérique virtuel (région partagée)
 
-Contrat unique en C : [lw-sys/csrc/lw_shm.h](lw-sys/csrc/lw_shm.h) et `lw_shm.c`, compilés **à l'identique** par le plugin HAL (et demain par le pilote ASIO). Aucune disposition mémoire n'est dupliquée en Rust : le daemon passe par ces fonctions C.
+Contrat unique en C : [lw-sys/csrc/lw_shm.h](lw-sys/csrc/lw_shm.h) et `lw_shm.c`, compilés **à l'identique** par le plugin HAL (et demain par le pilote Windows). Aucune disposition mémoire n'est dupliquée en Rust : le daemon passe par ces fonctions C.
 
 - Région = en-tête de 4 Kio + anneau `TO_NET` (applications → réseau ; producteur : plugin) + anneau `FROM_NET` (réseau → applications ; producteur : daemon), float32 entrelacés, SPSC sans verrou, positions 64 bits, compteurs de débordement et de sous-alimentation.
 - Horloge en seqlock : (temps hôte, position d'échantillon, rapport de vitesse) ; l'en-tête déclare l'horloge hôte (`mach_absolute_time`, `QueryPerformanceCounter` ou `CLOCK_MONOTONIC`). Le plugin s'en sert dans `GetZeroTimeStamp` (ADR 0003).

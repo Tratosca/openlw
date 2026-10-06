@@ -1,4 +1,4 @@
-//! Boucle audio interne : un « faux client audio » joue le rôle du plugin HAL ou du pilote ASIO.
+//! Boucle audio interne : un « faux client audio » joue le rôle du plugin HAL ou du pilote Windows.
 //! Il obtient la région par le canal de contrôle (`attach` : XPC sous macOS, tube nommé sous
 //! Windows ; sous Linux la région reste dans le processus), écrit l'audio des applications, relit le
 //! retour en boucle interne, lit l'horloge partagée ; le daemon expose crêtes et compteurs par `status`.

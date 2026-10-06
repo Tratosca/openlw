@@ -1,7 +1,7 @@
 //! Région partagée daemon ↔ client audio : enveloppes sûres autour de `csrc/lw_shm.c`.
 //!
 //! La disposition et la logique (anneaux SPSC, seqlock d'horloge) n'existent qu'en C : le plugin HAL
-//! et le pilote ASIO compilent le même fichier. Partage : objet `xpc_shmem` (macOS), section
+//! et le pilote Windows compilent le même fichier. Partage : objet `xpc_shmem` (macOS), section
 //! dupliquée dans le processus client (Windows) ; sous Linux, la région reste dans le daemon, qui sert
 //! lui-même les nœuds PipeWire. Ici, on garantit côté Rust un seul producteur et un seul consommateur
 //! par anneau et par processus : les extrémités ([`Producer`], [`Consumer`], [`ClockWriter`]) ne sont

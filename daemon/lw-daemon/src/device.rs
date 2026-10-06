@@ -1,5 +1,5 @@
 //! Côté daemon du périphérique virtuel : région partagée avec le client audio (plugin HAL sous macOS,
-//! pilote ASIO sous Windows, nœuds PipeWire du daemon sous Linux ; ADR 0005).
+//! pilote audio sous Windows, nœuds PipeWire du daemon sous Linux ; ADR 0005).
 //!
 //! Un thread temps réel cadencé à 1 ms :
 //! - publie l'horloge dans la région (horloge hôte, rapport 1,0 tant qu'aucune horloge réseau n'asservit) ;

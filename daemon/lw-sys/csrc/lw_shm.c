@@ -1,6 +1,6 @@
 /*
  * Implémentation unique de la région partagée (voir lw_shm.h). Atomiques sans verrou, sans appel
- * système : utilisable dans le thread IO du plugin HAL ou le callback ASIO.
+ * système : utilisable dans le thread IO du plugin HAL ou le rappel audio du pilote Windows.
  */
 #include "lw_shm.h"
 

@@ -1,14 +1,14 @@
-//! Supervision du daemon : périphérique virtuel, choix de l'interface et sessions réseau.
+//! Daemon supervision: virtual device, interface selection, network sessions.
 //!
-//! [`run`] est une boucle de réconciliation :
-//! 1. le périphérique (région partagée avec le plugin) est recréé quand son nombre de canaux change ;
-//!    son numéro de génération augmente et le plugin se rattache (commande `geometry`) ;
-//! 2. l'interface cible est relue toutes les 2 s : celle de la configuration, ou en mode `auto` celle
-//!    qui entend des annonces Livewire ([`crate::detect`]) ;
-//! 3. la session réseau (émission, réception, annonce, découverte) est relancée quand l'interface
-//!    change ; un changement de configuration est appliqué à chaud, flux par flux ([`Session::apply`]) :
-//!    patcher une entrée ne coupe pas les flux émis. Sans cible, aucune session : l'état indique la
-//!    recherche.
+//! [`run`] is a reconciliation loop:
+//! 1. recreate the device (region shared with the plugin) when channel counts change;
+//!    increment its generation and reattach the plugin (`geometry` command);
+//! 2. reread the target interface every 2 s: configured interface, or in `auto` mode the one
+//!    receiving Livewire advertisements ([`crate::detect`]);
+//! 3. restart the network session (transmission, reception, advertisements, discovery) when the interface
+//!    changes; apply configuration changes live, stream by stream ([`Session::apply`]):
+//!    patching an input does not interrupt transmitted streams. Without a target, no session: state indicates
+//!    searching.
 
 use std::io;
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ use crate::net::TxOptions;
 use crate::patch;
 use crate::{bus, discovery, error, info, rx, tx, Stop};
 
-/// Thread d'une session (flux émis ou reçu, annonce, découverte), arrêtable seul.
+/// Independently stoppable session thread (transmission, reception, advertisements, discovery).
 struct Worker {
     name: String,
     stop: Stop,
@@ -57,8 +57,8 @@ impl Worker {
     }
 }
 
-/// Paramètres qui imposent de relancer un flux émis. Le choix des sorties du périphérique n'en fait
-/// pas partie : il ne change que la table de routes.
+/// Parameters requiring a transmitted-stream restart. Device output selection is
+/// excluded: it changes only the routing table.
 #[derive(Debug, Clone, PartialEq)]
 struct TxKey {
     channel: u16,
@@ -70,7 +70,7 @@ struct TxKey {
     with_source: bool,
 }
 
-/// Paramètres qui imposent de relancer un flux reçu.
+/// Parameters requiring a received-stream restart.
 #[derive(Debug, Clone, PartialEq)]
 struct RxKey {
     group: std::net::Ipv4Addr,
@@ -94,7 +94,7 @@ struct RxEntry {
     worker: Worker,
 }
 
-/// Session en cours sur une interface : appliquée à chaud, flux par flux.
+/// Active session on an interface: apply changes live, stream by stream.
 pub struct Session {
     stop: Stop,
     pub iface: Iface,
@@ -105,7 +105,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// Démarre la découverte sur `nic`, puis applique `cfg` (voir [`Session::apply`]).
+    /// Start discovery on `nic`, then apply `cfg` (see [`Session::apply`]).
     pub fn start(
         cfg: &Config,
         nic: Iface,
@@ -136,8 +136,8 @@ impl Session {
         Ok(session)
     }
 
-    /// Applique `cfg` : démarre les flux nouveaux ou modifiés, arrête ceux qui ont disparu, garde
-    /// les autres tels quels (aucune coupure), puis remplace la table de routes du périphérique.
+    /// Apply `cfg`: start new or modified streams, stop removed streams, keep
+    /// the others unchanged (no interruption), then replace the device routing table.
     pub fn apply(
         &mut self,
         cfg: &Config,
@@ -148,7 +148,7 @@ impl Session {
         let mut table = Routes::default();
         let (mut started, mut stopped) = (0usize, 0usize);
 
-        // Flux émis.
+        // Transmitted streams.
         let mut old_tx = std::mem::take(&mut self.tx);
         for (src, stream) in cfg.sources.iter().zip(cfg.tx_streams()) {
             let key = TxKey {
@@ -205,7 +205,7 @@ impl Session {
             shared.forget_stream(&e.group);
         }
 
-        // Flux reçus.
+        // Received streams.
         let mut old_rx = std::mem::take(&mut self.rx);
         for (d, (group, port_no)) in cfg.destinations.iter().zip(cfg.rx_groups()) {
             let key = RxKey {
@@ -261,7 +261,7 @@ impl Session {
             shared.forget_stream(&e.group);
         }
 
-        // Table de routes du périphérique (remplacée d'un bloc par son thread).
+        // Device routing table (replaced atomically by its thread).
         let patched = table.outputs.len() + table.inputs.len();
         match routes {
             Some(h) => h.set(table),
@@ -269,7 +269,7 @@ impl Session {
             None => {}
         }
 
-        // Annonce : relancée seulement si ce qui est annoncé change.
+        // Advertisements: restart only if advertised content changes.
         let adv_key = (cfg.advertise && !cfg.sources.is_empty())
             .then(|| format!("{}|{:?}", cfg.terminal(), cfg.adv_sources()));
         if self.advertiser.as_ref().map(|(k, _)| Some(k)) != Some(adv_key.as_ref()) {
@@ -299,7 +299,7 @@ impl Session {
         Ok(())
     }
 
-    /// Un thread de la session s'est-il arrêté sur erreur ? (retourne la première erreur rencontrée)
+    /// Did a session thread stop with an error? Return the first error encountered.
     pub fn failed(&mut self) -> Option<String> {
         let finished = |w: &Worker| w.handle.is_finished();
         if self.discovery.as_ref().is_some_and(finished) {
@@ -317,7 +317,7 @@ impl Session {
         None
     }
 
-    /// Arrête la session et attend ses threads.
+    /// Stop the session and wait for its threads.
     pub fn stop(self) {
         self.stop.request();
         let workers = self
@@ -341,11 +341,11 @@ fn join_error(w: Worker) -> Option<String> {
     }
 }
 
-/// Erreur de démarrage du daemon.
+/// Daemon startup error.
 pub type Error = Box<dyn std::error::Error>;
 
-/// Fait tourner le daemon jusqu'à l'arrêt : canal de contrôle (`control`), détecteur, périphérique,
-/// sessions. `path` : fichier où enregistrer les modifications de configuration reçues.
+/// Run the daemon until stopped: control channel (`control`), detector, device,
+/// sessions. `path`: file in which to save received configuration changes.
 pub fn run(
     cfg: Config,
     path: Option<PathBuf>,
@@ -367,8 +367,8 @@ pub fn run(
     Ok(())
 }
 
-/// Boucle de supervision, avec un état partagé et un canal de contrôle fournis par l'appelant (tests).
-/// `want_device` : crée le périphérique virtuel même si la configuration n'en décrit pas.
+/// Supervision loop with caller-provided shared state and control channel (tests).
+/// `want_device`: create the virtual device even if not described by configuration.
 pub fn supervise(
     shared: &Shared,
     server: Option<&lw_sys::ctl::Server>,
@@ -389,6 +389,9 @@ pub fn supervise(
 
     let mut current = cfg;
     let mut dev: Option<(DeviceConfig, Stop, device::Device)> = None;
+    // Linux: PipeWire nodes connected to device region (ADR 0009).
+    #[cfg(all(target_os = "linux", feature = "pipewire"))]
+    let mut nodes: Option<lw_pw::Bridge> = None;
     let mut generation = 0u64;
     let mut session: Option<Session> = None;
     let mut restart = true;
@@ -396,12 +399,14 @@ pub fn supervise(
     let mut last_check: Option<Instant> = None;
     let mut last_error = String::new();
     while !stop.requested() {
-        // 1. Périphérique.
+        // 1. Device.
         let dc = current.device_config();
         if want_device && dev.as_ref().is_none_or(|(c, _, _)| *c != dc) {
             if let Some(s) = session.take() {
                 s.stop();
             }
+            #[cfg(all(target_os = "linux", feature = "pipewire"))]
+            drop(nodes.take());
             if let Some((_, ds, d)) = dev.take() {
                 ds.request();
                 let _ = d.thread.join();
@@ -418,6 +423,26 @@ pub fn supervise(
                         s.set_region(&d.region);
                     }
                     shared.set_device(d.status.clone());
+                    #[cfg(all(target_os = "linux", feature = "pipewire"))]
+                    {
+                        let labels = shared.labels();
+                        let cfg = lw_pw::BridgeConfig {
+                            sink_description: labels.output_device_name,
+                            source_description: labels.input_device_name,
+                            input_margin: current.latency.input_margin(),
+                        };
+                        let report: lw_pw::Report = |is_error, message| {
+                            if is_error {
+                                error!("{message}");
+                            } else {
+                                info!("{message}");
+                            }
+                        };
+                        match lw_pw::start(d.region.clone(), cfg, report) {
+                            Ok(b) => nodes = Some(b),
+                            Err(e) => error!("nœuds PipeWire : {e}"),
+                        }
+                    }
                     info!(
                         "périphérique virtuel n° {generation} : {} sorties vers le réseau, {} entrées depuis le réseau{}",
                         dc.channels_to_net,
@@ -436,7 +461,7 @@ pub fn supervise(
         }
         let routes = dev.as_ref().map(|(_, _, d)| d.routes_handle());
 
-        // 2. Interface cible (relue toutes les 2 s : `iface::list` interroge networksetup).
+        // 2. Target interface (reread every 2 s: `iface::list` queries networksetup).
         if restart
             || reconfigure
             || last_check.is_none_or(|t| t.elapsed() >= Duration::from_secs(2))
@@ -492,7 +517,7 @@ pub fn supervise(
                 }
                 restart = false;
             } else if reconfigure {
-                // Même interface : modification appliquée à chaud, flux par flux.
+                // Same interface: apply changes live, stream by stream.
                 if let Some(s) = session.as_mut() {
                     if let Err(e) = s.apply(&current, &shared, routes.as_ref()) {
                         error!("modification inapplicable : {e}");
@@ -502,7 +527,7 @@ pub fn supervise(
             reconfigure = false;
         }
 
-        // 3. Configuration modifiée par XPC.
+        // 3. Configuration changed through XPC.
         match reload_rx.recv_timeout(Duration::from_millis(200)) {
             Ok(next) => {
                 current = next;
@@ -511,7 +536,7 @@ pub fn supervise(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
-        // Un thread en erreur (interface perdue, port occupé…) est journalisé ; le daemon continue.
+        // Log thread errors (lost interface, occupied port, etc.); daemon continues.
         if let Some(s) = session.as_mut() {
             while let Some(e) = s.failed() {
                 error!("{e}");

@@ -69,6 +69,17 @@ struct Inner {
     size: usize,
     /// Creator sharing object or received client object, released on drop; NULL on Linux.
     handle: *mut c_void,
+    /// Endpoints currently held (TO_NET producer/consumer, FROM_NET producer/consumer, clock
+    /// writer); released when the endpoint is dropped.
+    taken: [AtomicBool; 5],
+}
+
+impl Inner {
+    fn release(&self, slot: usize) {
+        if let Some(flag) = self.taken.get(slot) {
+            flag.store(false, Ordering::Release);
+        }
+    }
 }
 
 // SAFETY: memory accessed only through C functions, atomic for positions; audio-data
@@ -88,10 +99,10 @@ impl Drop for Inner {
     }
 }
 
-/// Mapped shared region. Each endpoint obtainable once.
+/// Mapped shared region. Each endpoint is held by at most one owner at a time, and becomes
+/// available again once that owner drops it.
 pub struct Region {
     inner: Arc<Inner>,
-    taken: [AtomicBool; 5],
 }
 
 /// Parameters read from header.
@@ -183,8 +194,12 @@ impl Region {
 
     fn wrap(base: *mut c_void, size: usize, handle: *mut c_void) -> Self {
         Self {
-            inner: Arc::new(Inner { base, size, handle }),
-            taken: Default::default(),
+            inner: Arc::new(Inner {
+                base,
+                size,
+                handle,
+                taken: Default::default(),
+            }),
         }
     }
 
@@ -278,7 +293,11 @@ impl Region {
     }
 
     fn take(&self, slot: usize) -> Result<(), Error> {
-        let flag = self.taken.get(slot).ok_or(Error("extrémité inconnue"))?;
+        let flag = self
+            .inner
+            .taken
+            .get(slot)
+            .ok_or(Error("extrémité inconnue"))?;
         if flag.swap(true, Ordering::AcqRel) {
             Err(Error("extrémité déjà attribuée"))
         } else {
@@ -286,27 +305,31 @@ impl Region {
         }
     }
 
-    /// Producer for ring `dir` (once per region).
+    /// Producer for ring `dir` (one owner at a time).
     pub fn producer(&self, dir: Dir) -> Result<Producer, Error> {
-        self.take(dir as usize * 2)?;
+        let slot = dir as usize * 2;
+        self.take(slot)?;
         Ok(Producer {
             inner: self.inner.clone(),
             dir,
             channels: self.channels(dir),
+            slot,
         })
     }
 
-    /// Consumer for ring `dir` (once per region).
+    /// Consumer for ring `dir` (one owner at a time).
     pub fn consumer(&self, dir: Dir) -> Result<Consumer, Error> {
-        self.take(dir as usize * 2 + 1)?;
+        let slot = dir as usize * 2 + 1;
+        self.take(slot)?;
         Ok(Consumer {
             inner: self.inner.clone(),
             dir,
             channels: self.channels(dir),
+            slot,
         })
     }
 
-    /// Clock writer (daemon, once).
+    /// Clock writer (daemon, one owner at a time).
     pub fn clock_writer(&self) -> Result<ClockWriter, Error> {
         self.take(4)?;
         Ok(ClockWriter {
@@ -331,6 +354,13 @@ pub struct Producer {
     inner: Arc<Inner>,
     dir: Dir,
     channels: u32,
+    slot: usize,
+}
+
+impl Drop for Producer {
+    fn drop(&mut self) {
+        self.inner.release(self.slot);
+    }
 }
 
 impl Producer {
@@ -360,6 +390,13 @@ pub struct Consumer {
     inner: Arc<Inner>,
     dir: Dir,
     channels: u32,
+    slot: usize,
+}
+
+impl Drop for Consumer {
+    fn drop(&mut self) {
+        self.inner.release(self.slot);
+    }
 }
 
 impl Consumer {
@@ -372,6 +409,13 @@ impl Consumer {
     pub fn readable(&self) -> u32 {
         // SAFETY: valid region; atomic read.
         unsafe { ffi::lw_ring_readable(self.inner.base, self.dir as c_int) }
+    }
+
+    /// Discard up to `frames` oldest frames (latency catch-up); return discarded
+    /// count.
+    pub fn skip(&mut self, frames: u32) -> u32 {
+        // SAFETY: unique consumer for this ring (guaranteed by `Region::consumer`).
+        unsafe { ffi::lw_ring_skip(self.inner.base, self.dir as c_int, frames) }
     }
 
     /// Fill `out` (interleaved frames); pad missing frames with silence.
@@ -388,6 +432,12 @@ impl Consumer {
 /// Shared-clock writer.
 pub struct ClockWriter {
     inner: Arc<Inner>,
+}
+
+impl Drop for ClockWriter {
+    fn drop(&mut self) {
+        self.inner.release(4);
+    }
 }
 
 impl ClockWriter {
@@ -427,13 +477,17 @@ mod tests {
     }
 
     #[test]
-    fn ends_are_unique() {
+    fn ends_are_unique_while_held() {
         let r = Region::create(48_000, 256, 2, 2).unwrap();
-        let _p = r.producer(Dir::ToNet).unwrap();
+        let p = r.producer(Dir::ToNet).unwrap();
         assert!(r.producer(Dir::ToNet).is_err());
         let _c = r.consumer(Dir::ToNet).unwrap();
-        let _w = r.clock_writer().unwrap();
+        let w = r.clock_writer().unwrap();
         assert!(r.clock_writer().is_err());
+        drop(p);
+        drop(w);
+        assert!(r.producer(Dir::ToNet).is_ok(), "released on drop");
+        assert!(r.clock_writer().is_ok());
     }
 
     #[test]

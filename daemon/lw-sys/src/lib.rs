@@ -49,6 +49,7 @@ mod ffi {
         pub fn lw_shm_host_clock(base: *const c_void, clock: *mut HostClock);
         pub fn lw_ring_write(base: *mut c_void, dir: c_int, src: *const f32, frames: u32) -> u32;
         pub fn lw_ring_read(base: *mut c_void, dir: c_int, dst: *mut f32, frames: u32) -> u32;
+        pub fn lw_ring_skip(base: *mut c_void, dir: c_int, frames: u32) -> u32;
         pub fn lw_ring_readable(base: *const c_void, dir: c_int) -> u32;
         pub fn lw_ring_writable(base: *const c_void, dir: c_int) -> u32;
         pub fn lw_ring_counters(

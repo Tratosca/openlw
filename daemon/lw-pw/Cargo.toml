@@ -1,0 +1,18 @@
+[package]
+name = "lw-pw"
+version = "0.5.0"
+description = "Nœuds PipeWire du périphérique OpenLW (Linux) : puits « OpenLW Out » et source « OpenLW In » sur la région partagée."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+lw-sys = { version = "0.5.0", path = "../lw-sys" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = { version = "0.10", features = ["v0_3_49"] }
+
+[lints]
+workspace = true

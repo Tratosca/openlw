@@ -6,7 +6,7 @@ OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-
 |---|---|---|---|---|
 | macOS 10.13 and later | Intel, Apple Silicon | CoreAudio (all applications) | OpenLW (AppKit, Liquid Glass on macOS 26) | Available |
 | Windows 10 22H2 and 11 | x64, ARM64 | ASIO® driver, displayed as “OpenLW” (ASIO-compatible applications) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3, planned) | In progress; network service implemented |
-| Linux (PipeWire) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications, planned) | OpenLW (GTK4, planned) | In progress; network service implemented |
+| Linux (PipeWire 0.3.49+) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications) | OpenLW (GTK4, planned) | In progress; network service and PipeWire nodes implemented |
 
 See the [roadmap](docs/roadmap.md), [Windows guide](windows/README.md), and [Linux guide](linux/README.md) for platform-specific progress and validation limits. The following usage instructions describe macOS.
 

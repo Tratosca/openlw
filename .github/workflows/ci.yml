@@ -31,6 +31,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+      - name: PipeWire development files (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev clang pkg-config
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -72,6 +75,22 @@ jobs:
           $code = $LASTEXITCODE
           Stop-Process $d
           exit $code
+
+  linux-pipewire:
+    name: PipeWire nodes (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux/amd64
+          - os: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Daemon with PipeWire in a container (retry, audio loopback, reconnection)
+        run: PLATFORM=${{ matrix.platform }} tools/ci/test-pipewire.sh
 
   macos-bundle:
     name: macOS plugin, app, and package

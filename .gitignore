@@ -1,0 +1,17 @@
+# Produits de compilation
+daemon/target/
+plugin/build/
+app/build/
+build/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Captures réseau et fichiers tiers : jamais dans le dépôt
+*.pcap
+*.pcapng
+*.msi
+*.cab
+*.exe
+*.dll
+*.sys

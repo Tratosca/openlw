@@ -1,0 +1,13 @@
+{
+  "iface": "auto",
+  "terminal_name": "",
+  "advertise": true,
+  "sources": [],
+  "destinations": [],
+  "device": {
+    "channels_to_net": 2,
+    "channels_from_net": 2,
+    "ring_frames": 8192,
+    "loopback": false
+  }
+}

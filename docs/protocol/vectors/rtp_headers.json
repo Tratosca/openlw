@@ -1,0 +1,65 @@
+{
+  "source": "doc:02-rtp-audio",
+  "streams": [
+    {
+      "mode": "standard",
+      "group": "239.192.0.101",
+      "samples_per_packet": 240,
+      "channels": 2,
+      "payload_bytes_L24": 1440,
+      "ts_step": 240,
+      "packets_per_s": 200,
+      "header_hex": "806003e800075300efc00065",
+      "ssrc_is_dst": true,
+      "confidence": {
+        "ssrc_is_dst": "choix OpenLW",
+        "ts_step": "observe en Standard, suppose pour les autres formats"
+      }
+    },
+    {
+      "mode": "aes67",
+      "group": "239.192.0.101",
+      "samples_per_packet": 48,
+      "channels": 2,
+      "payload_bytes_L24": 288,
+      "ts_step": 48,
+      "packets_per_s": 1000,
+      "header_hex": "806003e800075300efc00065",
+      "ssrc_is_dst": true,
+      "confidence": {
+        "ssrc_is_dst": "choix OpenLW",
+        "ts_step": "observe en Standard, suppose pour les autres formats"
+      }
+    },
+    {
+      "mode": "livestream",
+      "group": "239.192.0.101",
+      "samples_per_packet": 12,
+      "channels": 2,
+      "payload_bytes_L24": 72,
+      "ts_step": 12,
+      "packets_per_s": 4000,
+      "header_hex": "806003e800075300efc00065",
+      "ssrc_is_dst": true,
+      "confidence": {
+        "ssrc_is_dst": "choix OpenLW",
+        "ts_step": "observe en Standard, suppose pour les autres formats"
+      }
+    },
+    {
+      "mode": "surround",
+      "group": "239.196.0.101",
+      "samples_per_packet": 60,
+      "channels": 8,
+      "payload_bytes_L24": 1440,
+      "ts_step": 60,
+      "packets_per_s": 800,
+      "header_hex": "806003e800075300efc40065",
+      "ssrc_is_dst": true,
+      "confidence": {
+        "ssrc_is_dst": "choix OpenLW",
+        "ts_step": "observe en Standard, suppose pour les autres formats"
+      }
+    }
+  ]
+}

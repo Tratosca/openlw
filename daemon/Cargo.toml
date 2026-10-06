@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["lw-daemon","lw-proto", "lw-sys"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+authors = ["François Brille (Tratosca)"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+indexing_slicing = "warn"

@@ -1,0 +1,19 @@
+[package]
+name = "lw-daemon"
+version = "0.5.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+clap = { version = "4.5.61", features = ["derive"] }
+if-addrs = "0.15.0"
+lw-proto = { version = "0.5.0", path = "../lw-proto" }
+lw-sys = { version = "0.5.0", path = "../lw-sys" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+socket2 = { version = "0.6.5", features = ["all"] }
+
+[lints]
+workspace = true

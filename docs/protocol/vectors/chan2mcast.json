@@ -1,0 +1,161 @@
+{
+  "source": "doc:01-channels",
+  "valid": [
+    {
+      "channel": 1,
+      "kind": "stereo",
+      "group": "239.192.0.1"
+    },
+    {
+      "channel": 1,
+      "kind": "backfeed",
+      "group": "239.193.0.1"
+    },
+    {
+      "channel": 1,
+      "kind": "surround",
+      "group": "239.196.0.1"
+    },
+    {
+      "channel": 2,
+      "kind": "stereo",
+      "group": "239.192.0.2"
+    },
+    {
+      "channel": 2,
+      "kind": "backfeed",
+      "group": "239.193.0.2"
+    },
+    {
+      "channel": 2,
+      "kind": "surround",
+      "group": "239.196.0.2"
+    },
+    {
+      "channel": 101,
+      "kind": "stereo",
+      "group": "239.192.0.101"
+    },
+    {
+      "channel": 101,
+      "kind": "backfeed",
+      "group": "239.193.0.101"
+    },
+    {
+      "channel": 101,
+      "kind": "surround",
+      "group": "239.196.0.101"
+    },
+    {
+      "channel": 255,
+      "kind": "stereo",
+      "group": "239.192.0.255"
+    },
+    {
+      "channel": 255,
+      "kind": "backfeed",
+      "group": "239.193.0.255"
+    },
+    {
+      "channel": 255,
+      "kind": "surround",
+      "group": "239.196.0.255"
+    },
+    {
+      "channel": 256,
+      "kind": "stereo",
+      "group": "239.192.1.0"
+    },
+    {
+      "channel": 256,
+      "kind": "backfeed",
+      "group": "239.193.1.0"
+    },
+    {
+      "channel": 256,
+      "kind": "surround",
+      "group": "239.196.1.0"
+    },
+    {
+      "channel": 257,
+      "kind": "stereo",
+      "group": "239.192.1.1"
+    },
+    {
+      "channel": 257,
+      "kind": "backfeed",
+      "group": "239.193.1.1"
+    },
+    {
+      "channel": 257,
+      "kind": "surround",
+      "group": "239.196.1.1"
+    },
+    {
+      "channel": 4001,
+      "kind": "stereo",
+      "group": "239.192.15.161"
+    },
+    {
+      "channel": 4001,
+      "kind": "backfeed",
+      "group": "239.193.15.161"
+    },
+    {
+      "channel": 4001,
+      "kind": "surround",
+      "group": "239.196.15.161"
+    },
+    {
+      "channel": 4095,
+      "kind": "stereo",
+      "group": "239.192.15.255"
+    },
+    {
+      "channel": 4095,
+      "kind": "backfeed",
+      "group": "239.193.15.255"
+    },
+    {
+      "channel": 4095,
+      "kind": "surround",
+      "group": "239.196.15.255"
+    },
+    {
+      "channel": 16384,
+      "kind": "stereo",
+      "group": "239.192.64.0"
+    },
+    {
+      "channel": 16384,
+      "kind": "backfeed",
+      "group": "239.193.64.0"
+    },
+    {
+      "channel": 16384,
+      "kind": "surround",
+      "group": "239.196.64.0"
+    },
+    {
+      "channel": 32766,
+      "kind": "stereo",
+      "group": "239.192.127.254"
+    },
+    {
+      "channel": 32766,
+      "kind": "backfeed",
+      "group": "239.193.127.254"
+    },
+    {
+      "channel": 32766,
+      "kind": "surround",
+      "group": "239.196.127.254"
+    }
+  ],
+  "invalid_channels": [
+    0,
+    32767,
+    32768,
+    65535
+  ]
+}

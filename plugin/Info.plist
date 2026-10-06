@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AudioServerPlugIn_MachServices</key>
+	<array>
+		<string>fr.francois-brille.openlw.daemon</string>
+	</array>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>fr</string>
+	<key>CFBundleExecutable</key>
+	<string>OpenLW</string>
+	<key>CFBundleIdentifier</key>
+	<string>fr.francois-brille.openlw.driver</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>OpenLW</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.5.0</string>
+	<key>CFBundleVersion</key>
+	<string>7</string>
+	<key>CFPlugInFactories</key>
+	<dict>
+		<key>E53C29E2-B6CF-4FBA-8CD6-7312B817F157</key>
+		<string>LW_Create</string>
+	</dict>
+	<key>CFPlugInTypes</key>
+	<dict>
+		<key>443ABAB8-E7B3-491A-B985-BEB9187030DB</key>
+		<array>
+			<string>E53C29E2-B6CF-4FBA-8CD6-7312B817F157</string>
+		</array>
+	</dict>
+	<key>LSMinimumSystemVersion</key>
+	<string>10.13</string>
+	<key>LWChannelsFromNet</key>
+	<integer>2</integer>
+	<key>LWChannelsToNet</key>
+	<integer>2</integer>
+</dict>
+</plist>

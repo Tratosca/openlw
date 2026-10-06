@@ -1,0 +1,22 @@
+[package]
+name = "lw-sys"
+version = "0.5.0"
+description = "Couche C du daemon (macOS) : threads temps réel, os_log, contrôle XPC. Seule crate du workspace avec du code unsafe (frontière FFI)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+build = "build.rs"
+
+# Pas de `[lints] workspace = true` : le workspace interdit `unsafe`, indispensable ici à la frontière C.
+# Chaque bloc unsafe est justifié par un commentaire SAFETY.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[build-dependencies]
+cc = "1.6.0"

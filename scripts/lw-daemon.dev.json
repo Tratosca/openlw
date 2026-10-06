@@ -1,0 +1,13 @@
+{
+  "iface": "lo0",
+  "terminal_name": "mac-livewire",
+  "advertise": false,
+  "sources": [],
+  "destinations": [],
+  "device": {
+    "channels_to_net": 8,
+    "channels_from_net": 8,
+    "ring_frames": 8192,
+    "loopback": false
+  }
+}

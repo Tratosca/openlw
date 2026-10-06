@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchDaemon du service réseau Livewire, posé par l'installeur (installer/build-pkg.sh) :
+    /Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist   (root:wheel, 644)
+    /Library/Application Support/OpenLW/lw-daemon        (binaire universel)
+    /Library/Application Support/OpenLW/lw-daemon.json   (réglages, modifiés par OpenLW)
+  Le nom MachServices est celui que le plugin HAL déclare dans AudioServerPlugIn_MachServices (ADR 0005),
+  que OpenLW et `lw-daemon ctl` interrogent.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>fr.francois-brille.openlw.daemon</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Application Support/OpenLW/lw-daemon</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>/Library/Application Support/OpenLW/lw-daemon.json</string>
+        <string>--xpc</string>
+    </array>
+    <key>MachServices</key>
+    <dict>
+        <key>fr.francois-brille.openlw.daemon</key>
+        <true/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>StandardErrorPath</key>
+    <string>/Library/Logs/OpenLW/lw-daemon.log</string>
+</dict>
+</plist>

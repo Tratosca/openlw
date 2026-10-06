@@ -1,0 +1,15 @@
+#!/bin/sh
+# Réglages par défaut (conservés s'ils existent), démarrage du service, chargement du périphérique.
+set -u
+APP="/Library/Application Support/OpenLW"
+PLIST=/Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist
+mkdir -p /Library/Logs/OpenLW
+if [ ! -f "$APP/lw-daemon.json" ]; then
+    cp "$APP/lw-daemon.default.json" "$APP/lw-daemon.json"
+fi
+chown root:wheel "$APP/lw-daemon.json" "$PLIST"
+chmod 644 "$APP/lw-daemon.json" "$PLIST"
+launchctl bootstrap system "$PLIST" 2>/dev/null || launchctl kickstart -k system/fr.francois-brille.openlw.daemon
+# coreaudiod charge le plugin au redémarrage (coupure du son de quelques secondes).
+killall coreaudiod 2>/dev/null || true
+exit 0

@@ -1,0 +1,539 @@
+//! Contrôle du daemon : état partagé et requêtes JSON reçues par XPC (ADR 0005).
+//!
+//! Requêtes : `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"attach"}` (le plugin demande en plus
+//! la région partagée, jointe par la couche C à la réponse). Réponses : `{"ok":true,...}` ou `{"ok":false,"error":...}`.
+//! L'app de configuration et la commande `lw-daemon ctl` utilisent ce protocole.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+use serde::Serialize;
+use serde_json::{json, Value};
+
+use crate::config::{Config, Format, Kind};
+use crate::editor::{self, Edit};
+use crate::rx::RxStats;
+use crate::tx::TxReport;
+
+/// Nom du service Mach déclaré dans le plist du LaunchDaemon.
+pub const SERVICE_NAME: &str = "fr.francois-brille.openlw.daemon";
+
+/// État observable du daemon.
+#[derive(Debug, Clone, Serialize)]
+pub struct Status {
+    pub version: &'static str,
+    pub pid: u32,
+    pub started_unix: u64,
+    pub uptime_s: u64,
+    /// Interface choisie automatiquement (`iface: "auto"`).
+    pub iface_auto: bool,
+    /// Aucune interface utilisable : recherche du réseau Livewire (auto) ou interface absente.
+    pub searching: bool,
+    pub iface: String,
+    pub iface_friendly: String,
+    pub ipv4: String,
+    pub tx: BTreeMap<String, TxReport>,
+    pub rx: BTreeMap<String, RxStats>,
+    pub advertised_sources: usize,
+    /// Périphérique virtuel (région partagée avec le plugin), s'il est actif.
+    pub device: Option<crate::device::DeviceStatus>,
+}
+
+/// Source de l'état du périphérique (rafraîchi par son propre thread).
+pub type DeviceStatusRef = Arc<Mutex<crate::device::DeviceStatus>>;
+
+/// État partagé entre les threads et le gestionnaire XPC.
+#[derive(Clone)]
+pub struct Shared {
+    inner: Arc<Mutex<Status>>,
+    started: Instant,
+    device: Arc<Mutex<Option<DeviceStatusRef>>>,
+    directory: crate::discovery::Directory,
+    config: Arc<Mutex<Option<ConfigSource>>>,
+    heard: crate::detect::Heard,
+}
+
+/// Configuration courante, son fichier et le canal de rechargement de la session.
+struct ConfigSource {
+    current: Config,
+    path: Option<PathBuf>,
+    reload: Sender<Config>,
+}
+
+/// Groupe autorisé à modifier le patch (en plus de root).
+pub const ADMIN_GROUP: &str = "admin";
+
+impl Shared {
+    /// `iface` : interface de la session, ou `None` tant qu'aucune n'est choisie.
+    pub fn new(iface: Option<&crate::iface::Iface>, advertised_sources: usize) -> Self {
+        let started_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Self {
+            inner: Arc::new(Mutex::new(Status {
+                version: env!("CARGO_PKG_VERSION"),
+                pid: std::process::id(),
+                started_unix,
+                uptime_s: 0,
+                iface_auto: false,
+                searching: iface.is_none(),
+                iface: iface.map(|i| i.name.clone()).unwrap_or_default(),
+                iface_friendly: iface.map(|i| i.friendly.clone()).unwrap_or_default(),
+                ipv4: iface.map(|i| i.ipv4.to_string()).unwrap_or_default(),
+                tx: BTreeMap::new(),
+                rx: BTreeMap::new(),
+                advertised_sources,
+                device: None,
+            })),
+            started: Instant::now(),
+            device: Arc::new(Mutex::new(None)),
+            directory: crate::discovery::Directory::new(),
+            config: Arc::new(Mutex::new(None)),
+            heard: crate::detect::Heard::default(),
+        }
+    }
+
+    /// Interfaces où des annonces Livewire ont été entendues (détecteur).
+    pub fn heard(&self) -> &crate::detect::Heard {
+        &self.heard
+    }
+
+    /// Aucune session : recherche du réseau (`auto`) ou interface configurée absente.
+    pub fn set_searching(&self, auto: bool) {
+        self.with(|s| {
+            s.iface_auto = auto;
+            s.searching = true;
+            s.iface.clear();
+            s.iface_friendly.clear();
+            s.ipv4.clear();
+            s.tx.clear();
+            s.rx.clear();
+        });
+    }
+
+    fn with<R>(&self, f: impl FnOnce(&mut Status) -> R) -> R {
+        // Un thread qui panique ne doit pas rendre l'état illisible : on reprend la donnée.
+        let mut guard = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        f(&mut guard)
+    }
+
+    pub fn update_tx(&self, report: &TxReport) {
+        self.with(|s| s.tx.insert(report.group.clone(), report.clone()));
+    }
+
+    pub fn update_rx(&self, stats: &RxStats) {
+        self.with(|s| s.rx.insert(stats.group.clone(), stats.clone()));
+    }
+
+    /// Nombre de sources annoncées (0 si l'annonce est désactivée).
+    pub fn set_advertised(&self, n: usize) {
+        self.with(|s| s.advertised_sources = n);
+    }
+
+    /// Retire les statistiques d'un flux arrêté.
+    pub fn forget_stream(&self, group: &str) {
+        self.with(|s| {
+            s.tx.remove(group);
+            s.rx.remove(group);
+        });
+    }
+
+    /// Branche la configuration courante : les commandes de patch la modifient, l'enregistrent dans
+    /// `path` (si fourni) et envoient la nouvelle version sur `reload`.
+    pub fn set_config(&self, current: Config, path: Option<PathBuf>, reload: Sender<Config>) {
+        *self.config.lock().unwrap_or_else(PoisonError::into_inner) = Some(ConfigSource {
+            current,
+            path,
+            reload,
+        });
+    }
+
+    /// Vide les statistiques de flux et met à jour l'interface (nouvelle session).
+    pub fn reset_streams(&self, iface: &crate::iface::Iface, auto: bool) {
+        self.with(|s| {
+            s.iface_auto = auto;
+            s.searching = false;
+            s.tx.clear();
+            s.rx.clear();
+            s.iface = iface.name.clone();
+            s.iface_friendly = iface.friendly.clone();
+            s.ipv4 = iface.ipv4.to_string();
+        });
+    }
+
+    fn apply_edit(&self, edit: &Edit) -> Value {
+        let mut guard = self.config.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(src) = guard.as_mut() else {
+            return json!({ "ok": false, "error": "configuration non modifiable (daemon lancé sans fichier de configuration)" });
+        };
+        let next = match editor::apply(&src.current, edit) {
+            Ok(c) => c,
+            Err(e) => return json!({ "ok": false, "error": e.0 }),
+        };
+        if let Some(path) = &src.path {
+            if let Err(e) = next.save(path) {
+                return json!({ "ok": false, "error": format!("enregistrement de {} impossible : {e}", path.display()) });
+            }
+        }
+        if src.reload.send(next.clone()).is_err() {
+            return json!({ "ok": false, "error": "superviseur arrêté" });
+        }
+        src.current = next.clone();
+        crate::info!("patch modifié : {edit:?}");
+        json!({ "ok": true, "config": next })
+    }
+
+    fn current_config(&self) -> Option<Config> {
+        self.config
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|s| s.current.clone())
+    }
+
+    /// Noms du périphérique et de ses canaux, d'après la configuration et les annonces reçues.
+    pub fn labels(&self) -> crate::labels::Labels {
+        let announced = self
+            .directory
+            .sources(Instant::now())
+            .into_iter()
+            .map(|s| (s.channel, s.name))
+            .collect();
+        match self.current_config() {
+            Some(cfg) => crate::labels::compute(&cfg, &announced),
+            None => crate::labels::Labels {
+                split: false,
+                name: crate::labels::DEVICE_NAME.into(),
+                input_device_name: crate::labels::INPUT_DEVICE_NAME.into(),
+                output_device_name: crate::labels::OUTPUT_DEVICE_NAME.into(),
+                input_names: Vec::new(),
+                output_names: Vec::new(),
+            },
+        }
+    }
+
+    /// Annuaire des sources découvertes (alimenté par le thread de découverte).
+    pub fn directory(&self) -> &crate::discovery::Directory {
+        &self.directory
+    }
+
+    /// Rattache l'état du périphérique virtuel.
+    pub fn set_device(&self, status: DeviceStatusRef) {
+        *self.device.lock().unwrap_or_else(PoisonError::into_inner) = Some(status);
+    }
+
+    fn device_status(&self) -> Option<crate::device::DeviceStatus> {
+        let dev = self
+            .device
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()?;
+        let s = dev.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        Some(s)
+    }
+
+    pub fn snapshot(&self) -> Status {
+        let uptime = self.started.elapsed().as_secs();
+        let device = self.device_status();
+        self.with(|s| {
+            s.uptime_s = uptime;
+            s.device = device;
+            s.clone()
+        })
+    }
+
+    /// Traite une requête JSON et renvoie la réponse JSON (jamais d'erreur côté appelant).
+    pub fn handle(&self, request: &str, peer_uid: u32) -> String {
+        let reply = match serde_json::from_str::<Value>(request) {
+            Ok(v) if is_mutating(&v) && !lw_sys::auth::uid_in_group(peer_uid, ADMIN_GROUP) => {
+                json!({ "ok": false, "error": format!("réservé aux administrateurs de ce Mac (groupe {ADMIN_GROUP}, uid {peer_uid})") })
+            }
+            Ok(v) if is_mutating(&v) => match parse_edit(&v) {
+                Ok(edit) => self.apply_edit(&edit),
+                Err(e) => json!({ "ok": false, "error": e }),
+            },
+            Ok(v) => match v.get("cmd").and_then(Value::as_str) {
+                Some("config") => match self.current_config() {
+                    Some(c) => json!({ "ok": true, "config": c }),
+                    None => json!({ "ok": false, "error": "aucune configuration chargée" }),
+                },
+                Some("ping") => {
+                    json!({ "ok": true, "pong": true, "version": env!("CARGO_PKG_VERSION") })
+                }
+                Some("status") => match serde_json::to_value(self.snapshot()) {
+                    Ok(status) => json!({ "ok": true, "status": status }),
+                    Err(e) => json!({ "ok": false, "error": e.to_string() }),
+                },
+                Some("sources") => {
+                    let sources = self.directory.sources(Instant::now());
+                    let terminals: Vec<Value> = self
+                        .directory
+                        .terminals()
+                        .into_iter()
+                        .map(|(ip, name, known, nums)| json!({ "ip": ip, "name": name, "sources_known": known, "sources_announced": nums }))
+                        .collect();
+                    json!({ "ok": true, "sources": sources, "terminals": terminals })
+                }
+                Some("ifaces") => match crate::iface::list() {
+                    Ok(list) => {
+                        let now = Instant::now();
+                        let items: Vec<Value> = list
+                            .iter()
+                            .map(|i| {
+                                let mut v = serde_json::to_value(i).unwrap_or(Value::Null);
+                                if let Some(o) = v.as_object_mut() {
+                                    o.insert(
+                                        "candidate".into(),
+                                        crate::detect::is_candidate(i).into(),
+                                    );
+                                    o.insert(
+                                        "livewire".into(),
+                                        self.heard.recent(&i.name, now).into(),
+                                    );
+                                }
+                                v
+                            })
+                            .collect();
+                        json!({ "ok": true, "ifaces": items })
+                    }
+                    Err(e) => json!({ "ok": false, "error": e.to_string() }),
+                },
+                Some("geometry") => match self.device_status() {
+                    Some(d) => {
+                        let labels = self.labels();
+                        json!({
+                            "ok": true,
+                            "generation": d.generation,
+                            "channels_to_net": d.channels_to_net,
+                            "channels_from_net": d.channels_from_net,
+                            "layout": if labels.split { "split" } else { "duplex" },
+                            "name": labels.name,
+                            "input_device_name": labels.input_device_name,
+                            "output_device_name": labels.output_device_name,
+                            "input_margin": self.current_config().map(|c| c.latency.input_margin()).unwrap_or(256),
+                            "input_names": labels.input_names,
+                            "output_names": labels.output_names,
+                        })
+                    }
+                    None => json!({ "ok": false, "error": "aucun périphérique virtuel actif" }),
+                },
+                Some("attach") => match self.device_status() {
+                    Some(d) => json!({ "ok": true, "device": d }),
+                    None => json!({ "ok": false, "error": "aucun périphérique virtuel actif" }),
+                },
+                Some(other) => {
+                    json!({ "ok": false, "error": format!("commande inconnue : {other}") })
+                }
+                None => json!({ "ok": false, "error": "champ `cmd` absent" }),
+            },
+            Err(e) => json!({ "ok": false, "error": format!("JSON invalide : {e}") }),
+        };
+        reply.to_string()
+    }
+
+    /// Démarre le service XPC (`None` : écouteur anonyme, pour les tests).
+    pub fn serve(
+        &self,
+        mach_name: Option<&str>,
+    ) -> Result<lw_sys::xpc::Server, lw_sys::xpc::Error> {
+        let me = self.clone();
+        lw_sys::xpc::Server::start(mach_name, Box::new(move |req, uid| me.handle(req, uid)))
+    }
+}
+
+const MUTATING: [&str; 10] = [
+    "patch_input",
+    "unpatch_input",
+    "patch_output",
+    "unpatch_output",
+    "set_iface",
+    "set_advertise",
+    "set_device_channels",
+    "set_device_naming",
+    "set_advanced",
+    "set_device_layout",
+];
+
+fn is_mutating(v: &Value) -> bool {
+    v.get("cmd")
+        .and_then(Value::as_str)
+        .is_some_and(|c| MUTATING.contains(&c))
+}
+
+fn channels_arg(v: &Value, key: &str) -> Result<Vec<u16>, String> {
+    let arr = v
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or(format!("`{key}` (liste de canaux) absent"))?;
+    arr.iter()
+        .map(|x| {
+            x.as_u64()
+                .and_then(|n| u16::try_from(n).ok())
+                .ok_or(format!("`{key}` : entier attendu"))
+        })
+        .collect()
+}
+
+fn opt_u16(v: &Value, key: &str) -> Result<Option<u16>, String> {
+    match v.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(x) => x
+            .as_u64()
+            .and_then(|n| u16::try_from(n).ok())
+            .map(Some)
+            .ok_or(format!("`{key}` : entier attendu")),
+    }
+}
+
+fn parse_edit(v: &Value) -> Result<Edit, String> {
+    let cmd = v.get("cmd").and_then(Value::as_str).unwrap_or_default();
+    let from_json = |key: &str, default: &str| -> Result<Value, String> {
+        Ok(v.get(key)
+            .cloned()
+            .unwrap_or_else(|| Value::String(default.into())))
+    };
+    match cmd {
+        "patch_input" => Ok(Edit::PatchInput {
+            channel: opt_u16(v, "channel")?,
+            group: match v.get("group").and_then(Value::as_str) {
+                Some(g) => Some(
+                    g.parse()
+                        .map_err(|_| "`group` : adresse IPv4 invalide".to_string())?,
+                ),
+                None => None,
+            },
+            port: opt_u16(v, "port")?.unwrap_or(5004),
+            kind: serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
+                .map_err(|e| format!("`kind` : {e}"))?,
+            device_channels: channels_arg(v, "device_channels")?,
+        }),
+        "unpatch_input" => Ok(Edit::UnpatchInput {
+            device_channels: channels_arg(v, "device_channels")?,
+        }),
+        "patch_output" => Ok(Edit::PatchOutput {
+            channel: opt_u16(v, "channel")?.ok_or("`channel` absent")?,
+            name: v
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("MAC")
+                .to_string(),
+            format: serde_json::from_value::<Format>(from_json("format", "standard")?)
+                .map_err(|e| format!("`format` : {e}"))?,
+            device_channels: channels_arg(v, "device_channels")?,
+        }),
+        "unpatch_output" => Ok(Edit::UnpatchOutput {
+            channel: opt_u16(v, "channel")?.ok_or("`channel` absent")?,
+        }),
+        "set_iface" => {
+            let name = v
+                .get("iface")
+                .and_then(Value::as_str)
+                .ok_or("`iface` absent")?;
+            if name == crate::config::AUTO_IFACE {
+                return Ok(Edit::SetIface(name.into()));
+            }
+            let nic = crate::iface::find(name).map_err(|e| e.to_string())?;
+            Ok(Edit::SetIface(nic.name))
+        }
+        "set_advanced" => Ok(Edit::SetAdvanced {
+            terminal_name: v
+                .get("terminal_name")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            latency: match v.get("latency") {
+                None | Some(Value::Null) => None,
+                Some(l) => Some(
+                    serde_json::from_value(l.clone())
+                        .map_err(|_| "`latency` : low, normal ou safe".to_string())?,
+                ),
+            },
+            dscp: match v.get("dscp") {
+                None | Some(Value::Null) => None,
+                Some(d) => Some(
+                    d.as_u64()
+                        .and_then(|n| u8::try_from(n).ok())
+                        .ok_or("`dscp` : entier de 0 à 63")?,
+                ),
+            },
+        }),
+        "set_device_layout" => Ok(Edit::SetDeviceLayout(
+            serde_json::from_value(v.get("layout").cloned().unwrap_or(Value::Null))
+                .map_err(|_| "`layout` : duplex ou split".to_string())?,
+        )),
+        "set_device_naming" => Ok(Edit::SetDeviceNaming(
+            v.get("enabled")
+                .and_then(Value::as_bool)
+                .ok_or("`enabled` (booléen) absent")?,
+        )),
+        "set_device_channels" => {
+            let n = |key: &str| -> Result<u32, String> {
+                v.get(key)
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or(format!("`{key}` (entier) absent"))
+            };
+            Ok(Edit::SetDeviceChannels {
+                to_net: n("to_net")?,
+                from_net: n("from_net")?,
+            })
+        }
+        "set_advertise" => Ok(Edit::SetAdvertise(
+            v.get("advertise")
+                .and_then(Value::as_bool)
+                .ok_or("`advertise` (booléen) absent")?,
+        )),
+        other => Err(format!("commande inconnue : {other}")),
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn shared() -> Shared {
+        let lo = crate::iface::Iface {
+            name: "lo0".into(),
+            friendly: "lo0".into(),
+            index: 1,
+            ipv4: Ipv4Addr::LOCALHOST,
+            loopback: true,
+        };
+        Shared::new(Some(&lo), 2)
+    }
+
+    #[test]
+    fn requests() {
+        let s = shared();
+        s.update_tx(&TxReport {
+            group: "239.192.15.161".into(),
+            packets: 42,
+            ..TxReport::default()
+        });
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"status"}"#, 0)).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["status"]["tx"]["239.192.15.161"]["packets"], 42);
+        assert_eq!(v["status"]["advertised_sources"], 2);
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"nope"}"#, 0)).unwrap();
+        assert_eq!(v["ok"], false);
+        let v: Value = serde_json::from_str(&s.handle("pas du json", 0)).unwrap();
+        assert_eq!(v["ok"], false);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn over_xpc() {
+        let s = shared();
+        let server = s.serve(None).unwrap();
+        let client = lw_sys::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
+        let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"ping"}"#).unwrap()).unwrap();
+        assert_eq!(v["pong"], true);
+        let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"status"}"#).unwrap()).unwrap();
+        assert_eq!(v["status"]["iface"], "lo0");
+    }
+}

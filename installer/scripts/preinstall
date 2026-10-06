@@ -1,0 +1,10 @@
+#!/bin/sh
+# Arrête le service en place avant son remplacement.
+launchctl bootout system/fr.francois-brille.openlw.daemon 2>/dev/null || true
+# Migration : versions de développement antérieures au nom OpenLW (périphérique, service, app, réglages).
+OLD=fr.francois-brille.livewire.daemon
+launchctl bootout "system/$OLD" 2>/dev/null || true
+rm -f "/Library/LaunchDaemons/$OLD.plist"
+rm -rf /Library/Audio/Plug-Ins/HAL/LivewireAudio.driver "/Applications/Livewire Control.app"
+rm -rf "/Library/Application Support/Livewire" /Library/Logs/Livewire
+exit 0

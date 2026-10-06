@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>OpenLW</title>
+    <organization>fr.francois-brille</organization>
+    <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="x86_64,arm64"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+    <allowed-os-versions>
+        <os-version min="10.13"/>
+    </allowed-os-versions>
+    <welcome file="welcome.html" mime-type="text/html"/>
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+    <choices-outline>
+        <line choice="default"/>
+    </choices-outline>
+    <choice id="default" title="OpenLW">
+        <pkg-ref id="fr.francois-brille.openlw"/>
+    </choice>
+    <pkg-ref id="fr.francois-brille.openlw" version="__VERSION__" onConclusion="none">OpenLW-component.pkg</pkg-ref>
+</installer-gui-script>

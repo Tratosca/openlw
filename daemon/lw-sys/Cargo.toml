@@ -20,6 +20,7 @@ undocumented_unsafe_blocks = "deny"
 
 [target.'cfg(windows)'.dependencies]
 serde_json = "1.0.151"
+windows-service = "0.8"
 
 [dev-dependencies]
 serde_json = "1.0.151"

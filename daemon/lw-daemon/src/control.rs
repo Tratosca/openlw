@@ -550,8 +550,7 @@ mod tests {
     fn over_xpc() {
         let s = shared();
         let server = s.serve_anonymous_xpc().unwrap();
-        let client =
-            lw_sys::xpc::Client::from_endpoint(&server.xpc().unwrap().endpoint()).unwrap();
+        let client = lw_sys::xpc::Client::from_endpoint(&server.xpc().unwrap().endpoint()).unwrap();
         let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"ping"}"#).unwrap()).unwrap();
         assert_eq!(v["pong"], true);
         let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"status"}"#).unwrap()).unwrap();
@@ -566,7 +565,10 @@ mod tests {
             std::env::temp_dir().join(format!("openlw-control-{}.sock", std::process::id())),
         );
         #[cfg(windows)]
-        let ep = Endpoint::Pipe(format!("fr.francois-brille.openlw.control-test.{}", std::process::id()));
+        let ep = Endpoint::Pipe(format!(
+            "fr.francois-brille.openlw.control-test.{}",
+            std::process::id()
+        ));
         let _server = s.serve(&ep).unwrap();
         let client = lw_sys::ctl::Client::connect(&ep).unwrap();
         let v: Value = serde_json::from_str(&client.call(r#"{"cmd":"status"}"#).unwrap()).unwrap();

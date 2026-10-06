@@ -1,16 +1,33 @@
 #!/bin/sh
-# Tests du daemon compilé pour Windows (x86_64-pc-windows-gnu), exécutés sous Wine dans un conteneur.
-# Wine n'énumère pas les cartes réseau du conteneur : les tests réseau (interfaces, multicast) ne
-# tournent que sur un vrai Windows (CI). Un seul thread de test : Rosetta (OrbStack) refuse certains
-# accès de Wine en parallèle.
-#   tools/ci/test-wine.sh            depuis la racine du dépôt
+# Tests du daemon compilé pour Windows, exécutés sous Wine dans un conteneur.
+#   tools/ci/test-wine.sh          Windows ARM64 (aarch64-pc-windows-gnullvm, Wine natif sur hôte arm64)
+#   tools/ci/test-wine.sh x64      Windows x64 (x86_64-pc-windows-gnu ; sur hôte arm64, Wine émulé)
+#
+# Limites : Wine n'énumère pas les cartes réseau du conteneur, les tests réseau (interfaces,
+# multicast) ne tournent que sur un vrai Windows (CI) ; MMCSS, jetons et ACL n'y sont qu'imités.
+# Sous émulation amd64 (Rosetta, OrbStack), un seul thread de test : Wine y échoue en parallèle.
 set -eu
 cd "$(dirname "$0")/../.."
-docker build -q --platform linux/amd64 -t openlw-wine -f tools/ci/wine.Dockerfile tools/ci >/dev/null
-docker run --rm --platform linux/amd64 -v "$PWD":/src -v openlw-target-wine:/target \
-    -v openlw-cargo-amd64:/usr/local/cargo/registry -e CARGO_TARGET_DIR=/target -w /src/daemon openlw-wine sh -c '
+case "${1:-arm64}" in
+    arm64)
+        IMAGE=openlw-wine-arm64 PLATFORM=linux/arm64 TARGET=aarch64-pc-windows-gnullvm
+        FILE=tools/ci/wine-arm64.Dockerfile VOL=openlw-target-winarm THREADS=""
+        ;;
+    x64)
+        IMAGE=openlw-wine PLATFORM=linux/amd64 TARGET=x86_64-pc-windows-gnu
+        FILE=tools/ci/wine.Dockerfile VOL=openlw-target-wine THREADS="--test-threads=1"
+        ;;
+    *)
+        echo "usage : $0 [arm64|x64]" >&2
+        exit 2
+        ;;
+esac
+docker build -q --platform "$PLATFORM" -t "$IMAGE" -f "$FILE" tools/ci >/dev/null
+docker run --rm --platform "$PLATFORM" -v "$PWD":/src -v "$VOL":/target \
+    -v "openlw-cargo-${PLATFORM#linux/}":/usr/local/cargo/registry -e CARGO_TARGET_DIR=/target \
+    -w /src/daemon "$IMAGE" sh -c "
     set -e
-    T="--target x86_64-pc-windows-gnu"
-    cargo test $T -p lw-sys -p lw-proto -- --test-threads=1
-    cargo test $T -p lw-daemon --lib -- --test-threads=1 --skip iface::tests::loopback_is_listed
-    cargo test $T -p lw-daemon --test device -- --test-threads=1'
+    T='--target $TARGET'
+    cargo test \$T -p lw-sys -p lw-proto -- $THREADS
+    cargo test \$T -p lw-daemon --lib -- $THREADS --skip iface::tests::loopback_is_listed
+    cargo test \$T -p lw-daemon --test device -- $THREADS"

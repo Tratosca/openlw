@@ -198,8 +198,7 @@ pub mod rt {
     ) -> Result<(), i32> {
         let ns = |d: Duration| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX);
         // SAFETY: fonction C sans pointeur ; elle ne touche que le thread appelant.
-        let rc =
-            unsafe { super::ffi::lw_rt_promote(ns(period), ns(computation), ns(constraint)) };
+        let rc = unsafe { super::ffi::lw_rt_promote(ns(period), ns(computation), ns(constraint)) };
         if rc == 0 {
             Ok(())
         } else {
@@ -330,6 +329,79 @@ pub mod qos {
             // SAFETY: flux créé par `lw_qos_dscp`, fermé une seule fois.
             unsafe { super::ffi::lw_qos_close(self.0) };
         }
+    }
+}
+
+/// Service Windows : glue avec le gestionnaire de services (SCM).
+#[cfg(windows)]
+pub mod service {
+    use std::ffi::OsString;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+    use std::time::Duration;
+
+    use windows_service::service::{
+        ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+        ServiceType,
+    };
+    use windows_service::service_control_handler::{self, ServiceControlHandlerResult};
+    use windows_service::{define_windows_service, service_dispatcher};
+
+    /// Corps du service : reçoit le drapeau d'arrêt, levé quand le SCM demande l'arrêt.
+    pub type Body = Box<dyn FnOnce(Arc<AtomicBool>) -> Result<(), String> + Send>;
+
+    static NAME: OnceLock<String> = OnceLock::new();
+    static BODY: Mutex<Option<Body>> = Mutex::new(None);
+
+    define_windows_service!(ffi_service_main, service_main);
+
+    fn service_main(_args: Vec<OsString>) {
+        let name = NAME.get().cloned().unwrap_or_default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let handler = move |ev| match ev {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                flag.store(true, Ordering::Relaxed);
+                ServiceControlHandlerResult::NoError
+            }
+            ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+            _ => ServiceControlHandlerResult::NotImplemented,
+        };
+        let Ok(status) = service_control_handler::register(&name, handler) else {
+            return;
+        };
+        let report = |state, accept, code| {
+            let _ = status.set_service_status(ServiceStatus {
+                service_type: ServiceType::OWN_PROCESS,
+                current_state: state,
+                controls_accepted: accept,
+                exit_code: ServiceExitCode::Win32(code),
+                checkpoint: 0,
+                wait_hint: Duration::from_secs(5),
+                process_id: None,
+            });
+        };
+        report(
+            ServiceState::Running,
+            ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+            0,
+        );
+        let body = BODY.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let result = body.map_or(Ok(()), |b| b(stop));
+        report(
+            ServiceState::Stopped,
+            ServiceControlAccept::empty(),
+            u32::from(result.is_err()),
+        );
+    }
+
+    /// Exécute `body` comme service `name` ; ne rend la main qu'à l'arrêt du service. Échoue si le
+    /// processus n'a pas été lancé par le gestionnaire de services.
+    pub fn run(name: &str, body: Body) -> Result<(), String> {
+        let _ = NAME.set(name.to_string());
+        *BODY.lock().unwrap_or_else(PoisonError::into_inner) = Some(body);
+        service_dispatcher::start(name, ffi_service_main)
+            .map_err(|e| format!("gestionnaire de services Windows : {e}"))
     }
 }
 
@@ -465,13 +537,19 @@ pub mod xpc {
             Error("erreur XPC".into())
         } else {
             // SAFETY: `err` pointe vers une chaîne statique de la couche C.
-            Error(unsafe { CStr::from_ptr(err) }.to_string_lossy().into_owned())
+            Error(
+                unsafe { CStr::from_ptr(err) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         }
     }
 
     fn take_string(out: *mut c_char) -> String {
         // SAFETY: `out` est une chaîne allouée par strdup, terminée ; libérée juste après la copie.
-        let s = unsafe { CStr::from_ptr(out) }.to_string_lossy().into_owned();
+        let s = unsafe { CStr::from_ptr(out) }
+            .to_string_lossy()
+            .into_owned();
         // SAFETY: `out` vient de strdup dans la couche C, libéré une seule fois par `lw_free`.
         unsafe { super::ffi::lw_free(out) };
         s
@@ -556,7 +634,10 @@ mod tests {
                 .join()
                 .unwrap();
         if cfg!(target_os = "linux") {
-            assert!(r.is_ok() || r == Err(1), "seul EPERM est admis sous Linux : {r:?}");
+            assert!(
+                r.is_ok() || r == Err(1),
+                "seul EPERM est admis sous Linux : {r:?}"
+            );
         } else {
             r.expect("passage en temps réel refusé");
         }
@@ -568,7 +649,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(50));
         let (t1, n1) = (super::rt::host_time(), super::rt::host_time_ns());
         let dt = super::rt::host_time_ns_of(t1 - t0);
-        assert!((45_000_000..500_000_000).contains(&dt), "écart hôte {dt} ns");
+        assert!(
+            (45_000_000..500_000_000).contains(&dt),
+            "écart hôte {dt} ns"
+        );
         assert!((45_000_000..500_000_000).contains(&(n1 - n0)));
     }
 

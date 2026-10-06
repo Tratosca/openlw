@@ -1,10 +1,18 @@
 # OpenLW
 
-**English summary.** OpenLW is an open-source macOS audio driver for Livewire®-compatible and AES67 audio-over-IP networks. It adds a virtual CoreAudio device to the Mac: any application can record network channels from it and play audio that OpenLW sends to the network on the channels you choose. It discovers the sources announced on the network, lets you patch them to the Mac's inputs, and announces the Mac's outputs. macOS 10.13 and later, Intel and Apple Silicon. Licensed under Apache-2.0. Not affiliated with or endorsed by TLS Corp. (Telos Alliance). The documentation below is in French.
+**English summary.** OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-over-IP networks. On macOS (10.13 and later, Intel and Apple Silicon) it adds a virtual CoreAudio device: any application can record network channels from it and play audio that OpenLW sends to the network on the channels you choose. It discovers the sources announced on the network, lets you patch them to the computer's inputs, and announces its outputs. Windows (ASIO, x64 and ARM64) and Linux (PipeWire, x86_64 and ARM64) support is in progress: the network service already runs on all three systems. Licensed under Apache-2.0. Not affiliated with or endorsed by TLS Corp. (Telos Alliance). The documentation below is in French.
 
 ---
 
-OpenLW est un driver audio libre pour macOS, compatible avec les réseaux Livewire® et AES67.
+OpenLW est un driver audio libre, compatible avec les réseaux Livewire® et AES67.
+
+| Système | Architectures | Périphérique audio | App | État |
+|---|---|---|---|---|
+| macOS 10.13 et plus | Intel, Apple Silicon | CoreAudio (toutes les applications) | OpenLW (AppKit, Liquid Glass sous macOS 26) | disponible |
+| Windows 10 22H2 et 11 | x64, ARM64 | ASIO (applications compatibles ASIO) | OpenLW (WinUI 3) | en cours : service réseau prêt |
+| Linux (PipeWire) | x86_64, ARM64 | nœuds PipeWire (applications PipeWire, PulseAudio, JACK) | OpenLW (GTK4) | en cours : service réseau prêt |
+
+Feuille de route : [docs/roadmap.md](docs/roadmap.md). Ce qui suit décrit la version macOS.
 
 - **Périphérique audio** : « OpenLW » (ou « OpenLW In » et « OpenLW Out »), utilisable par toutes les applications du Mac, de 1 à 16 canaux stéréo dans chaque sens.
 - **Réception** : découverte des sources annoncées sur le réseau, patch d'un canal Livewire vers une paire d'entrées, pré-écoute au casque.
@@ -27,7 +35,13 @@ Le paquet n'est pas encore signé ni notarisé : macOS demande une confirmation 
 
 ## Construire depuis les sources
 
-Prérequis : Xcode (SDK macOS 26 ou plus), Rust 1.82 ou plus avec les cibles `x86_64-apple-darwin` et `aarch64-apple-darwin`, Python 3 pour les outils et les tests.
+Service réseau (tous systèmes) : Rust 1.82 ou plus ; un compilateur C (Clang, GCC ou MSVC).
+
+```sh
+(cd daemon && cargo build --release)    # daemon/target/release/lw-daemon
+```
+
+macOS : Xcode (SDK macOS 26 ou plus), cibles Rust `x86_64-apple-darwin` et `aarch64-apple-darwin`.
 
 ```sh
 macos/scripts/build-all.sh          # service, plugin et app (binaires universels)
@@ -40,20 +54,26 @@ Tests :
 (cd daemon && cargo test && cargo clippy --all-targets)
 make -C macos/plugin test
 python3 -m pytest -q tools/lw/tests
+tools/ci/test-wine.sh               # daemon compilé pour Windows, sous Wine (Docker)
 ```
+
+La CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) teste le daemon sur macOS, Linux et Windows, en x86_64 et ARM64.
 
 ## Organisation
 
 | Dossier | Contenu |
 |---|---|
+| `daemon/` | service réseau (Rust, tous systèmes) : RTP, annonces, découverte, patch, canal de contrôle |
 | `macos/plugin/` | plugin CoreAudio (AudioServerPlugIn, C) : le périphérique audio |
-| `daemon/` | service réseau (Rust) : RTP, annonces, découverte, patch, contrôle XPC |
 | `macos/app/` | app OpenLW (Swift, AppKit) |
 | `macos/installer/` | paquet `.pkg` |
+| `windows/` | service, pilote ASIO, app et installeur Windows (en cours) |
+| `linux/` | unité systemd, app et paquets Linux (en cours) |
 | `docs/protocol/` | spécification réseau (ce qu'OpenLW émet et accepte) |
 | `docs/adr/` | décisions d'architecture |
 | `tools/lw/` | outils Python : codecs, émetteurs de test, analyse de captures |
 | `tools/wireshark/` | dissecteur Wireshark |
+| `tools/ci/` | tests du daemon Windows sous Wine (Docker) |
 
 ## Limites
 

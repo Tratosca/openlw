@@ -224,7 +224,11 @@ fn default_iface() -> String {
 }
 
 /// Nom par défaut d'une source émise (patch de sortie sans nom).
-pub const DEFAULT_SOURCE_NAME: &str = if cfg!(target_os = "macos") { "MAC" } else { "PC" };
+pub const DEFAULT_SOURCE_NAME: &str = if cfg!(target_os = "macos") {
+    "MAC"
+} else {
+    "PC"
+};
 
 /// Valeur de `iface` pour le choix automatique de l'interface.
 pub const AUTO_IFACE: &str = "auto";
@@ -247,7 +251,8 @@ pub fn computer_name() -> String {
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .and_then(clean)
         };
-        run("/usr/sbin/scutil", &["--get", "ComputerName"]).or_else(|| run("/bin/hostname", &["-s"]))
+        run("/usr/sbin/scutil", &["--get", "ComputerName"])
+            .or_else(|| run("/bin/hostname", &["-s"]))
     };
     #[cfg(target_os = "linux")]
     let name = std::fs::read_to_string("/etc/machine-info")
@@ -287,6 +292,21 @@ impl std::fmt::Display for ConfigError {
 impl std::error::Error for ConfigError {}
 
 impl Config {
+    /// Configuration par défaut des installations (`daemon/lw-daemon.default.json`).
+    pub const DEFAULT_JSON: &'static str = include_str!("../../lw-daemon.default.json");
+
+    /// Écrit la configuration par défaut dans `path` s'il n'existe pas (répertoires compris).
+    pub fn init_if_missing(path: &Path) -> Result<(), ConfigError> {
+        if path.exists() {
+            return Ok(());
+        }
+        let err = |e: std::io::Error| ConfigError(format!("{} : {e}", path.display()));
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(err)?;
+        }
+        std::fs::write(path, Self::DEFAULT_JSON).map_err(err)
+    }
+
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path)
             .map_err(|e| ConfigError(format!("{} : {e}", path.display())))?;
@@ -491,6 +511,23 @@ impl Config {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_configuration_is_valid_and_initialised_once() {
+        let dir = std::env::temp_dir().join(format!("openlw-config-{}", std::process::id()));
+        let path = dir.join("sous").join("lw-daemon.json");
+        Config::init_if_missing(&path).unwrap();
+        let c = Config::load(&path).unwrap();
+        assert!(c.auto_iface());
+        std::fs::write(&path, r#"{"iface":"x"}"#).unwrap();
+        Config::init_if_missing(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"iface":"x"}"#,
+            "fichier existant conservé"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parse_and_validate() {

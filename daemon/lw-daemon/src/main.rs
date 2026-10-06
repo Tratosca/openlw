@@ -3,7 +3,8 @@
 //!     lw-daemon ifaces
 //!     lw-daemon send --iface en7 --channel 4001 --format standard [--advertise --name "MAC 1"]
 //!     lw-daemon recv --iface en7 --channel 1
-//!     lw-daemon run --config lw-daemon.json [--control [ENDPOINT]]
+//!     lw-daemon run --config lw-daemon.json [--control [ENDPOINT]] [--init-config] [--log-file F]
+//!     lw-daemon service              (Windows, lancé par le gestionnaire de services)
 //!     lw-daemon ctl status [--endpoint ENDPOINT]
 
 use std::net::Ipv4Addr;
@@ -13,12 +14,12 @@ use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use lw_daemon::config::{Config, Format, Kind};
-use lw_sys::ctl::Endpoint;
 use lw_daemon::net::TxOptions;
 use lw_daemon::rx::RxStats;
 use lw_daemon::{advertise, iface, info, rx, tx, Stop};
 use lw_proto::adv::{AdvStreamType, Source};
 use lw_proto::channel::{Channel, AUDIO_PORT};
+use lw_sys::ctl::Endpoint;
 
 #[derive(Parser)]
 #[command(version, about = "Daemon et outil Livewire / AES67 d'OpenLW")]
@@ -93,6 +94,21 @@ enum Cmd {
         /// Ancienne forme de `--control mach:NOM` (plist launchd).
         #[arg(long, num_args = 0..=1, default_missing_value = lw_sys::ctl::SERVICE_NAME, hide = true)]
         xpc: Option<String>,
+        /// Crée le fichier de configuration par défaut s'il n'existe pas.
+        #[arg(long)]
+        init_config: bool,
+        /// Copie aussi le journal dans ce fichier.
+        #[arg(long)]
+        log_file: Option<PathBuf>,
+    },
+    /// Service Windows, lancé par le gestionnaire de services : configuration et journal dans
+    /// %ProgramData%\OpenLW, canal de contrôle par tube nommé.
+    #[cfg(windows)]
+    Service {
+        #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        log_file: Option<PathBuf>,
     },
     /// Écoute les annonces Livewire et liste les sources du réseau.
     Discover {
@@ -238,7 +254,8 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("erreur : {e}");
+            // Aussi dans le journal du système et le fichier journal (service sans stderr).
+            lw_daemon::error!("erreur : {e}");
             ExitCode::FAILURE
         }
     }
@@ -417,7 +434,15 @@ fn run(cli: Cli) -> Res {
             seconds,
             control,
             xpc,
+            init_config,
+            log_file,
         } => {
+            if let Some(f) = &log_file {
+                lw_daemon::log::to_file(f)?;
+            }
+            if init_config {
+                Config::init_if_missing(&config)?;
+            }
             let endpoint = match (control, xpc) {
                 (Some(c), _) => Some(Endpoint::parse(&c)?),
                 (None, Some(name)) => Some(Endpoint::parse(&format!("mach:{name}"))?),
@@ -430,6 +455,8 @@ fn run(cli: Cli) -> Res {
                 endpoint.as_ref(),
             )
         }
+        #[cfg(windows)]
+        Cmd::Service { config, log_file } => run_windows_service(config, log_file),
         Cmd::Discover {
             iface,
             seconds,
@@ -550,6 +577,46 @@ fn run(cli: Cli) -> Res {
             }
         }
     }
+}
+
+/// Nom du service Windows (gestionnaire de services, journal des événements).
+#[cfg(windows)]
+const WINDOWS_SERVICE: &str = "OpenLW";
+
+#[cfg(windows)]
+fn run_windows_service(config: Option<PathBuf>, log_file: Option<PathBuf>) -> Res {
+    let base = std::env::var_os("PROGRAMDATA")
+        .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from)
+        .join("OpenLW");
+    let config = config.unwrap_or_else(|| base.join("lw-daemon.json"));
+    lw_daemon::log::to_file(&log_file.unwrap_or_else(|| base.join("Logs").join("lw-daemon.log")))?;
+    Config::init_if_missing(&config)?;
+    lw_sys::service::run(
+        WINDOWS_SERVICE,
+        Box::new(move |flag| {
+            let stop = Stop::new();
+            let watcher = stop.clone();
+            std::thread::spawn(move || {
+                while !flag.load(std::sync::atomic::Ordering::Relaxed) && !watcher.requested() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                watcher.request();
+            });
+            let result = Config::load(&config)
+                .map_err(|e| e.to_string())
+                .and_then(|cfg| {
+                    info!("service {WINDOWS_SERVICE} démarré ({})", config.display());
+                    lw_daemon::supervisor::run(cfg, Some(config), &stop, Some(&Endpoint::service()))
+                        .map_err(|e| e.to_string())
+                });
+            stop.request();
+            if let Err(e) = &result {
+                lw_daemon::error!("service {WINDOWS_SERVICE} : {e}");
+            }
+            result
+        }),
+    )?;
+    Ok(())
 }
 
 fn run_config(

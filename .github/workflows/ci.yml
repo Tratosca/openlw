@@ -1,0 +1,67 @@
+# Intégration continue : daemon sur les six plateformes visées, plugin et paquet macOS, outils Python.
+# Les tests réseau du daemon passent par l'interface de bouclage (multicast local).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  daemon:
+    name: daemon (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15          # Apple Silicon
+          - macos-15-intel    # Intel
+          - ubuntu-24.04      # x86_64
+          - ubuntu-24.04-arm  # ARM64
+          - windows-2025      # x64 (MSVC)
+          - windows-11-arm    # ARM64 (MSVC)
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --no-fail-fast
+      - name: Build release
+        run: cargo build --release -p lw-daemon
+
+  macos-bundle:
+    name: plugin, app et paquet macOS
+    runs-on: macos-26   # SDK macOS 26 (NSGlassEffectView)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
+      - name: Harnais du plugin HAL
+        run: make -C macos/plugin test
+      - name: Binaires universels et paquet
+        run: |
+          macos/scripts/build-all.sh
+          macos/installer/build-pkg.sh
+
+  tools:
+    name: outils Python
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - run: python -m pytest -q tools/lw/tests

@@ -18,7 +18,7 @@ mkdir -p "$R/Library/Audio/Plug-Ins/HAL" "$R/Library/Application Support/OpenLW"
 ditto macos/plugin/build/OpenLW.driver "$R/Library/Audio/Plug-Ins/HAL/OpenLW.driver"
 install -m 755 build/lw-daemon "$R/Library/Application Support/OpenLW/lw-daemon"
 install -m 755 macos/installer/payload/uninstall.sh "$R/Library/Application Support/OpenLW/uninstall.sh"
-install -m 644 macos/installer/payload/lw-daemon.default.json "$R/Library/Application Support/OpenLW/lw-daemon.default.json"
+install -m 644 daemon/lw-daemon.default.json "$R/Library/Application Support/OpenLW/lw-daemon.default.json"
 install -m 644 macos/launchd/fr.francois-brille.openlw.daemon.plist "$R/Library/LaunchDaemons/"
 ditto "$APPSRC" "$R/Applications/OpenLW.app"
 # Attributs étendus retirés (quarantaine…). com.apple.provenance, protégé, reste : pkgbuild l'enregistre

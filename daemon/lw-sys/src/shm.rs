@@ -492,7 +492,9 @@ mod tests {
 
     #[cfg(windows)]
     fn second_mapping(daemon: &Region) -> Region {
-        let h = daemon.share_with(std::process::id()).expect("section dupliquée");
+        let h = daemon
+            .share_with(std::process::id())
+            .expect("section dupliquée");
         Region::map(SharedObject::from_handle_value(h).unwrap()).unwrap()
     }
 

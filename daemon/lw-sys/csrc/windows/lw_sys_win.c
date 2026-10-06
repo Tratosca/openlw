@@ -380,7 +380,7 @@ static void identify(struct lw_pipe_server *s, HANDLE pipe, lw_caller *c) {
         SID_NAME_USE use;
         if (LookupAccountSidW(NULL, ((TOKEN_USER *)ubuf)->User.Sid, name, &nlen, dom, &dlen, &use)) {
             wchar_t full[260];
-            _snwprintf(full, 260, L"%ls\\%ls", dom, name);
+            swprintf(full, 260, L"%ls\\%ls", dom, name);
             full[259] = L'\0';
             to_utf8(full, c->user, sizeof c->user);
         }

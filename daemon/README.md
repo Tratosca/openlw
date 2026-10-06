@@ -1,12 +1,12 @@
 # daemon — pile Livewire / AES67 en Rust
 
-Workspace Cargo du service réseau d'OpenLW ([ADR 0001](../docs/adr/0001-daemon-rust.md)).
+Workspace Cargo du service réseau d'OpenLW ([ADR 0001](../docs/adr/0001-daemon-rust.md)), pour macOS, Linux et Windows en x86_64 et ARM64 ([ADR 0006](../docs/adr/0006-multiplateforme.md)).
 
 | Crate | Rôle | État |
 |---|---|---|
 | `lw-proto` | Codecs purs, sans I/O : canaux ↔ groupes, formats de flux, RTP et L24, TlvMsg, Envelope, annonce (ADV), SDP, PTPv2, horloge Livewire (décodage) | fait |
-| `lw-sys` | Couche C (macOS) : threads temps réel (`THREAD_TIME_CONSTRAINT_POLICY` + `mach_wait_until`), `os_log`, service XPC, **région partagée avec le plugin** (`csrc/lw_shm.h`/`.c` : anneaux SPSC, seqlock d'horloge, transfert `xpc_shmem`). Seule crate avec `unsafe`, chaque bloc justifié (`SAFETY:`) | fait |
-| `lw-daemon` | Sockets liées à la NIC (`IP_BOUND_IF`, `IP_MULTICAST_IF`), émission RTP temps réel (générateur de test), réception avec statistiques, annonce ADV, config JSON, contrôle XPC (`status`, `ping`, `attach`), périphérique virtuel (horloge, crêtes, boucle interne) | fait ; PTP esclave à faire |
+| `lw-sys` | Couche système, une version C par système (`csrc/macos`, `csrc/linux`, `csrc/windows`, `csrc/posix`) : threads temps réel (Mach, `SCHED_FIFO`, MMCSS), sommeil précis, horloge hôte, journal, **région partagée avec le client audio** (`csrc/lw_shm.h`/`.c` v2 : anneaux SPSC, seqlock d'horloge), canal de contrôle (`ctl` : XPC, socket Unix, tube nommé), DSCP qWAVE et service Windows. Seule crate avec `unsafe`, chaque bloc justifié (`SAFETY:`) | fait |
+| `lw-daemon` | Sockets liées à la NIC (`IP_BOUND_IF`, `SO_BINDTODEVICE`, `IP_MULTICAST_IF`), émission RTP temps réel (générateur de test), réception avec statistiques, annonce ADV, config JSON, canal de contrôle (`status`, `ping`, `attach`, patch), périphérique virtuel (horloge, crêtes, boucle interne) | fait ; PTP esclave à faire |
 
 Chaque module de `lw-proto` renvoie à sa fiche de [docs/protocol/](../docs/protocol/README.md). Les décodeurs traitent du trafic non authentifié : ils renvoient une erreur sur toute entrée invalide, sans paniquer. `unsafe` est interdit dans le workspace, et le lint `clippy::indexing_slicing` signale tout accès indexé hors tests.
 
@@ -15,23 +15,26 @@ Chaque module de `lw-proto` renvoie à sa fiche de [docs/protocol/](../docs/prot
 ```sh
 cargo test                                   # tests unitaires, vecteurs, robustesse
 cargo clippy --all-targets                   # 0 avertissement attendu
-cargo build --release --target x86_64-apple-darwin
-cargo build --release --target aarch64-apple-darwin
+cargo build --release                        # système courant
+../tools/ci/test-wine.sh                     # compilé pour Windows ARM64, testé sous Wine (Docker)
 ```
 
 ## Utilisation de `lw-daemon`
 
 ```sh
 cargo build --release
-target/release/lw-daemon ifaces                                   # nom BSD, IP, index, nom convivial
+target/release/lw-daemon ifaces                                   # nom système, IP, index, nom convivial
 target/release/lw-daemon send --iface en7 --channel 4001 --format standard --advertise --name "MAC 1"
 target/release/lw-daemon recv --iface en7 --channel 1             # stats chaque seconde
-target/release/lw-daemon run --config lw-daemon.json              # format : src/config.rs
+target/release/lw-daemon run --config lw-daemon.json --control    # format : src/config.rs
+target/release/lw-daemon ctl status                               # canal de contrôle du service
 ```
+
+Canal de contrôle ([ADR 0007](../docs/adr/0007-canal-de-controle.md)) : `--control` sans valeur publie celui du service installé (XPC sous macOS, socket Unix sous Linux, tube nommé sous Windows) ; `--control unix:/tmp/lw.sock` ou `pipe:NOM` pour un essai. Sous Windows, `lw-daemon service` est lancé par le gestionnaire de services ([windows/README.md](../windows/README.md)).
 
 Formats : `standard` (240 éch.), `aes67` (48), `livestream` (12), `surround` (60, 8 canaux, 239.196). `--tos 136` pour AF41. Sur une vraie NIC, le bouclage multicast est coupé : on ne reçoit pas ses propres flux.
 
-Binaire universel (plancher ADR 0004, mesuré : x86_64 `LC_VERSION_MIN_MACOSX` 10.13, arm64 `minos` 11.0) :
+macOS, binaire universel (plancher ADR 0004, mesuré : x86_64 `LC_VERSION_MIN_MACOSX` 10.13, arm64 `minos` 11.0) :
 
 ```sh
 cargo build --release --target x86_64-apple-darwin && cargo build --release --target aarch64-apple-darwin
@@ -40,7 +43,7 @@ lipo -create -output target/lw-daemon-universal target/{x86_64,aarch64}-apple-da
 
 ## Cadencement temps réel
 
-Les threads d'émission passent en `THREAD_TIME_CONSTRAINT_POLICY` et attendent l'échéance par `mach_wait_until`, sans attente active. Une attente active ferait dépasser le budget de calcul déclaré, et le noyau rétrograderait le thread : c'est ce qu'a montré un premier essai, avec 2 s de trous. Retard maximal mesuré sur `lo0`, 5 s par mesure, 10 cœurs saturés par `yes` pour la charge :
+Les threads d'émission passent en temps réel et attendent l'échéance sans attente active : `THREAD_TIME_CONSTRAINT_POLICY` et `mach_wait_until` sous macOS, `SCHED_FIFO` et `clock_nanosleep` sous Linux, MMCSS « Pro Audio » et minuteur haute résolution sous Windows. Mesures ci-dessous sous macOS. Une attente active ferait dépasser le budget de calcul déclaré, et le noyau rétrograderait le thread : c'est ce qu'a montré un premier essai, avec 2 s de trous. Retard maximal mesuré sur `lo0`, 5 s par mesure, 10 cœurs saturés par `yes` pour la charge :
 
 | Flux | Normal, repos | Normal, charge | Temps réel, repos | Temps réel, charge |
 |---|---|---|---|---|
@@ -51,11 +54,11 @@ Les threads d'émission passent en `THREAD_TIME_CONSTRAINT_POLICY` et attendent 
 
 ## Périphérique virtuel (région partagée)
 
-Contrat unique en C : [lw-sys/csrc/lw_shm.h](lw-sys/csrc/lw_shm.h) et `lw_shm.c`, compilés **à l'identique** par le plugin HAL. Aucune disposition mémoire n'est dupliquée en Rust : le daemon passe par ces fonctions C.
+Contrat unique en C : [lw-sys/csrc/lw_shm.h](lw-sys/csrc/lw_shm.h) et `lw_shm.c`, compilés **à l'identique** par le plugin HAL (et demain par le pilote ASIO). Aucune disposition mémoire n'est dupliquée en Rust : le daemon passe par ces fonctions C.
 
 - Région = en-tête de 4 Kio + anneau `TO_NET` (applications → réseau ; producteur : plugin) + anneau `FROM_NET` (réseau → applications ; producteur : daemon), float32 entrelacés, SPSC sans verrou, positions 64 bits, compteurs de débordement et de sous-alimentation.
-- Horloge en seqlock : (temps hôte `mach_absolute_time`, position d'échantillon, rapport de vitesse). Le plugin s'en servira dans `GetZeroTimeStamp` (ADR 0003).
-- Transfert : le plugin envoie `{"cmd":"attach"}` en demandant la région (`want_shmem`) ; la couche C joint l'objet `xpc_shmem` à la réponse.
+- Horloge en seqlock : (temps hôte, position d'échantillon, rapport de vitesse) ; l'en-tête déclare l'horloge hôte (`mach_absolute_time`, `QueryPerformanceCounter` ou `CLOCK_MONOTONIC`). Le plugin s'en sert dans `GetZeroTimeStamp` (ADR 0003).
+- Transfert : le client envoie `{"cmd":"attach"}` en demandant la région ; objet `xpc_shmem` joint à la réponse sous macOS, section dupliquée dans le processus du client sous Windows. Sous Linux, la région reste dans le daemon.
 - Côté daemon, un thread temps réel cadencé à 1 ms publie l'horloge, mesure les crêtes par canal et, avec `"device": {"loopback": true}`, renvoie la sortie des applications vers leur entrée.
 
 Configuration (`"device"`, actif par défaut avec `--xpc`) : `channels_to_net` et `channels_from_net` (8 par défaut, 64 au plus), `ring_frames` (8192 par défaut, soit 170 ms), `loopback`.

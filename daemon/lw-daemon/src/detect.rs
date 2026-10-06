@@ -30,8 +30,24 @@ pub const HEARD_VALIDITY: Duration = Duration::from_secs(75);
 const VIRTUAL_PREFIXES: &[&str] = &["utun", "awdl", "llw", "bridge", "ap", "anpi", "gif", "stf"];
 #[cfg(target_os = "linux")]
 const VIRTUAL_PREFIXES: &[&str] = &[
-    "docker", "veth", "virbr", "br-", "tun", "tap", "wg", "vnet", "lxc", "lxd", "cni", "flannel",
-    "cali", "zt", "tailscale", "podman", "vboxnet", "vmnet",
+    "docker",
+    "veth",
+    "virbr",
+    "br-",
+    "tun",
+    "tap",
+    "wg",
+    "vnet",
+    "lxc",
+    "lxd",
+    "cni",
+    "flannel",
+    "cali",
+    "zt",
+    "tailscale",
+    "podman",
+    "vboxnet",
+    "vmnet",
 ];
 #[cfg(windows)]
 const VIRTUAL_PREFIXES: &[&str] = &[];
@@ -40,8 +56,20 @@ const VIRTUAL_PREFIXES: &[&str] = &[];
 /// hyperviseurs, VPN, Wi-Fi Direct, Bluetooth.
 #[cfg(windows)]
 const VIRTUAL_FRAGMENTS: &[&str] = &[
-    "vethernet", "hyper-v", "virtual", "vmware", "virtualbox", "loopback", "tailscale", "zerotier",
-    "wireguard", "openvpn", "tap-", "wintun", "bluetooth", "local area connection*",
+    "vethernet",
+    "hyper-v",
+    "virtual",
+    "vmware",
+    "virtualbox",
+    "loopback",
+    "tailscale",
+    "zerotier",
+    "wireguard",
+    "openvpn",
+    "tap-",
+    "wintun",
+    "bluetooth",
+    "local area connection*",
     "connexion au réseau local*",
 ];
 #[cfg(not(windows))]
@@ -156,7 +184,14 @@ mod tests {
     #[cfg(target_os = "linux")]
     const NAMES: (&[&str], &[&str]) = (
         &["enp3s0", "eth0", "eno1"],
-        &["docker0", "veth12ab", "virbr0", "br-3f2a", "wg0", "tailscale0"],
+        &[
+            "docker0",
+            "veth12ab",
+            "virbr0",
+            "br-3f2a",
+            "wg0",
+            "tailscale0",
+        ],
     );
     #[cfg(windows)]
     const NAMES: (&[&str], &[&str]) = (

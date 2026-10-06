@@ -33,7 +33,10 @@ fn main() {
         other => panic!("système non pris en charge : {other}"),
     }
     if env == "msvc" {
-        b.flag("/std:c11").flag("/W3").flag("/WX");
+        b.flag("/std:c11")
+            .flag("/W3")
+            .flag("/WX")
+            .define("_CRT_SECURE_NO_WARNINGS", None);
     } else {
         if os == "windows" {
             b.flag("-std=c11");

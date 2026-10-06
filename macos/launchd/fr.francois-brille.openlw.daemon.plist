@@ -18,7 +18,7 @@
         <string>run</string>
         <string>--config</string>
         <string>/Library/Application Support/OpenLW/lw-daemon.json</string>
-        <string>--xpc</string>
+        <string>--control</string>
     </array>
     <key>MachServices</key>
     <dict>

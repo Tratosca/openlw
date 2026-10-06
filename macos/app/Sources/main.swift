@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// Script de désinstallation posé par l'installeur (installer/payload).
+    /// Script de désinstallation posé par l'installeur (macos/installer/payload).
     static let uninstaller = "/Library/Application Support/OpenLW/uninstall.sh"
 
     @objc private func uninstall(_ sender: Any) {

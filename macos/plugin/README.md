@@ -34,13 +34,13 @@ make install     # copie dans /Library/Audio/Plug-Ins/HAL, root:wheel, puis kill
 make uninstall   # retire et redémarre coreaudiod
 ```
 
-Vérification : le périphérique apparaît dans Configuration audio et MIDI et dans Réglages Système > Son. Pour qu'il transporte du son, le daemon doit tourner en LaunchDaemon avec le service XPC ([../daemon/launchd/](../daemon/launchd/)) : sans launchd, un service Mach ne peut pas être publié.
+Vérification : le périphérique apparaît dans Configuration audio et MIDI et dans Réglages Système > Son. Pour qu'il transporte du son, le daemon doit tourner en LaunchDaemon avec le service XPC ([../macos/launchd/](../macos/launchd/)) : sans launchd, un service Mach ne peut pas être publié.
 
 `killall coreaudiod` coupe brièvement l'audio de toutes les applications. La signature ad hoc suffit pour un essai local ; la distribution passera par Developer ID et la notarisation (M8).
 
 ## Validation réelle (2026-10-05, macOS 27, Apple Silicon)
 
-Installé avec `scripts/install-dev.sh` (daemon en LaunchDaemon, config de dev avec boucle interne) :
+Installé avec `macos/scripts/install-dev.sh` (daemon en LaunchDaemon, config de dev avec boucle interne) :
 - **Périphérique** : « OpenLW » visible par le HAL (`system_profiler SPAudioDataType` : 8 entrées, 8 sorties, 48 kHz, transport virtuel, utilisable comme sortie par défaut). Le plugin tourne dans `Core-Audio-Driver-Service.helper` et atteint le service XPC du daemon depuis son bac à sable.
 - **Boucle audio** : un client CoreAudio joue une sinusoïde de 1 kHz à −12 dBFS sur les canaux 1 et 2 et enregistre l'entrée.
 

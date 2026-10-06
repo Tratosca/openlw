@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::config::{Config, Layout};
 
-/// Noms de base des périphériques (plugin/src/OpenLWPlugIn.c).
+/// Noms de base des périphériques (macos/plugin/src/OpenLWPlugIn.c).
 pub const DEVICE_NAME: &str = "OpenLW";
 pub const INPUT_DEVICE_NAME: &str = "OpenLW In";
 pub const OUTPUT_DEVICE_NAME: &str = "OpenLW Out";

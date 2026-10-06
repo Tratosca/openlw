@@ -8,7 +8,7 @@
 NAME     := OpenLW
 BUNDLE   := build/$(NAME).driver
 EXE      := $(BUNDLE)/Contents/MacOS/$(NAME)
-LWSYS    := ../daemon/lw-sys/csrc
+LWSYS    := ../../daemon/lw-sys/csrc
 SRC      := src/OpenLWPlugIn.c $(LWSYS)/lw_shm.c $(LWSYS)/lw_sys.c
 CFLAGS   := -std=gnu11 -O2 -g -Wall -Wextra -Werror -fblocks -fvisibility=hidden -I$(LWSYS)
 FRAMEWKS := -framework CoreAudio -framework CoreFoundation

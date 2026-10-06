@@ -5,7 +5,7 @@ import CoreAudio
 import Foundation
 
 enum MacAudio {
-    /// UID publiés par le plugin HAL (plugin/src/OpenLWPlugIn.c) : périphérique duplex, ou
+    /// UID publiés par le plugin HAL (macos/plugin/src/OpenLWPlugIn.c) : périphérique duplex, ou
     /// « OpenLW In » et « OpenLW Out » en présentation à deux périphériques.
     static let livewireUID = "fr.francois-brille.openlw.device"
     static let livewireInUID = "fr.francois-brille.openlw.device.in"

@@ -1,11 +1,11 @@
 # Installeur OpenLW
 
-`installer/build-pkg.sh` produit `build/OpenLW-<version>.pkg` : un paquet unique, Intel et Apple Silicon, macOS 10.13 et plus.
+`macos/installer/build-pkg.sh` produit `build/OpenLW-<version>.pkg` : un paquet unique, Intel et Apple Silicon, macOS 10.13 et plus.
 
 ```sh
-scripts/build-all.sh
-installer/build-pkg.sh
-# signé : INSTALLER_SIGN_ID="Developer ID Installer: …" installer/build-pkg.sh
+macos/scripts/build-all.sh
+macos/installer/build-pkg.sh
+# signé : INSTALLER_SIGN_ID="Developer ID Installer: …" macos/installer/build-pkg.sh
 ```
 
 ## Fichiers posés

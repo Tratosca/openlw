@@ -1,7 +1,5 @@
 # Produits de compilation
 daemon/target/
-plugin/build/
-app/build/
 build/
 __pycache__/
 *.pyc

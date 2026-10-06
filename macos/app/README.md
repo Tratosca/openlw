@@ -5,14 +5,14 @@ App de réglage du driver : interface réseau, nombre de canaux, patch des sourc
 ## Construire
 
 ```
-make -C app            # build/OpenLW.app, universelle, signature ad hoc
-make -C app check-min  # plancher par tranche : x86_64 10.13, arm64 11.0
-make -C app snapshot   # lance l'app et rend sa fenêtre dans app/build/snapshot.png
+make -C macos/app            # build/OpenLW.app, universelle, signature ad hoc
+make -C macos/app check-min  # plancher par tranche : x86_64 10.13, arm64 11.0
+make -C macos/app snapshot   # lance l'app et rend sa fenêtre dans macos/app/build/snapshot.png
 ```
 
 Prérequis : Xcode (SDK macOS 26 ou plus, pour `NSGlassEffectView`). Sous macOS 10.14.4, le système ne fournit pas le runtime Swift : `swift-stdlib-tool` le copie dans `Contents/Frameworks`. Sur un système plus récent, `/usr/lib/swift` est chargé en premier.
 
-`scripts/build-all.sh` construit l'app avec le reste ; `sudo scripts/install-dev.sh` la copie dans `/Applications`.
+`macos/scripts/build-all.sh` construit l'app avec le reste ; `sudo macos/scripts/install-dev.sh` la copie dans `/Applications`.
 
 ## Fenêtre
 
@@ -55,7 +55,7 @@ Panneaux en Liquid Glass (`NSGlassEffectView`) sur macOS 26 et plus, `NSVisualEf
 Le daemon peut tourner en LaunchAgent sous un autre nom de service. L'app s'y connecte avec :
 
 ```
-"app/build/OpenLW.app/Contents/MacOS/OpenLW" --user --service fr.francois-brille.openlw.daemon.dev
+"macos/app/build/OpenLW.app/Contents/MacOS/OpenLW" --user --service fr.francois-brille.openlw.daemon.dev
 ```
 
 Banc simulé sur lo0 (une seule machine) :

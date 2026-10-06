@@ -30,15 +30,15 @@ Le paquet n'est pas encore signé ni notarisé : macOS demande une confirmation 
 Prérequis : Xcode (SDK macOS 26 ou plus), Rust 1.82 ou plus avec les cibles `x86_64-apple-darwin` et `aarch64-apple-darwin`, Python 3 pour les outils et les tests.
 
 ```sh
-scripts/build-all.sh          # service, plugin et app (binaires universels)
-installer/build-pkg.sh        # build/OpenLW-<version>.pkg
+macos/scripts/build-all.sh          # service, plugin et app (binaires universels)
+macos/installer/build-pkg.sh        # build/OpenLW-<version>.pkg
 ```
 
 Tests :
 
 ```sh
 (cd daemon && cargo test && cargo clippy --all-targets)
-make -C plugin test
+make -C macos/plugin test
 python3 -m pytest -q tools/lw/tests
 ```
 
@@ -46,10 +46,10 @@ python3 -m pytest -q tools/lw/tests
 
 | Dossier | Contenu |
 |---|---|
-| `plugin/` | plugin CoreAudio (AudioServerPlugIn, C) : le périphérique audio |
+| `macos/plugin/` | plugin CoreAudio (AudioServerPlugIn, C) : le périphérique audio |
 | `daemon/` | service réseau (Rust) : RTP, annonces, découverte, patch, contrôle XPC |
-| `app/` | app OpenLW (Swift, AppKit) |
-| `installer/` | paquet `.pkg` |
+| `macos/app/` | app OpenLW (Swift, AppKit) |
+| `macos/installer/` | paquet `.pkg` |
 | `docs/protocol/` | spécification réseau (ce qu'OpenLW émet et accepte) |
 | `docs/adr/` | décisions d'architecture |
 | `tools/lw/` | outils Python : codecs, émetteurs de test, analyse de captures |

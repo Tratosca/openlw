@@ -4,7 +4,7 @@
 //! |---------|-------------------------------------------------------|----------------------------------------|
 //! | macOS | XPC, Mach service `fr.francois-brille.openlw.daemon` | root, `admin` group |
 //! | Linux | Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock` | root, service user |
-//! | Windows | Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon` | Elevated administrators, SYSTEM, local `OpenLW` group |
+//! | Windows | Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon` | Elevated administrators, SYSTEM, local `OpenLW Users` group |
 //!
 //! Unix socket also works on macOS (tests, tools). On stream transports (socket, pipe),
 //! each message is one line ending with `\n`; compact JSON contains no literal newlines.
@@ -20,7 +20,9 @@ use crate::shm::Region;
 pub const SERVICE_NAME: &str = "fr.francois-brille.openlw.daemon";
 
 /// Local Windows group whose members may modify configuration (created by installer).
-pub const EDIT_GROUP_WINDOWS: &str = "OpenLW";
+/// Not plain "OpenLW": users and local groups share one SAM namespace, so a user account
+/// with that name would block the group.
+pub const EDIT_GROUP_WINDOWS: &str = "OpenLW Users";
 
 /// Control-channel error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +81,7 @@ pub fn edit_policy() -> &'static str {
     if cfg!(target_os = "macos") {
         "réservé aux administrateurs de ce Mac (groupe admin)"
     } else if cfg!(windows) {
-        "réservé aux administrateurs (application lancée en tant qu'administrateur) et aux membres du groupe local OpenLW"
+        "réservé aux administrateurs (application lancée en tant qu'administrateur) et aux membres du groupe local « OpenLW Users »"
     } else {
         "réservé à l'utilisateur qui exécute le service OpenLW"
     }

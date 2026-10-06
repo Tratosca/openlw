@@ -1,7 +1,8 @@
 # Builds build\OpenLW-<version>-<arch>.msi: service, audio driver, app.
 #   powershell -ExecutionPolicy Bypass -File windows\installer\build-msi.ps1 -Arch arm64   (or x64)
 # Prerequisites: Rust (MSVC), Visual Studio Build Tools (C++ and Windows SDK), CMake, .NET 10 SDK,
-# WiX (dotnet tool install --global wix). Optional Authenticode signing: $env:SIGN_CERT_THUMBPRINT.
+# WiX 5.0.2 (dotnet tool install --global wix --version 5.0.2): WiX 7 requires accepting the Open
+# Source Maintenance Fee EULA, WiX 5 does not. Optional Authenticode signing: $env:SIGN_CERT_THUMBPRINT.
 param(
     [ValidateSet("arm64", "x64")] [string]$Arch = "arm64",
     [string]$Version = "0.5.0"
@@ -39,10 +40,13 @@ if ($env:SIGN_CERT_THUMBPRINT) {
 }
 
 Write-Host "=== MSI"
+$wixVersion = "5.0.2"
+if (-not ((wix --version) -like "$wixVersion*")) { throw "WiX $wixVersion attendu (dotnet tool install --global wix --version $wixVersion)" }
 $msi = Join-Path $root "build\OpenLW-$Version-$Arch.msi"
-wix extension add -g WixToolset.Util.wixext WixToolset.Firewall.wixext | Out-Null
-wix build windows\installer\Package.wxs -arch $Arch -culture fr-FR `
-    -ext WixToolset.Util.wixext -ext WixToolset.Firewall.wixext `
+wix extension add -g "WixToolset.Util.wixext/$wixVersion" "WixToolset.Firewall.wixext/$wixVersion"
+if ($LASTEXITCODE) { throw "wix extension add" }
+wix build windows\installer\Package.wxs -arch $Arch `
+    -ext "WixToolset.Util.wixext/$wixVersion" -ext "WixToolset.Firewall.wixext/$wixVersion" `
     -d DaemonExe=$daemon -d DriverDll=$driver -d AppDir="$out\app" -d Version=$Version `
     -o $msi
 if ($LASTEXITCODE) { throw "wix build" }

@@ -16,7 +16,7 @@ User-facing strings are in French, like the macOS app.
 
 ## Service connection
 
-Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon`, one JSON request per line ([ADR 0007](../../docs/adr/0007-canal-de-controle.md)). The app opens the pipe with exactly the rights granted to authenticated users and at Identification level. It runs as the signed-in user (`asInvoker`): changes are allowed to members of the local `OpenLW` group (added by the installer) and to elevated administrators; otherwise the service error is shown.
+Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon`, one JSON request per line ([ADR 0007](../../docs/adr/0007-canal-de-controle.md)). The app opens the pipe with exactly the rights granted to authenticated users and at Identification level. It runs as the signed-in user (`asInvoker`): changes are allowed to members of the local `OpenLW Users` group (added by the installer) and to elevated administrators; otherwise the service error is shown.
 
 ## Preview
 

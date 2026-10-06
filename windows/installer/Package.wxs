@@ -17,6 +17,8 @@
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
+    <!-- Working directory and binaries of the custom actions (WiX defines only referenced standard folders). -->
+    <StandardDirectory Id="System64Folder" />
 
     <Feature Id="Main" Title="OpenLW" AllowAbsent="no">
       <ComponentGroupRef Id="Service" />
@@ -25,11 +27,12 @@
     </Feature>
 
     <!-- Local group whose members may change the configuration without elevation (ADR 0007);
-         the installing user is added (name resolved from UserSID). Removed on uninstall. -->
-    <CustomAction Id="CreateEditGroup" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="ignore"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;net localgroup OpenLW /add /comment:'Peut modifier la configuration d''OpenLW' 2>$null; $u = (New-Object Security.Principal.SecurityIdentifier '[UserSID]').Translate([Security.Principal.NTAccount]).Value; net localgroup OpenLW $u /add&quot;" />
-    <CustomAction Id="DeleteEditGroup" Directory="INSTALLFOLDER" Execute="deferred" Impersonate="no" Return="ignore"
-                  ExeCommand="&quot;[System32Folder]net.exe&quot; localgroup OpenLW /delete" />
+         the installing user is added (name resolved from UserSID). Removed on uninstall.
+         Square brackets are MSI property syntax: literal ones are escaped as [\[] and [\]]. -->
+    <CustomAction Id="CreateEditGroup" Directory="System64Folder" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;net localgroup 'OpenLW Users' /add /comment:'Peut modifier la configuration d''OpenLW' 2>$null; $u = (New-Object Security.Principal.SecurityIdentifier '[UserSID]').Translate([\[]Security.Principal.NTAccount[\]]).Value; net localgroup 'OpenLW Users' $u /add&quot;" />
+    <CustomAction Id="DeleteEditGroup" Directory="System64Folder" Execute="deferred" Impersonate="no" Return="ignore"
+                  ExeCommand="&quot;[System64Folder]net.exe&quot; localgroup &quot;OpenLW Users&quot; /delete" />
     <InstallExecuteSequence>
       <Custom Action="CreateEditGroup" Before="StartServices" Condition="NOT REMOVE" />
       <Custom Action="DeleteEditGroup" After="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />

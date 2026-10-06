@@ -12,4 +12,4 @@ lipo -create -output build/lw-daemon \
 codesign --force --sign - --identifier fr.francois-brille.openlw.daemon build/lw-daemon
 make -C macos/plugin
 make -C macos/app
-echo "OK : $ROOT/build/lw-daemon, $ROOT/plugin/build/OpenLW.driver, $ROOT/app/build/OpenLW.app"
+echo "OK : $ROOT/build/lw-daemon, $ROOT/macos/plugin/build/OpenLW.driver, $ROOT/macos/app/build/OpenLW.app"

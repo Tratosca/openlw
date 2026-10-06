@@ -4,7 +4,15 @@ launchctl bootout system/fr.francois-brille.openlw.daemon 2>/dev/null || true
 # Migration: development versions predating OpenLW name (device, service, app, settings).
 OLD=fr.francois-brille.livewire.daemon
 launchctl bootout "system/$OLD" 2>/dev/null || true
+# Keep the patch and network settings when OpenLW has none yet (same configuration format).
+NEW_CFG="/Library/Application Support/OpenLW/lw-daemon.json"
+OLD_CFG="/Library/Application Support/Livewire/lw-daemon.json"
+if [ -f "$OLD_CFG" ] && [ ! -f "$NEW_CFG" ]; then
+    mkdir -p "/Library/Application Support/OpenLW"
+    cp "$OLD_CFG" "$NEW_CFG"
+fi
 rm -f "/Library/LaunchDaemons/$OLD.plist"
 rm -rf /Library/Audio/Plug-Ins/HAL/LivewireAudio.driver "/Applications/Livewire Control.app"
 rm -rf "/Library/Application Support/Livewire" /Library/Logs/Livewire
+pkgutil --forget fr.francois-brille.livewire >/dev/null 2>&1 || true
 exit 0

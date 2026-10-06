@@ -55,6 +55,12 @@ typedef struct {
 #define LW_ALIGN64 _Alignas(64)
 #endif
 
+/* Cache-line padding below is intended (MSVC warning C4324). */
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable : 4324)
+#endif
+
 /* Ring counters/positions; producer and consumer on separate cache lines. */
 typedef struct {
     LW_ALIGN64 uint64_t write_pos; /* Written by producer (release) */
@@ -84,6 +90,10 @@ typedef struct {
     double clock_rate_scalar;
     lw_ring_pos ring[2];
 } lw_shm_header;
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
 
 #ifdef __cplusplus
 static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "en-tête trop grand");

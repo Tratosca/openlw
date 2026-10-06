@@ -1,0 +1,7 @@
+# Compilation croisée avec llvm-mingw (tests sous Wine) : Windows aarch64.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR aarch64)
+set(CMAKE_C_COMPILER aarch64-w64-mingw32-clang)
+set(CMAKE_CXX_COMPILER aarch64-w64-mingw32-clang++)
+set(CMAKE_RC_COMPILER aarch64-w64-mingw32-windres)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)

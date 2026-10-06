@@ -7,7 +7,7 @@ Windows 10 22H2 et 11, x64 et ARM64. Périphérique audio : pilote ASIO®, affic
 | Composant | Dossier | État |
 |---|---|---|
 | Service réseau | `daemon/` (`lw-daemon service`) | prêt, à valider sur Windows réel |
-| Pilote ASIO | `windows/driver` (`OpenLWDriver.dll`, GPLv3, SDK Steinberg téléchargé à la compilation) | à faire |
+| Pilote ASIO | [`windows/driver`](driver/README.md) (`OpenLWDriver.dll`, GPLv3, SDK Steinberg téléchargé à la compilation) | fait, essai complet sous Wine ARM64 ; Windows réel et hôtes du commerce à essayer |
 | App OpenLW | `windows/app` (WinUI 3, C#) | à faire |
 | Installeur | `windows/installer` (MSI x64 et ARM64) | à faire |
 

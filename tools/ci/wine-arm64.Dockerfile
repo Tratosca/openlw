@@ -5,7 +5,7 @@
 FROM rust:1-trixie
 ARG LLVM_MINGW=20260922
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends wine wine64 xz-utils \
+    && apt-get install -y --no-install-recommends wine wine64 xz-utils cmake ninja-build unzip \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW}/llvm-mingw-${LLVM_MINGW}-ucrt-ubuntu-22.04-aarch64.tar.xz" \
        | tar -xJ -C /opt \

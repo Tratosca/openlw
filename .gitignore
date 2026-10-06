@@ -13,3 +13,6 @@ __pycache__/
 *.exe
 *.dll
 *.sys
+
+# SDK ASIO, téléchargé par windows/driver/fetch-sdk.*
+windows/driver/sdk/

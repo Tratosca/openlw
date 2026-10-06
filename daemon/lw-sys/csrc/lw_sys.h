@@ -130,6 +130,9 @@ uint64_t lw_shm_share_with(void *handle, uint32_t pid);
 void *lw_qos_dscp(uint64_t sock, const uint8_t dest_ip[4], uint16_t dest_port, uint32_t dscp, int *error);
 void lw_qos_close(void *flow);
 
+/* 1 si le processus `pid` est vivant (nom de son image, UTF-8, dans name[cap]), 0 sinon. */
+int lw_process_alive(uint32_t pid, char *name, size_t cap);
+
 #endif
 
 #endif

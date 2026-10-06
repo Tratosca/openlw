@@ -588,15 +588,54 @@ mod windows {
     struct Ctx {
         handler: Handler,
         region: Mutex<Option<Arc<Region>>>,
+        /// Processus qui détient la région (un seul client audio à la fois : les anneaux sont SPSC).
+        holder: Mutex<Option<u32>>,
+    }
+
+    /// Processus vivant ? Renvoie son nom d'image s'il l'est.
+    fn process_alive(pid: u32) -> Option<String> {
+        let mut name = [0 as c_char; 260];
+        // SAFETY: tampon de sortie valide, de la taille annoncée.
+        let alive = unsafe { crate::ffi::lw_process_alive(pid, name.as_mut_ptr(), name.len()) };
+        if alive == 0 {
+            return None;
+        }
+        // SAFETY: la couche C termine toujours le tampon par un octet nul.
+        let name = unsafe { CStr::from_ptr(name.as_ptr()) };
+        Some(name.to_string_lossy().into_owned())
     }
 
     impl Ctx {
         fn handle(&self, request: &str, caller: &Caller) -> String {
-            let response = (self.handler)(request, caller);
-            let wants_region = serde_json::from_str::<Value>(request)
-                .ok()
+            let parsed = serde_json::from_str::<Value>(request).ok();
+            let cmd = parsed
+                .as_ref()
+                .and_then(|v| v.get("cmd"))
+                .and_then(Value::as_str);
+            let wants_region = parsed
+                .as_ref()
                 .and_then(|v| v.get("want_shmem").and_then(Value::as_bool))
                 .unwrap_or(false);
+            // `detach` : le client audio rend la région (fin d'utilisation du pilote).
+            if cmd == Some("detach") {
+                let mut holder = self.holder.lock().unwrap_or_else(PoisonError::into_inner);
+                if holder.is_some() && *holder == caller.pid {
+                    *holder = None;
+                }
+                return json!({ "ok": true }).to_string();
+            }
+            if wants_region {
+                let holder = *self.holder.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(h) = holder.filter(|h| Some(*h) != caller.pid) {
+                    if let Some(name) = process_alive(h) {
+                        return json!({ "ok": false, "error": format!(
+                            "OpenLW est déjà utilisé par une autre application ({name}, processus {h})"
+                        ) })
+                        .to_string();
+                    }
+                }
+            }
+            let response = (self.handler)(request, caller);
             if !wants_region {
                 return response;
             }
@@ -619,6 +658,7 @@ mod windows {
                     "shmem".into(),
                     json!({ "handle": h, "size": region.size() }),
                 );
+                *self.holder.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
             }
             v.to_string()
         }
@@ -678,6 +718,7 @@ mod windows {
             let ctx = Box::into_raw(Box::new(Ctx {
                 handler,
                 region: Mutex::new(None),
+                holder: Mutex::new(None),
             }));
             // SAFETY: chaînes valides pendant l'appel (copiées par la couche C) ; rappels `extern "C"` ;
             // `ctx` reste valide jusqu'à `lw_pipe_server_stop` (voir `Drop`).
@@ -919,5 +960,12 @@ mod tests {
         assert!(resp.contains("\"shmem\""));
         let mapped = Region::map(obj.expect("section reçue")).unwrap();
         assert_eq!(mapped.geometry(), region.geometry());
+        // Même processus : nouvel attachement accepté ; `detach` rend la région.
+        assert!(client
+            .call_with_region(r#"{"cmd":"attach"}"#)
+            .unwrap()
+            .1
+            .is_some());
+        assert!(client.call(r#"{"cmd":"detach"}"#).unwrap().contains("true"));
     }
 }

@@ -224,6 +224,28 @@ void lw_free(char *p) {
     free(p);
 }
 
+int lw_process_alive(uint32_t pid, char *name, size_t cap) {
+    if (cap > 0) {
+        name[0] = '\0';
+    }
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (p == NULL) {
+        return 0;
+    }
+    DWORD code = 0;
+    int alive = GetExitCodeProcess(p, &code) && code == STILL_ACTIVE;
+    if (alive && cap > 0) {
+        wchar_t path[MAX_PATH];
+        DWORD len = MAX_PATH;
+        if (QueryFullProcessImageNameW(p, 0, path, &len)) {
+            const wchar_t *base = wcsrchr(path, L'\\');
+            to_utf8(base ? base + 1 : path, name, cap);
+        }
+    }
+    CloseHandle(p);
+    return alive;
+}
+
 /* ---------- DSCP par qWAVE ---------- */
 
 typedef struct {

@@ -40,6 +40,39 @@ jobs:
       - name: Build release
         run: cargo build --release -p lw-daemon
 
+  windows-driver:
+    name: pilote Windows (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            arch: x64
+          - os: windows-11-arm
+            arch: ARM64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: SDK ASIO (steinberg.net, empreinte vérifiée)
+        run: powershell -ExecutionPolicy Bypass -File windows/driver/fetch-sdk.ps1
+      - name: Pilote et hôte de test (MSVC)
+        run: |
+          cmake -S windows/driver -B build/driver -A ${{ matrix.arch }}
+          cmake --build build/driver --config Release
+      - name: Service en boucle interne, essai du pilote
+        shell: pwsh
+        run: |
+          cargo build --release -p lw-daemon --manifest-path daemon/Cargo.toml
+          $cfg = Join-Path $env:RUNNER_TEMP "cfg.json"
+          '{"iface":"auto","advertise":false,"device":{"channels_to_net":2,"channels_from_net":2,"loopback":true}}' | Set-Content -Encoding ascii $cfg
+          $d = Start-Process daemon\target\release\lw-daemon.exe -ArgumentList "run","--config",$cfg,"--control" -PassThru -NoNewWindow
+          Start-Sleep 3
+          build\driver\Release\openlw-driver-test.exe "$PWD\build\driver\Release\OpenLWDriver.dll"
+          $code = $LASTEXITCODE
+          Stop-Process $d
+          exit $code
+
   macos-bundle:
     name: plugin, app et paquet macOS
     runs-on: macos-26   # SDK macOS 26 (NSGlassEffectView)

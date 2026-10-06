@@ -179,6 +179,7 @@ mod ffi {
                 error: *mut c_int,
             ) -> *mut c_void;
             pub fn lw_qos_close(flow: *mut c_void);
+            pub fn lw_process_alive(pid: u32, name: *mut c_char, cap: usize) -> c_int;
         }
     }
 }

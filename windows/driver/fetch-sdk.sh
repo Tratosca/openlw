@@ -11,4 +11,4 @@ mkdir -p sdk
 curl -fsSL "$URL" -o sdk/asiosdk.zip
 echo "$SHA256  sdk/asiosdk.zip" | sha256sum -c - 2>/dev/null || echo "$SHA256  sdk/asiosdk.zip" | shasum -a 256 -c -
 (cd sdk && unzip -q -o asiosdk.zip && rm asiosdk.zip)
-echo "SDK ASIO : $(pwd)/sdk/ASIOSDK"
+echo "ASIO SDK: $(pwd)/sdk/ASIOSDK"

@@ -127,7 +127,7 @@ impl Timestamp {
         let s = u64::from_be_bytes([0, 0, raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]]);
         let ns = r.u32()?;
         if ns >= 1_000_000_000 {
-            return Err(Error::Invalid("nanosecondes PTP >= 10^9"));
+            return Err(Error::Invalid("PTP nanoseconds >= 10^9"));
         }
         Ok(Self::from_parts(s, ns))
     }
@@ -266,15 +266,15 @@ impl Message {
     }
 
     pub fn parse(buf: &[u8]) -> Result<Self, Error> {
-        let mut r = Reader::new(buf, "message PTP");
+        let mut r = Reader::new(buf, "PTP message");
         let msg_type = MessageType::from_code(r.u8()?);
         let version = r.u8()? & 0x0F;
         if version != 2 {
-            return Err(Error::Invalid("version PTP différente de 2"));
+            return Err(Error::Invalid("PTP version is not 2"));
         }
         let length = usize::from(r.u16()?);
         if length < HEADER_LEN || length > buf.len() {
-            return Err(Error::Invalid("longueur de message PTP"));
+            return Err(Error::Invalid("PTP message length"));
         }
         let domain = r.u8()?;
         r.u8()?;

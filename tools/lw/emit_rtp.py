@@ -39,7 +39,7 @@ def main(argv=None):
     parser.add_argument("--freq", type=float, default=997.0)
     parser.add_argument("--level-dbfs", type=float, default=-20.0)
     parser.add_argument("--pt", type=int, default=96)
-    parser.add_argument("--ssrc", type=lambda x: int(x, 0), help="defaut : adresse IP du groupe ")
+    parser.add_argument("--ssrc", type=lambda x: int(x, 0), help="default: group IP address")
     parser.add_argument("--port", type=int, default=5004)
     parser.add_argument("--tos", type=lambda x: int(x, 0), default=0xB8)
     args = parser.parse_args(argv)
@@ -52,7 +52,7 @@ def main(argv=None):
     period = samples / RATE
     seq, ts, n = 0, 0, 0
     total = int(args.seconds / period)
-    print(f"{args.mode} canal {args.channel} -> {group}:{args.port} depuis {ip}, {samples} ech/pkt, {1/period:.0f} pkt/s, SSRC 0x{ssrc:08X}")
+    print(f"{args.mode} channel {args.channel} -> {group}:{args.port} from {ip}, {samples} samples/pkt, {1/period:.0f} pkt/s, SSRC 0x{ssrc:08X}")
     start = time.perf_counter()
     for k in range(total):
         frames = bytearray()
@@ -68,7 +68,7 @@ def main(argv=None):
         delay = start + (k + 1) * period - time.perf_counter()
         if delay > 0:
             time.sleep(delay)
-    print(f"{total} paquets emis")
+    print(f"{total} packets sent")
     return 0
 
 

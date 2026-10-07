@@ -2,11 +2,29 @@
 <installer-gui-script minSpecVersion="2">
     <title>OpenLW</title>
     <organization>fr.francois-brille</organization>
+    <!-- Both host architectures: Installer runs natively and the check below explains a wrong download
+         (an Intel-only package would otherwise run under Rosetta on Apple Silicon). -->
     <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="x86_64,arm64"/>
     <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
     <allowed-os-versions>
-        <os-version min="10.13"/>
+        <os-version min="__MIN_OS__"/>
     </allowed-os-versions>
+    <installation-check script="matchesMac()"/>
+    <script><![CDATA[
+    // coreaudiod loads the HAL plugin in the native architecture: the package must match the Mac.
+    function matchesMac() {
+        var appleSilicon = system.sysctl('hw.optional.arm64') == 1;
+        if (appleSilicon == __APPLE_SILICON__) {
+            return true;
+        }
+        my.result.type = 'Fatal';
+        my.result.title = 'This package does not match this Mac';
+        my.result.message = appleSilicon
+            ? 'This Mac has an Apple Silicon chip. Download the OpenLW package for Apple Silicon (arm64).'
+            : 'This Mac has an Intel processor. Download the OpenLW package for Intel (x86_64).';
+        return false;
+    }
+    ]]></script>
     <welcome file="welcome.html" mime-type="text/html"/>
     <conclusion file="conclusion.html" mime-type="text/html"/>
     <choices-outline>

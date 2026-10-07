@@ -20,7 +20,7 @@
  * Same queue attaches region if I/O runs without it (daemon started after application).
  *
  * Names: "geometry" also contains device names (“OpenLW”, or “OpenLW In
- * (2 - Studio A)” if enabled in app) and channel names (currently “2 - Studio A G”).
+ * (2 - Studio A)” if enabled in app) and channel names (currently “2 - Studio A L”).
  * Changes notify host (PropertiesChanged) without configuration change.
  *
  * Input latency: bounded here on reader side, because only plugin knows host-requested
@@ -70,9 +70,9 @@ enum {
     kObj_Device = 2,     /* duplex */
     kObj_StreamIn = 3,   /* Network → applications (input) */
     kObj_StreamOut = 4,  /* Applications → network (output) */
-    kObj_DevIn = 5,      /* « OpenLW In » */
+    kObj_DevIn = 5,      /* “OpenLW In” */
     kObj_StreamIn2 = 6,
-    kObj_DevOut = 7,     /* « OpenLW Out » */
+    kObj_DevOut = 7,     /* “OpenLW Out” */
     kObj_StreamOut2 = 8,
 };
 
@@ -346,14 +346,14 @@ static void attach_locked(void) {
     detach_locked();
     gClient = gTestEndpoint ? lw_xpc_client_endpoint(gTestEndpoint) : lw_xpc_client_mach(LW_SERVICE, 1);
     if (gClient == NULL) {
-        plog(3, "connexion XPC au daemon impossible");
+        plog(3, "cannot open the XPC connection to the daemon");
         return;
     }
     const char *err = NULL;
     void *obj = NULL;
     char *reply = lw_xpc_call_shmem(gClient, "{\"cmd\":\"attach\"}", &err, &obj);
     if (reply == NULL || obj == NULL) {
-        plog(3, err ? err : "le daemon n'a pas fourni de région partagée");
+        plog(3, err ? err : "the daemon did not provide a shared region");
         if (reply) {
             lw_free(reply);
         }
@@ -374,7 +374,7 @@ static void attach_locked(void) {
     }
     /* Published clock must use mach_absolute_time ticks, GetZeroTimeStamp's timebase. */
     if (base == NULL || clock.id != LW_CLOCK_MACH) {
-        plog(3, "région partagée invalide (magie, version, taille ou horloge hôte)");
+        plog(3, "invalid shared region (magic, version, size, or host clock)");
         lw_shm_unmap(base, size);
         lw_xpc_release(obj);
         detach_locked();
@@ -384,7 +384,7 @@ static void attach_locked(void) {
     if (h->channels[LW_TO_NET] != gChannelsOut || h->channels[LW_FROM_NET] != gChannelsIn ||
         h->sample_rate != (uint32_t)LW_SAMPLE_RATE) {
         /* Daemon channel count changed: monitor will request configuration change. */
-        plog(3, "géométrie de la région différente de celle du périphérique (canaux ou fréquence)");
+        plog(3, "region geometry differs from the device (channels or sample rate)");
         lw_shm_unmap(base, size);
         lw_xpc_release(obj);
         detach_locked();
@@ -395,7 +395,7 @@ static void attach_locked(void) {
     gAttachedGeneration = generation;
     atomic_store(&gInPrimed, 0);
     atomic_store(&gRegion, base);
-    plog(2, "région partagée du daemon attachée");
+    plog(2, "daemon shared region attached");
 }
 
 /* One geometry query; request configuration change if needed. */
@@ -466,7 +466,7 @@ static void monitor_tick(void) {
         return;
     }
     if (relayout) {
-        plog(2, split ? "présentation : deux périphériques" : "présentation : un périphérique");
+        plog(2, split ? "layout: two devices" : "layout: one device");
         AudioObjectPropertyAddress pa[2] = {
             {kAudioPlugInPropertyDeviceList, kAudioObjectPropertyScopeGlobal, LW_ELEMENT_MAIN},
             {kAudioObjectPropertyOwnedObjects, kAudioObjectPropertyScopeGlobal, LW_ELEMENT_MAIN},
@@ -497,7 +497,7 @@ static void monitor_tick(void) {
     }
     for (int i = 0; i < 3; i++) {
         if (request & (1 << i)) {
-            plog(2, "géométrie du daemon modifiée : changement de configuration demandé");
+            plog(2, "daemon geometry changed: configuration change requested");
             host->RequestDeviceConfigurationChange(host, kDevIds[i], 0, NULL);
         }
     }
@@ -749,7 +749,7 @@ static OSStatus LW_Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPl
     Float64 ticksPerSecond = 1e9 * (Float64)tb.denom / (Float64)tb.numer;
     gHostTicksPerFrame = ticksPerSecond / LW_SAMPLE_RATE;
     monitor_start();
-    plog(2, "plugin OpenLW initialisé");
+    plog(2, "OpenLW plugin initialized");
     return kAudioHardwareNoError;
 }
 
@@ -800,7 +800,7 @@ static OSStatus LW_PerformConfigChange(AudioServerPlugInDriverRef d, AudioObject
         }
     }
     pthread_mutex_unlock(&gLock);
-    plog(2, "configuration du périphérique appliquée");
+    plog(2, "device configuration applied");
     return kAudioHardwareNoError;
 }
 
@@ -1131,7 +1131,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         case kAudioObjectPropertyOwner:
             return put_u32(stream_owner(id), inDataSize, outDataSize, outData);
         case kAudioObjectPropertyName:
-            return put_str(in ? CFSTR("Depuis Livewire") : CFSTR("Vers Livewire"), inDataSize, outDataSize, outData);
+            return put_str(in ? CFSTR("From Livewire") : CFSTR("To Livewire"), inDataSize, outDataSize, outData);
         case kAudioObjectPropertyOwnedObjects:
             *outDataSize = 0;
             return kAudioHardwareNoError;

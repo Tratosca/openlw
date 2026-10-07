@@ -55,7 +55,7 @@ public sealed class Listener : IDisposable
         catch (Exception e)
         {
             sock.Dispose();
-            throw new ListenError($"Écoute impossible : sortie audio de Windows indisponible ({e.Message}).");
+            throw new ListenError($"Cannot listen to the source: Windows audio output unavailable ({e.Message}).");
         }
         int gen;
         lock (gate)
@@ -65,7 +65,7 @@ public sealed class Listener : IDisposable
             output = wo;
             buffer = buf;
         }
-        var t = new Thread(() => Receive(sock, channels, bits, gen, wo, buf)) { IsBackground = true, Name = "pré-écoute" };
+        var t = new Thread(() => Receive(sock, channels, bits, gen, wo, buf)) { IsBackground = true, Name = "preview" };
         t.Start();
     }
 
@@ -96,7 +96,7 @@ public sealed class Listener : IDisposable
             s.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             step = "bind";
             s.Bind(new IPEndPoint(IPAddress.Any, port));
-            step = "abonnement au groupe";
+            step = "group join";
             s.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership,
                 new MulticastOption(IPAddress.Parse(group), IPAddress.Parse(ifaceIp)));
             s.ReceiveTimeout = 200;
@@ -105,7 +105,7 @@ public sealed class Listener : IDisposable
         catch (SocketException e)
         {
             s.Dispose();
-            throw new ListenError($"Écoute impossible ({step} : {e.Message}). Vérifiez l'interface Livewire choisie.");
+            throw new ListenError($"Cannot listen to the source ({step}: {e.Message}). Check the selected Livewire interface.");
         }
     }
 

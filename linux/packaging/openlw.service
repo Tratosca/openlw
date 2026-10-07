@@ -3,7 +3,7 @@
 #   systemctl --user enable --now openlw.service
 # Without an active session (dedicated machine): loginctl enable-linger <user>.
 [Unit]
-Description=OpenLW : audio Livewire et AES67
+Description=OpenLW: Livewire and AES67 audio
 After=pipewire.service
 Wants=pipewire.service
 

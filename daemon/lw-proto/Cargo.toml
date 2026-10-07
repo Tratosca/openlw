@@ -1,7 +1,7 @@
 [package]
 name = "lw-proto"
 version = "0.5.0"
-description = "Codecs Livewire / AES67 (canaux, RTP, annonce, SDP, PTP, horloge Livewire) sans I/O"
+description = "Livewire / AES67 codecs (channels, RTP, advertisements, SDP, PTP, Livewire clock), no I/O"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

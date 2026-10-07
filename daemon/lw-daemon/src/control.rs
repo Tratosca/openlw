@@ -175,7 +175,7 @@ impl Shared {
     fn apply_edit(&self, edit: &Edit) -> Value {
         let mut guard = self.config.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(src) = guard.as_mut() else {
-            return json!({ "ok": false, "error": "configuration non modifiable (daemon lancé sans fichier de configuration)" });
+            return json!({ "ok": false, "error": "configuration is read-only (daemon started without a configuration file)" });
         };
         let next = match editor::apply(&src.current, edit) {
             Ok(c) => c,
@@ -183,14 +183,14 @@ impl Shared {
         };
         if let Some(path) = &src.path {
             if let Err(e) = next.save(path) {
-                return json!({ "ok": false, "error": format!("enregistrement de {} impossible : {e}", path.display()) });
+                return json!({ "ok": false, "error": format!("cannot save {}: {e}", path.display()) });
             }
         }
         if src.reload.send(next.clone()).is_err() {
-            return json!({ "ok": false, "error": "superviseur arrêté" });
+            return json!({ "ok": false, "error": "supervisor stopped" });
         }
         src.current = next.clone();
-        crate::info!("patch modifié : {edit:?}");
+        crate::info!("patch changed: {edit:?}");
         json!({ "ok": true, "config": next })
     }
 
@@ -266,7 +266,7 @@ impl Shared {
             Ok(v) => match v.get("cmd").and_then(Value::as_str) {
                 Some("config") => match self.current_config() {
                     Some(c) => json!({ "ok": true, "config": c }),
-                    None => json!({ "ok": false, "error": "aucune configuration chargée" }),
+                    None => json!({ "ok": false, "error": "no configuration loaded" }),
                 },
                 Some("ping") => {
                     json!({ "ok": true, "pong": true, "version": env!("CARGO_PKG_VERSION") })
@@ -326,18 +326,18 @@ impl Shared {
                             "output_names": labels.output_names,
                         })
                     }
-                    None => json!({ "ok": false, "error": "aucun périphérique virtuel actif" }),
+                    None => json!({ "ok": false, "error": "no active virtual device" }),
                 },
                 Some("attach") => match self.device_status() {
                     Some(d) => json!({ "ok": true, "device": d }),
-                    None => json!({ "ok": false, "error": "aucun périphérique virtuel actif" }),
+                    None => json!({ "ok": false, "error": "no active virtual device" }),
                 },
                 Some(other) => {
-                    json!({ "ok": false, "error": format!("commande inconnue : {other}") })
+                    json!({ "ok": false, "error": format!("unknown command: {other}") })
                 }
-                None => json!({ "ok": false, "error": "champ `cmd` absent" }),
+                None => json!({ "ok": false, "error": "missing `cmd` field" }),
             },
-            Err(e) => json!({ "ok": false, "error": format!("JSON invalide : {e}") }),
+            Err(e) => json!({ "ok": false, "error": format!("invalid JSON: {e}") }),
         };
         reply.to_string()
     }
@@ -380,12 +380,12 @@ fn channels_arg(v: &Value, key: &str) -> Result<Vec<u16>, String> {
     let arr = v
         .get(key)
         .and_then(Value::as_array)
-        .ok_or(format!("`{key}` (liste de canaux) absent"))?;
+        .ok_or(format!("missing `{key}` (channel list)"))?;
     arr.iter()
         .map(|x| {
             x.as_u64()
                 .and_then(|n| u16::try_from(n).ok())
-                .ok_or(format!("`{key}` : entier attendu"))
+                .ok_or(format!("`{key}`: integer expected"))
         })
         .collect()
 }
@@ -397,7 +397,7 @@ fn opt_u16(v: &Value, key: &str) -> Result<Option<u16>, String> {
             .as_u64()
             .and_then(|n| u16::try_from(n).ok())
             .map(Some)
-            .ok_or(format!("`{key}` : entier attendu")),
+            .ok_or(format!("`{key}`: integer expected")),
     }
 }
 
@@ -414,13 +414,13 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
             group: match v.get("group").and_then(Value::as_str) {
                 Some(g) => Some(
                     g.parse()
-                        .map_err(|_| "`group` : adresse IPv4 invalide".to_string())?,
+                        .map_err(|_| "`group`: invalid IPv4 address".to_string())?,
                 ),
                 None => None,
             },
             port: opt_u16(v, "port")?.unwrap_or(5004),
             kind: serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
-                .map_err(|e| format!("`kind` : {e}"))?,
+                .map_err(|e| format!("`kind`: {e}"))?,
             device_channels: channels_arg(v, "device_channels")?,
         }),
         "unpatch_input" => Ok(Edit::UnpatchInput {
@@ -431,33 +431,33 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
             group: match v.get("group").and_then(Value::as_str) {
                 Some(g) => Some(
                     g.parse()
-                        .map_err(|_| "`group` : adresse IPv4 invalide".to_string())?,
+                        .map_err(|_| "`group`: invalid IPv4 address".to_string())?,
                 ),
                 None => None,
             },
             port: opt_u16(v, "port")?.unwrap_or(5004),
             kind: serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
-                .map_err(|e| format!("`kind` : {e}"))?,
+                .map_err(|e| format!("`kind`: {e}"))?,
         }),
         "patch_output" => Ok(Edit::PatchOutput {
-            channel: opt_u16(v, "channel")?.ok_or("`channel` absent")?,
+            channel: opt_u16(v, "channel")?.ok_or("missing `channel`")?,
             name: v
                 .get("name")
                 .and_then(Value::as_str)
                 .unwrap_or(crate::config::DEFAULT_SOURCE_NAME)
                 .to_string(),
             format: serde_json::from_value::<Format>(from_json("format", "standard")?)
-                .map_err(|e| format!("`format` : {e}"))?,
+                .map_err(|e| format!("`format`: {e}"))?,
             device_channels: channels_arg(v, "device_channels")?,
         }),
         "unpatch_output" => Ok(Edit::UnpatchOutput {
-            channel: opt_u16(v, "channel")?.ok_or("`channel` absent")?,
+            channel: opt_u16(v, "channel")?.ok_or("missing `channel`")?,
         }),
         "set_iface" => {
             let name = v
                 .get("iface")
                 .and_then(Value::as_str)
-                .ok_or("`iface` absent")?;
+                .ok_or("missing `iface`")?;
             if name == crate::config::AUTO_IFACE {
                 return Ok(Edit::SetIface(name.into()));
             }
@@ -473,7 +473,7 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
                 None | Some(Value::Null) => None,
                 Some(l) => Some(
                     serde_json::from_value(l.clone())
-                        .map_err(|_| "`latency` : low, normal ou safe".to_string())?,
+                        .map_err(|_| "`latency`: low, normal, or safe".to_string())?,
                 ),
             },
             dscp: match v.get("dscp") {
@@ -481,25 +481,25 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
                 Some(d) => Some(
                     d.as_u64()
                         .and_then(|n| u8::try_from(n).ok())
-                        .ok_or("`dscp` : entier de 0 à 63")?,
+                        .ok_or("`dscp`: integer from 0 to 63")?,
                 ),
             },
         }),
         "set_device_layout" => Ok(Edit::SetDeviceLayout(
             serde_json::from_value(v.get("layout").cloned().unwrap_or(Value::Null))
-                .map_err(|_| "`layout` : duplex ou split".to_string())?,
+                .map_err(|_| "`layout`: duplex or split".to_string())?,
         )),
         "set_device_naming" => Ok(Edit::SetDeviceNaming(
             v.get("enabled")
                 .and_then(Value::as_bool)
-                .ok_or("`enabled` (booléen) absent")?,
+                .ok_or("missing `enabled` (boolean)")?,
         )),
         "set_device_channels" => {
             let n = |key: &str| -> Result<u32, String> {
                 v.get(key)
                     .and_then(Value::as_u64)
                     .and_then(|n| u32::try_from(n).ok())
-                    .ok_or(format!("`{key}` (entier) absent"))
+                    .ok_or(format!("missing `{key}` (integer)"))
             };
             Ok(Edit::SetDeviceChannels {
                 to_net: n("to_net")?,
@@ -509,9 +509,9 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
         "set_advertise" => Ok(Edit::SetAdvertise(
             v.get("advertise")
                 .and_then(Value::as_bool)
-                .ok_or("`advertise` (booléen) absent")?,
+                .ok_or("missing `advertise` (boolean)")?,
         )),
-        other => Err(format!("commande inconnue : {other}")),
+        other => Err(format!("unknown command: {other}")),
     }
 }
 
@@ -547,7 +547,7 @@ mod tests {
         assert_eq!(v["status"]["advertised_sources"], 2);
         let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"nope"}"#, &me)).unwrap();
         assert_eq!(v["ok"], false);
-        let v: Value = serde_json::from_str(&s.handle("pas du json", &me)).unwrap();
+        let v: Value = serde_json::from_str(&s.handle("not json", &me)).unwrap();
         assert_eq!(v["ok"], false);
     }
 
@@ -556,15 +556,15 @@ mod tests {
         let s = shared();
         let guest = Caller {
             may_edit: false,
-            ..Caller::trusted("invité")
+            ..Caller::trusted("guest")
         };
         let v: Value =
             serde_json::from_str(&s.handle(r#"{"cmd":"set_advertise","advertise":true}"#, &guest))
                 .unwrap();
         assert_eq!(v["ok"], false);
-        assert!(v["error"].as_str().unwrap().contains("invité"));
+        assert!(v["error"].as_str().unwrap().contains("guest"));
         let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"ping"}"#, &guest)).unwrap();
-        assert_eq!(v["ok"], true, "lecture libre");
+        assert_eq!(v["ok"], true, "reads unrestricted");
     }
 
     #[cfg(target_os = "macos")]

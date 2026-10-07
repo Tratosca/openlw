@@ -117,7 +117,7 @@ def analyze(path, ports):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("capture")
-    parser.add_argument("--port", type=int, action="append", help="port(s) RTP (defaut 5004)")
+    parser.add_argument("--port", type=int, action="append", help="RTP port(s) (default 5004)")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     reports = analyze(args.capture, set(args.port or [5004]))
@@ -125,10 +125,10 @@ def main(argv=None):
         print(json.dumps(reports, indent=2))
         return 0
     for r in reports:
-        chan = f"canal {r['livewire_channel']} ({r['livewire_kind']})" if r["livewire_channel"] else "hors plan Livewire"
+        chan = f"channel {r['livewire_channel']} ({r['livewire_kind']})" if r["livewire_channel"] else "not a Livewire group"
         print(f"{r['src']} -> {r['dst']}:{r['port']} [{chan}] {r['packets']} pkts {r['pkt_rate']} pkt/s "
-              f"PT={r['pt']} SSRC={r['ssrc']} (=dst:{r['ssrc_equals_dst']}) charge={r['payload_sizes']} "
-              f"ech/pkt={r['samples_per_packet_L24']} dseq={r['dseq']} dts={r['dts']} gigue={r['jitter_samples']} ech "
+              f"PT={r['pt']} SSRC={r['ssrc']} (=dst:{r['ssrc_equals_dst']}) payload={r['payload_sizes']} "
+              f"samples/pkt={r['samples_per_packet_L24']} dseq={r['dseq']} dts={r['dts']} jitter={r['jitter_samples']} samples "
               f"TOS={r['tos']} TTL={r['ttl']} csum0={r['udp_checksum_zero']}")
     return 0
 

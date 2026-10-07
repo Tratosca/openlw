@@ -90,7 +90,7 @@ impl Iface {
             format!("{} ({}) · {}", self.friendly, self.name, self.ipv4)
         };
         if self.livewire {
-            base + " · réseau Livewire"
+            base + " · Livewire network"
         } else {
             base
         }
@@ -337,7 +337,7 @@ mod tests {
             "destinations": [{"channel": 101, "kind": "surround", "device_channels": [1,2,3,4,5,6,7,8]},
                              {"group": "239.192.0.9", "device_channels": [3,4]}],
             "sources": [{"channel": 2001, "name": "PC", "device_channels": [1,2]},
-                        {"channel": 2002}, {"name": "sans canal"}],
+                        {"channel": 2002}, {"name": "no channel"}],
         }));
         assert!(c.auto_iface() && !c.advertise);
         assert_eq!((c.channels_to_net, c.channels_from_net, c.tos), (4, 6, 136));

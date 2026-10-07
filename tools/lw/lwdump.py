@@ -71,7 +71,7 @@ def main(argv=None):
     parser.add_argument("--adv", action="store_true")
     parser.add_argument("--clock", action="store_true")
     parser.add_argument("--ptp", action="store_true")
-    parser.add_argument("--json", action="store_true", help="une ligne JSON par paquet")
+    parser.add_argument("--json", action="store_true", help="one JSON line per packet")
     args = parser.parse_args(argv)
     every = not (args.adv or args.clock or args.ptp)
     stats = collections.Counter()
@@ -111,7 +111,7 @@ def main(argv=None):
         else:
             body = {k: v for k, v in rec.items() if k not in ("t", "src", "dst", "sport", "dport", "hex")}
             print(f"{rec['t']:.6f} {rec['src']}:{rec['sport']} -> {rec['dst']}:{rec['dport']} {body}")
-    print("# totaux :", dict(stats), file=sys.stderr)
+    print("# totals:", dict(stats), file=sys.stderr)
     return 0
 
 

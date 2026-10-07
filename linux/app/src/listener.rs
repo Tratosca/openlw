@@ -67,29 +67,29 @@ impl Listener {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
         let ring = self.ring.clone();
         std::thread::Builder::new()
-            .name("pré-écoute PipeWire".into())
+            .name("preview PipeWire".into())
             .spawn(move || {
                 let r = play(&ring, quit_rx, &ready_tx);
                 if let Err(e) = r {
                     let _ = ready_tx.send(Err(e));
                 }
             })
-            .map_err(|e| format!("Écoute impossible : {e}"))?;
+            .map_err(|e| format!("Cannot listen to the source: {e}."))?;
         match ready_rx.recv_timeout(Duration::from_secs(3)) {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(format!("Écoute impossible : {e}.")),
+            Ok(Err(e)) => return Err(format!("Cannot listen to the source: {e}.")),
             Err(_) => {
                 let _ = quit.send(());
-                return Err("Écoute impossible : PipeWire ne répond pas.".into());
+                return Err("Cannot listen to the source: PipeWire is not responding.".into());
             }
         }
         let ring = self.ring.clone();
         let st = stop.clone();
         let width = if bits == 16 { 2 } else { 3 };
         std::thread::Builder::new()
-            .name("pré-écoute réseau".into())
+            .name("preview network".into())
             .spawn(move || receive(&sock, channels.max(1), width, &ring, &st))
-            .map_err(|e| format!("Écoute impossible : {e}"))?;
+            .map_err(|e| format!("Cannot listen to the source: {e}."))?;
         self.running = Some(Running { stop, quit });
         Ok(())
     }
@@ -112,7 +112,7 @@ impl Drop for Listener {
 /// kernel delivers only this group's datagrams to the socket.
 fn open(group: Ipv4Addr, iface: Ipv4Addr) -> Result<UdpSocket, String> {
     let fail = |step: &str, e: std::io::Error| {
-        format!("Écoute impossible ({step} : {e}). Vérifiez l'interface Livewire choisie.")
+        format!("Cannot listen to the source ({step}: {e}). Check the selected Livewire interface.")
     };
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
         .map_err(|e| fail("socket", e))?;
@@ -121,7 +121,7 @@ fn open(group: Ipv4Addr, iface: Ipv4Addr) -> Result<UdpSocket, String> {
     s.bind(&SocketAddrV4::new(group, PORT).into())
         .map_err(|e| fail("bind", e))?;
     s.join_multicast_v4(&group, &iface)
-        .map_err(|e| fail("abonnement au groupe", e))?;
+        .map_err(|e| fail("group join", e))?;
     s.set_read_timeout(Some(Duration::from_millis(200)))
         .map_err(|e| fail("socket", e))?;
     Ok(s.into())
@@ -168,13 +168,13 @@ fn play(
     quit: pw::channel::Receiver<()>,
     ready: &mpsc::Sender<Result<(), String>>,
 ) -> Result<(), String> {
-    let pwerr = |what: &str, e: pw::Error| format!("PipeWire, {what} : {e}");
+    let pwerr = |what: &str, e: pw::Error| format!("PipeWire, {what}: {e}");
     pw::init();
-    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(|e| pwerr("boucle", e))?;
-    let context = pw::context::ContextRc::new(&mainloop, None).map_err(|e| pwerr("contexte", e))?;
+    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(|e| pwerr("loop", e))?;
+    let context = pw::context::ContextRc::new(&mainloop, None).map_err(|e| pwerr("context", e))?;
     let core = context
         .connect_rc(None)
-        .map_err(|e| pwerr("connexion (session audio absente ?)", e))?;
+        .map_err(|e| pwerr("connection (no audio session?)", e))?;
     // Quit request or server error: no further loop run.
     let ended = Rc::new(Cell::new(false));
     let _quit = quit.attach(mainloop.loop_(), {
@@ -189,7 +189,7 @@ fn play(
     let default_sink: Rc<RefCell<Option<String>>> = Rc::default();
     let metadata: Rc<RefCell<Vec<(pw::metadata::Metadata, pw::metadata::MetadataListener)>>> =
         Rc::default();
-    let registry = core.get_registry_rc().map_err(|e| pwerr("registre", e))?;
+    let registry = core.get_registry_rc().map_err(|e| pwerr("registry", e))?;
     let _registry_listener = registry
         .add_listener_local()
         .global({
@@ -253,7 +253,7 @@ fn play(
             }
         })
         .register();
-    pending.set(Some(core.sync(0).map_err(|e| pwerr("synchronisation", e))?));
+    pending.set(Some(core.sync(0).map_err(|e| pwerr("synchronization", e))?));
     mainloop.run();
     if ended.get() {
         return Ok(());
@@ -261,7 +261,7 @@ fn play(
     let target = preview_target(&sinks.borrow(), default_sink.borrow().as_deref())?;
     let stream = pw::stream::StreamBox::new(
         &core,
-        "Pré-écoute OpenLW",
+        "OpenLW Preview",
         properties! {
             *pw::keys::MEDIA_TYPE => "Audio",
             *pw::keys::MEDIA_CATEGORY => "Playback",
@@ -319,7 +319,7 @@ fn play(
         .register()
         .map_err(|e| pwerr("flux", e))?;
     let pod = format_pod()?;
-    let mut params = [Pod::from_bytes(&pod).ok_or("format invalide")?];
+    let mut params = [Pod::from_bytes(&pod).ok_or("invalid format")?];
     stream
         .connect(
             spa::utils::Direction::Output,
@@ -357,7 +357,7 @@ fn preview_target(sinks: &[String], default: Option<&str>) -> Result<String, Str
         .iter()
         .find(|s| *s != OPENLW_OUT)
         .cloned()
-        .ok_or_else(|| "aucune sortie audio de l'ordinateur autre qu'OpenLW Out".to_string())
+        .ok_or_else(|| "no audio output on this computer other than OpenLW Out".to_string())
 }
 
 /// Interleaved 32-bit float, 48 kHz, stereo.
@@ -381,7 +381,7 @@ fn format_pod() -> Result<Vec<u8>, String> {
     });
     pw::spa::pod::serialize::PodSerializer::serialize(std::io::Cursor::new(Vec::new()), &obj)
         .map(|(c, _)| c.into_inner())
-        .map_err(|e| format!("format PipeWire : {e:?}"))
+        .map_err(|e| format!("PipeWire format: {e:?}"))
 }
 
 #[cfg(test)]

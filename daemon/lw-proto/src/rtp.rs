@@ -24,10 +24,10 @@ pub struct Packet<'a> {
 
 impl<'a> Packet<'a> {
     pub fn parse(buf: &'a [u8]) -> Result<Self, Error> {
-        let mut r = Reader::new(buf, "paquet RTP");
+        let mut r = Reader::new(buf, "RTP packet");
         let b0 = r.u8()?;
         if b0 >> 6 != 2 {
-            return Err(Error::Invalid("version RTP différente de 2"));
+            return Err(Error::Invalid("RTP version is not 2"));
         }
         let b1 = r.u8()?;
         let sequence = r.u16()?;
@@ -49,14 +49,14 @@ impl<'a> Packet<'a> {
             let pad = usize::from(
                 *payload
                     .last()
-                    .ok_or(Error::Invalid("bourrage sans octet"))?,
+                    .ok_or(Error::Invalid("padding without a byte"))?,
             );
             if pad == 0 || pad > payload.len() {
-                return Err(Error::Invalid("bourrage RTP"));
+                return Err(Error::Invalid("RTP padding"));
             }
             payload = payload
                 .get(..payload.len() - pad)
-                .ok_or(Error::Invalid("bourrage RTP"))?;
+                .ok_or(Error::Invalid("RTP padding"))?;
         }
         Ok(Self {
             marker: b1 & 0x80 != 0,
@@ -161,7 +161,7 @@ impl Packetizer {
     /// Build next packet from `samples` (exactly `samples_needed()` values).
     pub fn packet(&mut self, samples: &[i32], out: &mut Vec<u8>) -> Result<(), Error> {
         if samples.len() != self.samples_needed() {
-            return Err(Error::Invalid("nombre d'échantillons du paquet"));
+            return Err(Error::Invalid("packet sample count"));
         }
         out.clear();
         out.reserve(HEADER_LEN + samples.len() * 3);

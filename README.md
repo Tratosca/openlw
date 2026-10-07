@@ -3,22 +3,9 @@
 OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-over-IP networks. It connects desktop audio applications to network sources and destinations through a virtual audio device, source discovery, and an input/output patch matrix.
 
 > [!WARNING]
-> **Not for critical environments. Provided “as is”.** OpenLW is an independent, experimental project. It is not designed, tested or certified for critical environments: on-air broadcast chains, emergency or safety systems, or any use where an interruption, delay or corruption of audio could cause harm or loss. It is provided “as is”, without warranty of any kind, express or implied, as stated in sections 7 and 8 of the [Apache License 2.0](LICENSE) (sections 15 and 16 of the GPLv3 for the Windows ASIO driver). You use it at your own risk.
+> **Provided “as is” and probably not suited for production environments.** OpenLW is an independent, experimental project that has not been tested or certified for critical environments or any use where an interruption, delay or corruption of audio could cause harm or loss. It is provided “as is”, without warranty of any kind, express or implied, as stated in sections 7 and 8 of the [Apache License 2.0](LICENSE) (sections 15 and 16 of the GPLv3 for the Windows ASIO driver). Use it at your own risk.
 
-| Platform | Architectures | Audio device | App | Status |
-|---|---|---|---|---|
-| macOS 10.13 and later | Intel, Apple Silicon | CoreAudio (all applications) | OpenLW (AppKit, Liquid Glass on macOS 26) | Available |
-| Windows 10 22H2 and 11 | x64, ARM64 | ASIO® driver, displayed as “OpenLW” (ASIO-compatible applications) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3) | Build from source only, no binary release ([why](#windows-build-from-source-only)) |
-| Linux (PipeWire 0.3.49+) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications) | OpenLW (GTK4) | In progress; service, PipeWire nodes, app and packages implemented, real machine validation pending |
 
-See the [roadmap](docs/roadmap.md), [Windows guide](windows/README.md), and [Linux guide](linux/README.md) for platform-specific progress and validation limits. The following usage instructions describe macOS.
-
-### Windows: build from source only
-
-The Windows service, ASIO® driver, app and MSI installer stay in the repository and build from source ([Windows guide](windows/README.md)), but no Windows binary or installer is published:
-
-- Telos Alliance already offers a proprietary, paid Windows driver for Livewire networks (Axia IP-Audio Driver).
-- Distributing an installer that installs cleanly requires Authenticode code signing (organization-validated or EV certificate, or a signing service); otherwise SmartScreen warns and Smart App Control may block it. A driver visible to all Windows applications (WaveRT kernel driver) would additionally require an EV certificate and Microsoft attestation signing for every release ([roadmap](docs/roadmap.md)).
 
 ## Features
 
@@ -28,18 +15,34 @@ The Windows service, ASIO® driver, app and MSI installer stay in the repository
 - **Network selection:** automatically use the interface receiving Livewire advertisements; apply changes without interrupting unrelated streams.
 - **OpenLW app:** manage patches, transmission, meters, settings, and uninstallation.
 
+| Platform | Architectures | Audio device | App | Status |
+|---|---|---|---|---|
+| macOS | Apple Silicon (macOS 11 and later), Intel (macOS 10.13 and later): one package each | CoreAudio (all applications) | OpenLW (AppKit, Liquid Glass on macOS 26) | Available |
+| Windows 10 22H2 and 11 | x64, ARM64 | ASIO® driver, displayed as “OpenLW” (ASIO-compatible applications) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3) | Build from source only, no binary release ([why](#windows-build-from-source-only)) |
+| Linux (PipeWire 0.3.49+) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications) | OpenLW (GTK4) | In progress; service, PipeWire nodes, app and packages implemented, real machine validation pending |
+
+See the [roadmap](docs/roadmap.md), [Windows guide](windows/README.md), and [Linux guide](linux/README.md) for platform-specific progress and validation limits. The following usage instructions describe macOS.
+
 ## Install and start on macOS
 
-Open `OpenLW-<version>.pkg` and follow the installer. Then:
+Open the package for your Mac, `OpenLW-<version>-arm64.pkg` (Apple Silicon, macOS 11 or later) or `OpenLW-<version>-x86_64.pkg` (Intel, macOS 10.13 or later), and follow the installer. A package refuses to install on the other architecture. Then:
 
 1. Connect the Mac to the Livewire network.
 2. Open **OpenLW** from Applications.
-3. To transmit, select “OpenLW” as the Mac's or application's output, enter the destination channel in OpenLW, and enable transmission (the current app labels this checkbox **Diffuser**).
+3. To transmit, select “OpenLW” as the Mac's or application's output, enter the destination channel in OpenLW, and select **Transmit**.
 4. To record, click the source's cell in the input matrix, then record from “OpenLW” in your audio application.
 
-To uninstall, use the OpenLW menu's uninstall command (currently **Désinstaller OpenLW**).
+To uninstall, choose **OpenLW > Uninstall OpenLW…**.
 
-The package is not yet signed or notarized. macOS requires confirmation when opening it: right-click > Open, or use System Settings > Privacy & Security.
+Released packages are signed with a Developer ID and notarized by Apple. A package built from source without signing identities is unsigned: macOS then asks for confirmation when opening it (right-click > Open, or System Settings > Privacy & Security).
+
+## Windows: build from source only
+
+On Windows, OpenLW only provides an ASIO® driver. A WaveRT audio driver, which would make the device appear in Windows and in all applications as an “audio output” or “audio input”, only installs normally once signed through Microsoft: this requires an expensive EV code signing certificate and attestation signing for every release. The alternative, enabling test mode or disabling driver signature enforcement, is strongly discouraged. I don't plan to buy such a certificate for this project anytime soon.
+
+Also, I highly encourage you to buy the Telos Alliance Windows driver for Livewire networks (Axia IP-Audio Driver).
+
+The Windows service, ASIO driver, app and MSI installer must be built from source ([Windows guide](windows/README.md)); no Windows binary or installer will be released. Locally built installers are unsigned (no Authenticode signature): SmartScreen warns, and Smart App Control, when enabled, may block them.
 
 ## Build from source
 
@@ -53,7 +56,8 @@ For macOS, install Xcode with the macOS 26 SDK or later and the Rust targets `x8
 
 ```sh
 macos/scripts/build-all.sh          # Universal service, plugin, and app binaries
-macos/installer/build-pkg.sh        # build/OpenLW-<version>.pkg
+macos/installer/build-pkg.sh arm64  # build/OpenLW-<version>-arm64.pkg (Apple Silicon)
+macos/installer/build-pkg.sh x86_64 # build/OpenLW-<version>-x86_64.pkg (Intel)
 ```
 
 Platform and component guides:
@@ -92,7 +96,7 @@ tools/ci/test-wine.sh               # Windows build under Wine (Docker)
 
 ## Limitations
 
-- No network-clock synchronization yet (PTP or Livewire clock). Buffer slips compensate for clock drift, with occasional brief interruptions; see [ADR 0003](docs/adr/0003-horloge.md).
+- No network-clock synchronization yet (PTP or Livewire clock). Buffer slips compensate for clock drift, with occasional brief interruptions; see [ADR 0003](docs/adr/0003-clock-strategy.md).
 - Surround and AES67 have not been verified with third-party devices; see [open questions](docs/protocol/open-questions.md).
 - macOS 10.13 has not been tested on a target machine.
 
@@ -103,5 +107,3 @@ OpenLW is licensed under Apache License 2.0, except for the Windows audio driver
 Livewire, Livewire+, and Axia are trademarks of TLS Corp. (Telos Alliance). OpenLW is an independent project, neither affiliated with nor endorsed by TLS Corp.; these names indicate compatibility only. OpenLW contains no TLS Corp. code, binaries, or documents.
 
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.
-
-Copyright 2026 François Brille (Tratosca).

@@ -39,10 +39,10 @@ impl ClockPacket {
         let rtp = Packet::parse(udp_payload)?;
         match rtp.extension {
             Some((EXTENSION_PROFILE, data)) if data.len() == EXTENSION_WORDS * 4 => {}
-            Some(_) => return Err(Error::Invalid("extension d'horloge inattendue")),
-            None => return Err(Error::Invalid("paquet d'horloge sans extension")),
+            Some(_) => return Err(Error::Invalid("unexpected clock extension")),
+            None => return Err(Error::Invalid("clock packet without extension")),
         }
-        let kind = match at::<4>(udp_payload, 20, "horloge Livewire")? {
+        let kind = match at::<4>(udp_payload, 20, "Livewire clock")? {
             [0x0A, 0x00, 0xCA, 0xBA] => ClockKind::A,
             [0x0B, 0x00, 0xCA, 0xBA] => ClockKind::B,
             other => ClockKind::Unknown(other),
@@ -51,9 +51,9 @@ impl ClockPacket {
             timestamp: rtp.timestamp,
             rtp_sequence: rtp.sequence,
             ssrc: rtp.ssrc,
-            clock_sequence: u32::from_be_bytes(at(udp_payload, 16, "horloge Livewire")?),
+            clock_sequence: u32::from_be_bytes(at(udp_payload, 16, "Livewire clock")?),
             kind,
-            master_id: at(udp_payload, 26, "horloge Livewire")?,
+            master_id: at(udp_payload, 26, "Livewire clock")?,
         })
     }
 }

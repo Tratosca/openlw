@@ -22,10 +22,10 @@ impl fmt::Display for Error {
         match self {
             Error::Truncated { what, need, have } => write!(
                 f,
-                "{what} tronqué : {need} octets requis, {have} disponibles"
+                "{what} truncated: {need} bytes required, {have} available"
             ),
-            Error::Invalid(what) => write!(f, "valeur invalide : {what}"),
-            Error::TooLong(what) => write!(f, "trop long : {what}"),
+            Error::Invalid(what) => write!(f, "invalid value: {what}"),
+            Error::TooLong(what) => write!(f, "too long: {what}"),
         }
     }
 }
@@ -61,7 +61,7 @@ impl<'a> Reader<'a> {
         let out = self
             .buf
             .get(self.pos..end)
-            .ok_or(Error::Invalid("borne interne"))?;
+            .ok_or(Error::Invalid("internal bound"))?;
         self.pos = end;
         Ok(out)
     }

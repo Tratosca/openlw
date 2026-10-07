@@ -35,8 +35,8 @@ enum lw_dir { LW_TO_NET = 0, LW_FROM_NET = 1 };
 /* Host clock in which clock_host_time is expressed. */
 enum lw_host_clock_id {
     LW_CLOCK_UNKNOWN = 0,
-    LW_CLOCK_MACH = 1,      /* macOS : mach_absolute_time */
-    LW_CLOCK_QPC = 2,       /* Windows : QueryPerformanceCounter */
+    LW_CLOCK_MACH = 1,      /* macOS: mach_absolute_time */
+    LW_CLOCK_QPC = 2,       /* Windows: QueryPerformanceCounter */
     LW_CLOCK_MONOTONIC = 3, /* Linux: CLOCK_MONOTONIC in nanoseconds */
 };
 
@@ -96,9 +96,9 @@ typedef struct {
 #endif
 
 #ifdef __cplusplus
-static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "en-tête trop grand");
+static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "header too large");
 #else
-_Static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "en-tête trop grand");
+_Static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "header too large");
 #endif
 
 /* Total region size; zero if parameters are invalid

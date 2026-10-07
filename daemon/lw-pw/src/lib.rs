@@ -37,7 +37,7 @@ impl Default for BridgeConfig {
     }
 }
 
-/// Erreur PipeWire.
+/// PipeWire error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error(pub String);
 
@@ -69,7 +69,7 @@ pub fn channel_positions(channels: u32) -> String {
 /// `frames + margin` available frames; catch up above `frames + 2 × margin`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputPlan {
-    /// Pas encore assez d'audio : silence.
+    /// Not enough audio yet: silence.
     Silence,
     /// Discard `skip` frames, then read.
     Read { skip: u32 },

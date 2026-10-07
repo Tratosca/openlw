@@ -1,6 +1,6 @@
 // OpenLW Windows audio-driver test host: load DLL like an ASIO application, play a
-// sine wave on two outputs, check it returns on two inputs through service internal
-// service (configuration "device": {"loopback": true}).
+// sine wave on two outputs, check it returns on two inputs through the service's internal
+// loopback (configuration "device": {"loopback": true}).
 //
 //   openlw-driver-test [path\OpenLWDriver.dll]          full test
 //   openlw-driver-test --expect-busy [path]             init must fail: driver already in use
@@ -29,7 +29,7 @@ static int g_failures = 0;
 #define CHECK(cond, ...)                                                                                          \
     do {                                                                                                         \
         bool ok_ = (cond);                                                                                       \
-        std::printf("  %s ", ok_ ? "ok  " : "ÉCHEC");                                                            \
+        std::printf("  %s ", ok_ ? "ok  " : "FAIL");                                                            \
         std::printf(__VA_ARGS__);                                                                                \
         std::printf("\n");                                                                                       \
         if (!ok_) {                                                                                              \
@@ -93,7 +93,7 @@ long asio_message(long selector, long value, void *, double *) {
     case kAsioEngineVersion:
         return 2;
     case kAsioResetRequest:
-        std::printf("  info demande de réinitialisation reçue\n");
+        std::printf("  info reset request received\n");
         return 1;
     default:
         return 0;
@@ -103,14 +103,14 @@ long asio_message(long selector, long value, void *, double *) {
 IASIO *load(const wchar_t *dll, HMODULE *module) {
     *module = LoadLibraryW(dll);
     if (*module == nullptr) {
-        std::printf("  ÉCHEC chargement de la DLL (erreur %lu)\n", GetLastError());
+        std::printf("  FAIL loading the DLL (error %lu)\n", GetLastError());
         return nullptr;
     }
     using GetClassObject = HRESULT(STDAPICALLTYPE *)(REFCLSID, REFIID, LPVOID *);
     auto get = reinterpret_cast<GetClassObject>(reinterpret_cast<void *>(GetProcAddress(*module, "DllGetClassObject")));
     IClassFactory *factory = nullptr;
     if (get == nullptr || FAILED(get(CLSID_OpenLW, IID_IClassFactory, reinterpret_cast<void **>(&factory)))) {
-        std::printf("  ÉCHEC fabrique COM introuvable\n");
+        std::printf("  FAIL COM class factory not found\n");
         return nullptr;
     }
     IASIO *driver = nullptr;
@@ -137,70 +137,70 @@ int wmain(int argc, wchar_t **argv) {
     }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     HMODULE module = nullptr;
-    std::printf("chargement\n");
+    std::printf("loading\n");
     IASIO *d = load(dll.c_str(), &module);
-    CHECK(d != nullptr, "instance du pilote créée");
+    CHECK(d != nullptr, "driver instance created");
     if (d == nullptr) {
         return 1;
     }
     char name[33] = {0}, msg[125] = {0};
     d->getDriverName(name);
-    CHECK(std::strcmp(name, "OpenLW") == 0, "nom affiché « %s »", name);
+    CHECK(std::strcmp(name, "OpenLW") == 0, "displayed name \"%s\"", name);
     ASIOBool inited = d->init(nullptr);
     d->getErrorMessage(msg);
     if (expect_busy) {
-        CHECK(!inited, "init refusé pendant qu'un autre processus utilise le pilote : %s", msg);
+        CHECK(!inited, "init refused while another process uses the driver: %s", msg);
         d->Release();
         return g_failures == 0 ? 0 : 1;
     }
-    CHECK(inited, "init (connexion au service, région partagée) %s", inited ? "" : msg);
+    CHECK(inited, "init (service connection, shared region) %s", inited ? "" : msg);
     if (!inited) {
         d->Release();
         return 1;
     }
     if (hold > 0) {
-        std::printf("pilote attaché pendant %d s\n", hold);
+        std::printf("driver attached for %d s\n", hold);
         std::fflush(stdout);
         Sleep(static_cast<DWORD>(hold) * 1000);
         d->Release();
         return 0;
     }
 
-    std::printf("propriétés\n");
+    std::printf("properties\n");
     long ins = 0, outs = 0, mn = 0, mx = 0, pref = 0, gran = 0;
-    CHECK(d->getChannels(&ins, &outs) == ASE_OK && ins >= 2 && outs >= 2, "%ld entrées, %ld sorties", ins, outs);
+    CHECK(d->getChannels(&ins, &outs) == ASE_OK && ins >= 2 && outs >= 2, "%ld inputs, %ld outputs", ins, outs);
     CHECK(d->getBufferSize(&mn, &mx, &pref, &gran) == ASE_OK && mn <= kSize && kSize <= mx,
-          "tampons %ld à %ld, préféré %ld", mn, mx, pref);
-    CHECK(d->canSampleRate(48000.0) == ASE_OK && d->canSampleRate(44100.0) != ASE_OK, "48 kHz seulement");
+          "buffers %ld to %ld, preferred %ld", mn, mx, pref);
+    CHECK(d->canSampleRate(48000.0) == ASE_OK && d->canSampleRate(44100.0) != ASE_OK, "48 kHz only");
     ASIOChannelInfo ci;
     std::memset(&ci, 0, sizeof ci);
     ci.channel = 0;
     ci.isInput = ASIOTrue;
-    CHECK(d->getChannelInfo(&ci) == ASE_OK && ci.type == ASIOSTFloat32LSB, "entrée 1 « %s », float 32 bits", ci.name);
+    CHECK(d->getChannelInfo(&ci) == ASE_OK && ci.type == ASIOSTFloat32LSB, "input 1 \"%s\", 32-bit float", ci.name);
     ASIOClockSource clocks[2];
     long nclocks = 2;
-    CHECK(d->getClockSources(clocks, &nclocks) == ASE_OK && nclocks == 1, "une source d'horloge (%s)", clocks[0].name);
+    CHECK(d->getClockSources(clocks, &nclocks) == ASE_OK && nclocks == 1, "one clock source (%s)", clocks[0].name);
 
-    std::printf("audio (boucle interne du service)\n");
+    std::printf("audio (service internal loopback)\n");
     for (int i = 0; i < 4; i++) {
         g_infos[i].isInput = i < 2 ? ASIOTrue : ASIOFalse;
         g_infos[i].channelNum = i % 2;
         g_infos[i].buffers[0] = g_infos[i].buffers[1] = nullptr;
     }
     ASIOCallbacks cb = {buffer_switch, sample_rate_changed, asio_message, buffer_switch_time_info};
-    CHECK(d->createBuffers(g_infos, 4, kSize, &cb) == ASE_OK, "createBuffers (2 entrées, 2 sorties, %ld trames)", kSize);
+    CHECK(d->createBuffers(g_infos, 4, kSize, &cb) == ASE_OK, "createBuffers (2 inputs, 2 outputs, %ld frames)", kSize);
     CHECK(d->start() == ASE_OK, "start");
     Sleep(3000);
     ASIOSamples pos;
     ASIOTimeStamp ts;
-    CHECK(d->getSamplePosition(&pos, &ts) == ASE_OK && pos.lo > 0, "position d'échantillon %lu", pos.lo);
+    CHECK(d->getSamplePosition(&pos, &ts) == ASE_OK && pos.lo > 0, "sample position %lu", pos.lo);
     CHECK(d->stop() == ASE_OK, "stop");
     long expected = 3 * 48000 / kSize;
-    CHECK(g_switches > expected * 8 / 10 && g_switches < expected * 12 / 10, "%ld échanges de tampons (%ld attendus)",
+    CHECK(g_switches > expected * 8 / 10 && g_switches < expected * 12 / 10, "%ld buffer switches (%ld expected)",
           static_cast<long>(g_switches), expected);
     CHECK(g_time_info == g_switches, "mode ASIOTime (%ld)", static_cast<long>(g_time_info));
-    CHECK(std::fabs(g_peak - kAmp) < 0.01f, "sinusoïde revenue par le réseau, crête %.3f", g_peak);
-    CHECK(g_mismatch == 0, "canaux intacts (%ld écarts)", g_mismatch);
+    CHECK(std::fabs(g_peak - kAmp) < 0.01f, "sine wave returned through the network, peak %.3f", g_peak);
+    CHECK(g_mismatch == 0, "channels intact (%ld mismatches)", g_mismatch);
     long jumps = 0;
     for (size_t i = 2; i < g_received.size(); i++) {
         // Continuity: second derivative of a 1 kHz sine remains small.
@@ -209,10 +209,10 @@ int wmain(int argc, wchar_t **argv) {
             jumps++;
         }
     }
-    CHECK(g_received.size() > 24000 && jumps <= 2, "%zu échantillons reçus, %ld discontinuité(s)", g_received.size(),
+    CHECK(g_received.size() > 24000 && jumps <= 2, "%zu samples received, discontinuities: %ld", g_received.size(),
           jumps);
     CHECK(d->disposeBuffers() == ASE_OK, "disposeBuffers");
     d->Release();
-    std::printf("%s : %d échec(s)\n", g_failures == 0 ? "SUCCÈS" : "ÉCHEC", g_failures);
+    std::printf("%s: %d failure(s)\n", g_failures == 0 ? "SUCCESS" : "FAIL", g_failures);
     return g_failures == 0 ? 0 : 1;
 }

@@ -31,7 +31,7 @@ def fourcc(tag):
         return tag
     raw = tag.encode("ascii")
     if len(raw) != 4:
-        raise ValueError(f"FourCC de 4 caracteres attendu : {tag!r}")
+        raise ValueError(f"4-character FourCC expected: {tag!r}")
     return struct.unpack(">I", raw)[0]
 
 
@@ -94,10 +94,10 @@ class TlvMsg:
                 body = value.encode()
                 parts.append(struct.pack(">H", len(body)) + body)
             else:
-                raise ValueError(f"type TlvMsg inconnu : {typ}")
+                raise ValueError(f"unknown TlvMsg type: {typ}")
         data = b"".join(parts)
         if len(data) > 0xFFFF:
-            raise ValueError("TlvMsg trop long")
+            raise ValueError("TlvMsg too long")
         return data
 
     @classmethod
@@ -108,21 +108,21 @@ class TlvMsg:
     @classmethod
     def _decode(cls, buf, depth):
         if depth > MAX_DEPTH:
-            raise DecodeError("imbrication trop profonde")
+            raise DecodeError("nesting too deep")
         if len(buf) < 6:
-            raise DecodeError("en-tete TlvMsg tronque")
+            raise DecodeError("truncated TlvMsg header")
         msg_id, count = struct.unpack_from(">IH", buf, 0)
         msg = cls(msg_id)
         pos = 6
         for _ in range(count):
             if pos + 5 > len(buf):
-                raise DecodeError("item tronque")
+                raise DecodeError("truncated item")
             tag, typ = struct.unpack_from(">IB", buf, pos)
             pos += 5
 
             def need(n):
                 if pos + n > len(buf):
-                    raise DecodeError(f"valeur tronquee (tag {fourcc_str(tag)})")
+                    raise DecodeError(f"truncated value (tag {fourcc_str(tag)})")
 
             if typ == T_DWORD:
                 need(4); value = struct.unpack_from(">I", buf, pos)[0]; pos += 4
@@ -143,7 +143,7 @@ class TlvMsg:
                 else:
                     need(n); value, _ = cls._decode(buf[pos:pos + n], depth + 1); pos += n
             else:
-                raise DecodeError(f"type TlvMsg inconnu {typ} (tag {fourcc_str(tag)})")
+                raise DecodeError(f"unknown TlvMsg type {typ} (tag {fourcc_str(tag)})")
             msg.items.append((tag, typ, value))
         return msg, pos
 
@@ -159,10 +159,10 @@ def encode_datagram(msg, seq, msg_type=MSG_DATAGRAM):
 def decode_datagram(data):
     """Return (header dict, TlvMsg). Raise DecodeError unless datagram uses Envelope v7."""
     if len(data) < ENVELOPE_HEADER_LEN:
-        raise DecodeError("datagramme plus court que l'en-tete Envelope")
+        raise DecodeError("datagram shorter than the Envelope header")
     layer, msg_type, cmsg_ver, envelope_ver, seq, result_port, lock_id, lock_tid = struct.unpack_from(">BBBBIHHI", data, 0)
     if envelope_ver != ENVELOPE_VERSION:
-        raise DecodeError(f"version Envelope {envelope_ver} (7 attendu)")
+        raise DecodeError(f"Envelope version {envelope_ver} (7 expected)")
     header = dict(layer=layer, type=msg_type, tlv_version=cmsg_ver, envelope_version=envelope_ver, seq=seq,
                   result_port=result_port, lock_id=lock_id, lock_tid=lock_tid)
     return header, TlvMsg.decode(data[ENVELOPE_HEADER_LEN:])
@@ -218,7 +218,7 @@ def source_block(channel, name, fast=2, shareable=0, label=None, group=None):
 def advertisement(advv, ip, sources=(), name=None, full=True, udpc=4000):
     """Build an advertisement page (NEST). sources: list of (slot 1..240, source block), at most eight."""
     if len(sources) > 8:
-        raise ValueError("au plus 8 sources par datagramme")
+        raise ValueError("at most 8 sources per datagram")
     msg = TlvMsg("NEST")
     msg.add("PVER", T_WORD, 2)
     msg.add("ADVT", T_BYTE, 1 if full else 2)

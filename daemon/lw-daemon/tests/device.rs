@@ -30,7 +30,7 @@ fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
     server.set_region(&dev.region);
     let client = lw_sys::xpc::Client::from_endpoint(&server.xpc().unwrap().endpoint()).unwrap();
     let (reply, obj) = client.call_with_shmem(r#"{"cmd":"attach"}"#).unwrap();
-    let region = Region::map(obj.expect("région jointe à la réponse attach")).unwrap();
+    let region = Region::map(obj.expect("region attached to the attach reply")).unwrap();
     FakeClient {
         _server: server,
         call: Box::new(move |r| client.call(r).unwrap()),
@@ -49,7 +49,7 @@ fn attach(shared: &Shared, dev: &device::Device) -> FakeClient {
     server.set_region(&dev.region);
     let client = lw_sys::ctl::Client::connect(&ep).unwrap();
     let (reply, obj) = client.call_with_region(r#"{"cmd":"attach"}"#).unwrap();
-    let region = Region::map(obj.expect("section jointe à la réponse attach")).unwrap();
+    let region = Region::map(obj.expect("section attached to the attach reply")).unwrap();
     FakeClient {
         _server: server,
         call: Box::new(move |r| client.call(r).unwrap()),
@@ -107,7 +107,7 @@ fn fake_plugin_loopback_roundtrip() {
 
     // Clock: position advances at 48 kHz relative to the host clock.
     std::thread::sleep(Duration::from_millis(30));
-    let (h1, s1, rate) = region.clock().expect("horloge publiée");
+    let (h1, s1, rate) = region.clock().expect("clock published");
     std::thread::sleep(Duration::from_millis(200));
     let (h2, s2, _) = region.clock().unwrap();
     assert_eq!(rate, 1.0);
@@ -115,7 +115,7 @@ fn fake_plugin_loopback_roundtrip() {
     let expected = dt_ns as f64 * 48_000.0 / 1e9;
     assert!(
         ((s2 - s1) as f64 - expected).abs() < 48.0,
-        "position {} contre {expected:.0} attendus",
+        "position {} versus {expected:.0} expected",
         s2 - s1
     );
 
@@ -143,7 +143,7 @@ fn fake_plugin_loopback_roundtrip() {
         if n > 0 {
             from_net.read(&mut back[..2 * n]).unwrap();
             for f in back[..2 * n].chunks_exact(2) {
-                assert_eq!(f[1], -f[0], "canaux intacts");
+                assert_eq!(f[1], -f[0], "channels intact");
                 received.push(f[0]);
             }
         }
@@ -152,9 +152,9 @@ fn fake_plugin_loopback_roundtrip() {
     assert_eq!(
         received.len(),
         total,
-        "toutes les trames reviennent par la boucle interne"
+        "every frame comes back through the internal loopback"
     );
-    assert_eq!(received, sent, "échantillons identiques, dans l'ordre");
+    assert_eq!(received, sent, "identical samples, in order");
 
     // State through the control channel: no overrun.
     std::thread::sleep(Duration::from_millis(150));
@@ -255,10 +255,10 @@ fn large_host_blocks_reach_the_stream_smoothly() {
         std::thread::sleep(Duration::from_micros(500));
     }
     let c = jitter.counters();
-    assert_eq!(c.slips, 0, "aucune trame jetée : {c:?}");
+    assert_eq!(c.slips, 0, "no frame discarded: {c:?}");
     assert_eq!(
         silent_after_prime, 0,
-        "aucun paquet silencieux après l'amorçage : {c:?}"
+        "no silent packet after priming: {c:?}"
     );
     stop.request();
     dev.thread.join().unwrap();

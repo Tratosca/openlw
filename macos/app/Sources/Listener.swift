@@ -59,7 +59,7 @@ final class Listener {
         let gen = generation
         os_unfair_lock_unlock(&lock)
         let t = Thread { [weak self] in self?.receive(sock: sock, channels: channels, bits: bits, generation: gen) }
-        t.name = "pré-écoute"
+        t.name = "preview"
         t.qualityOfService = .userInteractive
         thread = t
         t.start()
@@ -105,7 +105,7 @@ final class Listener {
         var mreq = ip_mreq(imr_multiaddr: in_addr(s_addr: inet_addr(group)), imr_interface: in_addr(s_addr: inet_addr(ifaceIP)))
         guard setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, socklen_t(MemoryLayout<ip_mreq>.size)) == 0 else {
             close(s)
-            throw ListenError.socket("abonnement au groupe", errno)
+            throw ListenError.socket("group membership", errno)
         }
         return s
     }
@@ -236,9 +236,9 @@ enum ListenError: Error {
     var message: String {
         switch self {
         case .socket(let step, let code):
-            return "Écoute impossible (\(step) : \(String(cString: strerror(code)))). Vérifiez l'interface Livewire choisie."
+            return "Cannot listen to the source (\(step): \(String(cString: strerror(code)))). Check the selected Livewire interface."
         case .audio(let status):
-            return "Écoute impossible : sortie audio du Mac indisponible (erreur \(status))."
+            return "Cannot listen to the source: the Mac's audio output is unavailable (error \(status))."
         }
     }
 }

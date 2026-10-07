@@ -1,7 +1,7 @@
 [package]
 name = "lw-sys"
 version = "0.5.0"
-description = "Couche système du daemon (macOS, Linux, Windows) : temps réel, horloge hôte, journal, région partagée, canal de contrôle. Seule crate du workspace avec du code unsafe (frontière FFI)."
+description = "Daemon system layer (macOS, Linux, Windows): real-time scheduling, host clock, logging, shared region, control channel. The only workspace crate with unsafe code (FFI boundary)."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

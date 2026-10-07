@@ -16,9 +16,9 @@ public sealed record DaemonError(DaemonErrorKind Kind, string Reason = "")
     /// Displayed message: what happened, then what the user can do.
     public string Message => Kind switch
     {
-        DaemonErrorKind.Unreachable => "Le service OpenLW ne répond pas. Si le problème persiste, réinstallez OpenLW.",
-        DaemonErrorKind.Decoding => "Réponse illisible du service OpenLW. Réinstallez OpenLW pour mettre l'app et le service à la même version.",
-        _ => $"Modification impossible : {Reason}",
+        DaemonErrorKind.Unreachable => "The OpenLW service isn't responding. If the problem persists, reinstall OpenLW.",
+        DaemonErrorKind.Decoding => "Unreadable response from the OpenLW service. Reinstall OpenLW so the app and the service are the same version.",
+        _ => $"Could not apply the change: {Reason}",
     };
 }
 
@@ -66,7 +66,7 @@ public sealed partial class DaemonClient : IDisposable
                     string? reply = reader!.ReadLine();
                     if (reply is null)
                     {
-                        throw new IOException("connexion fermée");
+                        throw new IOException("connection closed");
                     }
                     return Parse(reply);
                 }
@@ -93,7 +93,7 @@ public sealed partial class DaemonClient : IDisposable
         {
             return new DaemonResult(obj, null);
         }
-        string reason = obj["error"]?.GetValue<string>() ?? "erreur inconnue";
+        string reason = obj["error"]?.GetValue<string>() ?? "unknown error";
         return new DaemonResult(obj, new DaemonError(DaemonErrorKind.Refused, reason));
     }
 
@@ -118,10 +118,10 @@ public sealed partial class DaemonClient : IDisposable
             h.Dispose();
             if (err != ErrorPipeBusy || !WaitNamedPipe(PipePath, 2000))
             {
-                throw new IOException($"tube indisponible ({err})");
+                throw new IOException($"pipe unavailable ({err})");
             }
         }
-        throw new IOException("tube occupé");
+        throw new IOException("pipe busy");
     }
 
     private void Close()

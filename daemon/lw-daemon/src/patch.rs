@@ -58,7 +58,7 @@ pub fn build(cfg: &Config) -> Plan {
             let spp = stream.format.samples_per_packet() as usize;
             let target = 2 * spp + cfg.latency.tx_cushion();
             routes.outputs.push(OutRoute {
-                label: format!("{} → canal {}", src.name, src.channel),
+                label: format!("{} → channel {}", src.name, src.channel),
                 device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
                 writer,
             });
@@ -71,7 +71,7 @@ pub fn build(cfg: &Config) -> Plan {
         let sink = d.device_channels.as_ref().map(|chs| {
             let (writer, reader) = bus(d.stream_channels(), BUS_FRAMES);
             routes.inputs.push(InRoute {
-                label: format!("{} → entrées {:?}", d.label(), chs),
+                label: format!("{} → inputs {:?}", d.label(), chs),
                 device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
                 reader: JitterReader::new(
                     reader,

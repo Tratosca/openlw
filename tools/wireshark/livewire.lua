@@ -1,37 +1,37 @@
 -- Livewire: based on docs/protocol/ specification.
 -- All buffer accesses are bounded, including TlvMsg submessages.
 local adv = Proto("lwadv", "Livewire Envelope / TlvMsg")
-local clock = Proto("lwclock", "Horloge Livewire")
-local audio = Proto("lwrtp", "Audio RTP Livewire")
+local clock = Proto("lwclock", "Livewire Clock")
+local audio = Proto("lwrtp", "Livewire RTP Audio")
 local f = {
-    layer = ProtoField.uint8("lwadv.layer", "Couche", base.DEC),
-    kind = ProtoField.uint8("lwadv.kind", "Type Envelope", base.HEX,
+    layer = ProtoField.uint8("lwadv.layer", "Layer", base.DEC),
+    kind = ProtoField.uint8("lwadv.kind", "Envelope Type", base.HEX,
         {[0]="DATAGRAM", [0x4d]="MESSAGE (M)", [0x41]="ACK (A)", [0x4e]="NACK (N)"}),
-    msgver = ProtoField.uint8("lwadv.cmsg_version", "Version TlvMsg", base.DEC, nil, 0x7f),
-    version = ProtoField.uint8("lwadv.envelope_version", "Version Envelope", base.DEC),
-    seq = ProtoField.uint32("lwadv.seq", "Séquence", base.DEC),
-    port = ProtoField.uint16("lwadv.reply_port", "Port de réponse", base.DEC),
+    msgver = ProtoField.uint8("lwadv.cmsg_version", "TlvMsg Version", base.DEC, nil, 0x7f),
+    version = ProtoField.uint8("lwadv.envelope_version", "Envelope Version", base.DEC),
+    seq = ProtoField.uint32("lwadv.seq", "Sequence Number", base.DEC),
+    port = ProtoField.uint16("lwadv.reply_port", "Reply Port", base.DEC),
     lockid = ProtoField.uint16("lwadv.lock_id", "LockID", base.HEX),
     locktid = ProtoField.uint32("lwadv.lock_tid", "LockTID", base.HEX),
     id = ProtoField.string("lwadv.message_id", "Message FourCC"),
-    count = ProtoField.uint16("lwadv.count", "Nombre d'items", base.DEC),
+    count = ProtoField.uint16("lwadv.count", "Item Count", base.DEC),
     tag = ProtoField.string("lwadv.tag", "Tag FourCC"),
-    typ = ProtoField.uint8("lwadv.type", "Type TlvMsg", base.DEC),
-    u8 = ProtoField.uint8("lwadv.u8", "Valeur u8", base.DEC),
-    u16 = ProtoField.uint16("lwadv.u16", "Valeur u16", base.DEC),
-    u32 = ProtoField.uint32("lwadv.u32", "Valeur u32", base.DEC),
-    u64 = ProtoField.uint64("lwadv.u64", "Valeur u64", base.DEC),
-    length = ProtoField.uint16("lwadv.length", "Longueur / nombre d'éléments", base.DEC),
-    bytes = ProtoField.bytes("lwadv.bytes", "Octets"),
-    text = ProtoField.string("lwadv.text", "Chaîne"),
-    channel = ProtoField.uint32("lwadv.channel", "Canal Livewire", base.DEC),
-    ip = ProtoField.ipv4("lwadv.ip", "Adresse IPv4"),
-    advt = ProtoField.uint8("lwadv.advt", "Type d'annonce", base.DEC, {[1]="full", [2]="short"}),
+    typ = ProtoField.uint8("lwadv.type", "TlvMsg Type", base.DEC),
+    u8 = ProtoField.uint8("lwadv.u8", "u8 Value", base.DEC),
+    u16 = ProtoField.uint16("lwadv.u16", "u16 Value", base.DEC),
+    u32 = ProtoField.uint32("lwadv.u32", "u32 Value", base.DEC),
+    u64 = ProtoField.uint64("lwadv.u64", "u64 Value", base.DEC),
+    length = ProtoField.uint16("lwadv.length", "Length / Element Count", base.DEC),
+    bytes = ProtoField.bytes("lwadv.bytes", "Bytes"),
+    text = ProtoField.string("lwadv.text", "String"),
+    channel = ProtoField.uint32("lwadv.channel", "Livewire Channel", base.DEC),
+    ip = ProtoField.ipv4("lwadv.ip", "IPv4 Address"),
+    advt = ProtoField.uint8("lwadv.advt", "Advertisement Type", base.DEC, {[1]="full", [2]="short"}),
 }
 adv.fields = f
 local malformed = {}
 for _, proto in ipairs({adv, clock, audio}) do
-    local e = ProtoExpert.new(proto.name .. ".malformed", "Paquet tronqué ou mal formé",
+    local e = ProtoExpert.new(proto.name .. ".malformed", "Truncated or malformed packet",
         expert.group.MALFORMED, expert.severity.ERROR)
     proto.experts = {e}
     malformed[proto.name] = e
@@ -42,7 +42,7 @@ local function bad(tree, proto, reason)
 end
 local function need(tree, proto, offset, size, limit)
     if offset + size > limit then
-        return bad(tree, proto, string.format("Données tronquées à l'offset %d : %d octets requis, %d disponibles",
+        return bad(tree, proto, string.format("Data truncated at offset %d: %d bytes required, %d available",
             offset, size, math.max(0, limit - offset)))
     end
     return true
@@ -59,7 +59,7 @@ local sizes = {[1]=4, [7]=1, [8]=2, [9]=8}
 local fields = {[1]=f.u32, [7]=f.u8, [8]=f.u16, [9]=f.u64}
 local function message(tvb, offset, limit, parent, depth, summary, context)
     -- Root is level 1: at most eight total levels.
-    if depth > 8 then return bad(parent, adv, "Profondeur TlvMsg supérieure à 8") end
+    if depth > 8 then return bad(parent, adv, "TlvMsg depth greater than 8") end
     if not need(parent, adv, offset, 6, limit) then return nil end
     local start = offset
     local id = fourcc(tvb(offset, 4))
@@ -107,7 +107,7 @@ local function message(tvb, offset, limit, parent, depth, summary, context)
                 end
                 local finish = message(tvb, offset, offset + size, item, depth + 1, summary, tag)
                 if not finish then return nil end
-                if finish ~= offset + size then return bad(item, adv, "Octets résiduels dans le TlvMsg imbriqué") end
+                if finish ~= offset + size then return bad(item, adv, "Trailing bytes in nested TlvMsg") end
             elseif typ == 4 or typ == 5 then
                 local width = typ == 4 and 2 or 4
                 for pos = offset, offset + size - 1, width do
@@ -125,7 +125,7 @@ local function message(tvb, offset, limit, parent, depth, summary, context)
             end
             offset = offset + size
         else
-            return bad(item, adv, "Type TlvMsg inconnu ou non sérialisable : " .. typ)
+            return bad(item, adv, "Unknown or unserializable TlvMsg type: " .. typ)
         end
         item:set_len(offset - item_start)
     end
@@ -134,7 +134,7 @@ local function message(tvb, offset, limit, parent, depth, summary, context)
 end
 function adv.dissector(tvb, pinfo, tree)
     pinfo.cols.protocol = "LWADV"
-    pinfo.cols.info = "Envelope tronqué"
+    pinfo.cols.info = "Truncated Envelope"
     local node = tree:add(adv, tvb())
     local size = tvb:len()
     if not need(node, adv, 0, 16, size) then return end
@@ -149,38 +149,38 @@ function adv.dissector(tvb, pinfo, tree)
     end
     local summary = {sources={}}
     local finish = message(tvb, 16, size, node, 1, summary)
-    if finish and finish ~= size then bad(node, adv, "Octets résiduels après TlvMsg") end
+    if finish and finish ~= size then bad(node, adv, "Trailing bytes after TlvMsg") end
     if summary.id == "NEST" and (summary.advt == 1 or summary.advt == 2) then
         pinfo.cols.info = string.format("ADV %s %s NUMS=%s sources=%s",
-            summary.advt == 1 and "full" or "short", summary.name or "<absent>",
-            tostring(summary.nums or "?"), #summary.sources > 0 and table.concat(summary.sources, ",") or "<aucune>")
-    else pinfo.cols.info = summary.id or "TlvMsg tronqué" end
+            summary.advt == 1 and "full" or "short", summary.name or "<none>",
+            tostring(summary.nums or "?"), #summary.sources > 0 and table.concat(summary.sources, ",") or "<none>")
+    else pinfo.cols.info = summary.id or "Truncated TlvMsg" end
 end
 
 -- Shared RTP decoding, accounting for CSRCs, extension, padding.
 local function rtp_fields(prefix)
     return {
-        version=ProtoField.uint8(prefix..".version", "Version RTP", base.DEC, nil, 0xc0),
-        pt=ProtoField.uint8(prefix..".pt", "Payload type", base.DEC, nil, 0x7f),
-        seq=ProtoField.uint16(prefix..".seq", "Séquence RTP", base.DEC),
-        timestamp=ProtoField.uint32(prefix..".timestamp", "Timestamp RTP", base.DEC),
+        version=ProtoField.uint8(prefix..".version", "RTP Version", base.DEC, nil, 0xc0),
+        pt=ProtoField.uint8(prefix..".pt", "Payload Type", base.DEC, nil, 0x7f),
+        seq=ProtoField.uint16(prefix..".seq", "RTP Sequence Number", base.DEC),
+        timestamp=ProtoField.uint32(prefix..".timestamp", "RTP Timestamp", base.DEC),
         ssrc=ProtoField.uint32(prefix..".ssrc", "SSRC", base.HEX),
-        extra=ProtoField.bytes(prefix..".header_extra", "CSRC / extension RTP"),
-        padding=ProtoField.bytes(prefix..".padding", "Bourrage RTP"),
-        payload=ProtoField.bytes(prefix..".payload", "Charge RTP brute"),
+        extra=ProtoField.bytes(prefix..".header_extra", "RTP CSRC / Extension"),
+        padding=ProtoField.bytes(prefix..".padding", "RTP Padding"),
+        payload=ProtoField.bytes(prefix..".payload", "Raw RTP Payload"),
     }
 end
 local c, a = rtp_fields("lwclock"), rtp_fields("lwrtp")
-c.master = ProtoField.bytes("lwclock.master_id", "Identifiant du maître (octets 26–29)")
-c.ext_profile = ProtoField.uint16("lwclock.ext_profile", "Profil d'extension", base.HEX)
-c.ext_ok = ProtoField.bool("lwclock.ext_ok", "Extension FA1A/20 mots", base.NONE, {"oui", "non"})
-c.clock_seq = ProtoField.uint32("lwclock.clock_seq", "Séquence d'horloge", base.DEC)
-c.clock_type = ProtoField.string("lwclock.type", "Type de message (A/B)")
-a.channel = ProtoField.uint32("lwrtp.channel", "Canal Livewire", base.DEC)
-a.kind = ProtoField.string("lwrtp.kind", "Type de flux")
-a.channels = ProtoField.uint8("lwrtp.channels", "Nombre de canaux audio", base.DEC)
-a.samples = ProtoField.double("lwrtp.samples", "Échantillons par paquet (L24)")
-a.match = ProtoField.bool("lwrtp.ssrc_matches_dst", "SSRC == ip.dst", base.NONE, {"oui", "non"})
+c.master = ProtoField.bytes("lwclock.master_id", "Master Identifier (bytes 26–29)")
+c.ext_profile = ProtoField.uint16("lwclock.ext_profile", "Extension Profile", base.HEX)
+c.ext_ok = ProtoField.bool("lwclock.ext_ok", "FA1A/20-word Extension", base.NONE, {"yes", "no"})
+c.clock_seq = ProtoField.uint32("lwclock.clock_seq", "Clock Sequence Number", base.DEC)
+c.clock_type = ProtoField.string("lwclock.type", "Message Type (A/B)")
+a.channel = ProtoField.uint32("lwrtp.channel", "Livewire Channel", base.DEC)
+a.kind = ProtoField.string("lwrtp.kind", "Stream Kind")
+a.channels = ProtoField.uint8("lwrtp.channels", "Audio Channel Count", base.DEC)
+a.samples = ProtoField.double("lwrtp.samples", "Samples per Packet (L24)")
+a.match = ProtoField.bool("lwrtp.ssrc_matches_dst", "SSRC == ip.dst", base.NONE, {"yes", "no"})
 clock.fields, audio.fields = c, a
 local function rtp(tvb, node, proto, rf)
     local size = tvb:len()
@@ -188,7 +188,7 @@ local function rtp(tvb, node, proto, rf)
     node:add(rf.version, tvb(0,1)); node:add(rf.pt, tvb(1,1))
     node:add(rf.seq, tvb(2,2)); node:add(rf.timestamp, tvb(4,4)); node:add(rf.ssrc, tvb(8,4))
     local flags = tvb(0,1):uint()
-    if math.floor(flags / 64) ~= 2 then return bad(node, proto, "Version RTP différente de 2") end
+    if math.floor(flags / 64) ~= 2 then return bad(node, proto, "RTP version is not 2") end
     local offset = 12 + (flags % 16) * 4
     if not need(node, proto, 12, offset - 12, size) then return nil end
     if math.floor(flags / 16) % 2 == 1 then
@@ -201,7 +201,7 @@ local function rtp(tvb, node, proto, rf)
     local padding = 0
     if math.floor(flags / 32) % 2 == 1 then
         padding = tvb(size - 1, 1):uint()
-        if padding == 0 or padding > size - offset then return bad(node, proto, "Bourrage RTP invalide") end
+        if padding == 0 or padding > size - offset then return bad(node, proto, "Invalid RTP padding") end
         node:add(rf.padding, tvb(size - padding, padding))
     end
     local length = size - offset - padding
@@ -210,7 +210,7 @@ local function rtp(tvb, node, proto, rf)
 end
 function clock.dissector(tvb, pinfo, tree)
     pinfo.cols.protocol = "LWCLOCK"
-    pinfo.cols.info = "Horloge Livewire"
+    pinfo.cols.info = "Livewire clock"
     local node = tree:add(clock, tvb())
     if not rtp(tvb, node, clock, c) then return end
     -- Absolute offsets in UDP payload (docs/protocol/04-clock.md).
@@ -223,14 +223,14 @@ function clock.dissector(tvb, pinfo, tree)
         local magic = tvb(20,4):bytes():tohex():lower()
         local kind = (magic == "0a00caba" and "A") or (magic == "0b00caba" and "B") or magic
         node:add(c.clock_type, tvb(20,4), kind)
-        pinfo.cols.info = string.format("Horloge Livewire type %s seq=%u ts=%u%s", kind, tvb(16,4):uint(), tvb(4,4):uint(),
-            (profile == 0xFA1A and words == 0x14) and "" or " (extension inattendue)")
+        pinfo.cols.info = string.format("Livewire clock type %s seq=%u ts=%u%s", kind, tvb(16,4):uint(), tvb(4,4):uint(),
+            (profile == 0xFA1A and words == 0x14) and "" or " (unexpected extension)")
     end
     if need(node, clock, 26, 4, size) then node:add(c.master, tvb(26,4)) end
 end
 function audio.dissector(tvb, pinfo, tree)
     pinfo.cols.protocol = "LWRTP"
-    pinfo.cols.info = "RTP Livewire"
+    pinfo.cols.info = "Livewire RTP"
     local node = tree:add(audio, tvb())
     local length = rtp(tvb, node, audio, a)
     if not length then return end
@@ -239,7 +239,7 @@ function audio.dissector(tvb, pinfo, tree)
     if b1 ~= 239 or (b2 ~= 192 and b2 ~= 193 and b2 ~= 196) then return end
     local channel = (b3 * 256 + b4) % 32768
     local channels = b2 == 196 and 8 or 2
-    local kind = b2 == 196 and "surround" or b2 == 193 and "backfeed" or "stéréo"
+    local kind = b2 == 196 and "surround" or b2 == 193 and "backfeed" or "stereo"
     local samples = length / (3 * channels)
     local equal = tvb(8,4):uint() == ((b1 * 256 + b2) * 256 + b3) * 256 + b4
     node:add(a.channel, channel):set_generated()
@@ -247,15 +247,15 @@ function audio.dissector(tvb, pinfo, tree)
     node:add(a.channels, channels):set_generated()
     node:add(a.samples, samples):set_generated()
     node:add(a.match, equal):set_generated()
-    pinfo.cols.info = string.format("RTP L24 %s canal=%d échantillons=%g seq=%d SSRC==dst=%s",
-        kind, channel, samples, tvb(2,2):uint(), equal and "oui" or "non")
+    pinfo.cols.info = string.format("RTP L24 %s channel=%d samples=%g seq=%d SSRC==dst=%s",
+        kind, channel, samples, tvb(2,2):uint(), equal and "yes" or "no")
 end
 
 -- Zero disables binding; out-of-range ports ignored.
-adv.prefs.control_port = Pref.uint("Port UDP contrôle", 4000, "1–65535 ; 0 désactive")
-adv.prefs.announce_port = Pref.uint("Port UDP annonces", 4001, "1–65535 ; 0 désactive")
-clock.prefs.port = Pref.uint("Port UDP horloge", 7000, "1–65535 ; 0 désactive")
-audio.prefs.port = Pref.uint("Port UDP audio", 5004, "1–65535 ; 0 désactive")
+adv.prefs.control_port = Pref.uint("Control UDP port", 4000, "1–65535; 0 disables")
+adv.prefs.announce_port = Pref.uint("Advertisement UDP port", 4001, "1–65535; 0 disables")
+clock.prefs.port = Pref.uint("Clock UDP port", 7000, "1–65535; 0 disables")
+audio.prefs.port = Pref.uint("Audio UDP port", 5004, "1–65535; 0 disables")
 local udp = DissectorTable.get("udp.port")
 local function bind(proto, names)
     local previous = {}

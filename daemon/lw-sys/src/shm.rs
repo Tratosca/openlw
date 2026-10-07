@@ -143,14 +143,14 @@ impl Region {
         let size = unsafe { ffi::lw_shm_size(ring_frames, channels_to_net, channels_from_net) };
         if size == 0 {
             return Err(Error(
-                "géométrie invalide (anneau puissance de 2 entre 64 et 65536, ≤ 64 canaux)",
+                "invalid geometry (ring a power of two between 64 and 65536, ≤ 64 channels)",
             ));
         }
         let mut handle: *mut c_void = std::ptr::null_mut();
         // SAFETY: `handle` is a valid output pointer; C layer allocates `size` bytes.
         let base = unsafe { ffi::lw_shm_alloc(size, &mut handle) };
         if base.is_null() {
-            return Err(Error("allocation de la région partagée impossible"));
+            return Err(Error("cannot allocate the shared region"));
         }
         let mut clock = ffi::HostClock::default();
         // SAFETY: valid output pointer.
@@ -169,7 +169,7 @@ impl Region {
         };
         let region = Self::wrap(base, size, handle);
         if rc != 0 {
-            return Err(Error("initialisation de la région impossible"));
+            return Err(Error("cannot initialize the region"));
         }
         Ok(region)
     }
@@ -180,14 +180,14 @@ impl Region {
         // SAFETY: `object.0` is an owned sharing object; `size` is a valid output pointer.
         let base = unsafe { ffi::lw_shm_map(object.0, &mut size) };
         if base.is_null() {
-            return Err(Error("mappage de la région impossible"));
+            return Err(Error("cannot map the region"));
         }
         let obj = object.0;
         std::mem::forget(object); // Object ownership transfers to `Inner`
         let region = Self::wrap(base, size, obj);
         // SAFETY: `base` points to `size` mapped bytes.
         if unsafe { ffi::lw_shm_validate(base, size) } != 0 {
-            return Err(Error("région invalide (magie, version ou taille)"));
+            return Err(Error("invalid region (magic, version or size)"));
         }
         Ok(region)
     }
@@ -297,9 +297,9 @@ impl Region {
             .inner
             .taken
             .get(slot)
-            .ok_or(Error("extrémité inconnue"))?;
+            .ok_or(Error("unknown endpoint"))?;
         if flag.swap(true, Ordering::AcqRel) {
-            Err(Error("extrémité déjà attribuée"))
+            Err(Error("endpoint already taken"))
         } else {
             Ok(())
         }
@@ -344,9 +344,9 @@ fn frames_of(len: usize, channels: u32) -> Result<u32, Error> {
     }
     let ch = channels as usize;
     if len % ch != 0 {
-        return Err(Error("longueur non multiple du nombre de canaux"));
+        return Err(Error("length not a multiple of the channel count"));
     }
-    u32::try_from(len / ch).map_err(|_| Error("trop de trames"))
+    u32::try_from(len / ch).map_err(|_| Error("too many frames"))
 }
 
 /// Ring producer.
@@ -468,11 +468,11 @@ mod tests {
         assert_eq!(r.size(), 4096 + 1024 * 10 * 4);
         assert!(
             Region::create(48_000, 1000, 2, 2).is_err(),
-            "anneau non puissance de 2"
+            "ring not a power of two"
         );
         assert!(
             Region::create(48_000, 1024, 65, 2).is_err(),
-            "trop de canaux"
+            "too many channels"
         );
     }
 
@@ -503,7 +503,7 @@ mod tests {
             let block: Vec<f32> = (0..80).map(|i| next + i as f32).collect();
             assert_eq!(p.write(&block).unwrap(), 40);
             assert_eq!(c.read(&mut out).unwrap(), 40);
-            assert_eq!(out, block, "contenu identique après rebouclage");
+            assert_eq!(out, block, "identical content after wrap-around");
             next += 80.0;
         }
         // Overrun: 64 frames free, 100 requested.
@@ -515,7 +515,10 @@ mod tests {
         assert_eq!(c.read(&mut out).unwrap(), 64);
         assert_eq!(r.counters(Dir::FromNet).underruns, 6);
         assert!(out[128..].iter().all(|&s| s == 0.0));
-        assert!(p.write(&[1.0]).is_err(), "longueur non multiple des canaux");
+        assert!(
+            p.write(&[1.0]).is_err(),
+            "length not a multiple of the channels"
+        );
     }
 
     #[test]
@@ -541,14 +544,14 @@ mod tests {
         server.set_shmem(daemon);
         let client = crate::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
         let (_, obj) = client.call_with_shmem("{}").unwrap();
-        Region::map(obj.expect("objet xpc_shmem reçu")).unwrap()
+        Region::map(obj.expect("xpc_shmem object received")).unwrap()
     }
 
     #[cfg(windows)]
     fn second_mapping(daemon: &Region) -> Region {
         let h = daemon
             .share_with(std::process::id())
-            .expect("section dupliquée");
+            .expect("section duplicated");
         Region::map(SharedObject::from_handle_value(h).unwrap()).unwrap()
     }
 
@@ -593,8 +596,8 @@ mod tests {
             let slice = &mut buf[..2 * avail as usize];
             assert_eq!(consumer.read(slice).unwrap(), avail);
             for f in slice.chunks_exact(2) {
-                assert!(f[0] >= expect, "ordre conservé");
-                assert_eq!(f[1], -f[0], "trame intacte (pas de déchirure)");
+                assert!(f[0] >= expect, "order preserved");
+                assert_eq!(f[1], -f[0], "frame intact (no tearing)");
                 expect = f[0] + 1.0;
                 got += 1;
             }
@@ -604,14 +607,14 @@ mod tests {
         assert_eq!(
             got + c.overruns,
             u64::from(TOTAL),
-            "chaque trame est soit lue, soit comptée perdue"
+            "every frame is either read or counted as lost"
         );
     }
 
     #[test]
     fn clock_seqlock_is_consistent() {
         let r = Region::create(48_000, 256, 2, 2).unwrap();
-        assert!(r.clock().is_none(), "aucune horloge avant publication");
+        assert!(r.clock().is_none(), "no clock before publication");
         let mut w = r.clock_writer().unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let s2 = stop.clone();
@@ -625,7 +628,7 @@ mod tests {
         let mut reads = 0;
         while reads < 200_000 {
             if let Some((h, s, rate)) = r.clock() {
-                assert_eq!(s, h * 2, "triplet cohérent");
+                assert_eq!(s, h * 2, "consistent triple");
                 assert_eq!(rate, h as f64 * 0.5);
                 reads += 1;
             }

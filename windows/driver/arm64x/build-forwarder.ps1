@@ -50,4 +50,4 @@ try {
 } finally {
     Pop-Location
 }
-Write-Host "OK : $(Join-Path $OutDir 'OpenLWDriver.dll') (ARM64X)"
+Write-Host "OK: $(Join-Path $OutDir 'OpenLWDriver.dll') (ARM64X)"

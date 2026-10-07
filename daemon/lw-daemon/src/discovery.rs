@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(
             d.ingest(&short, t0 + Duration::from_secs(1)),
             Followup::None,
-            "pas plus d'une requête par 5 s"
+            "at most one request per 5 s"
         );
         // Two pages (8 + 2 sources).
         let p1 = Advertisement {

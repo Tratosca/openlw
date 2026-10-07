@@ -19,7 +19,7 @@ case "${1:-arm64}" in
         FILE=tools/ci/wine.Dockerfile VOL=openlw-target-wine THREADS="--test-threads=1"
         ;;
     *)
-        echo "usage : $0 [arm64|x64]" >&2
+        echo "usage: $0 [arm64|x64]" >&2
         exit 2
         ;;
 esac

@@ -158,7 +158,7 @@ impl DestinationConfig {
     /// Readable label: “channel 12” or “239.192.0.9:5004”.
     pub fn label(&self) -> String {
         match (self.channel, self.group) {
-            (Some(c), _) => format!("canal {c}"),
+            (Some(c), _) => format!("channel {c}"),
             (None, Some(g)) => format!("{g}:{}", self.port),
             _ => "?".into(),
         }
@@ -300,7 +300,7 @@ impl Config {
         if path.exists() {
             return Ok(());
         }
-        let err = |e: std::io::Error| ConfigError(format!("{} : {e}", path.display()));
+        let err = |e: std::io::Error| ConfigError(format!("{}: {e}", path.display()));
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir).map_err(err)?;
         }
@@ -309,9 +309,9 @@ impl Config {
 
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let text = std::fs::read_to_string(path)
-            .map_err(|e| ConfigError(format!("{} : {e}", path.display())))?;
+            .map_err(|e| ConfigError(format!("{}: {e}", path.display())))?;
         let cfg: Config = serde_json::from_str(&text)
-            .map_err(|e| ConfigError(format!("{} : {e}", path.display())))?;
+            .map_err(|e| ConfigError(format!("{}: {e}", path.display())))?;
         cfg.validate()?;
         Ok(cfg)
     }
@@ -349,23 +349,23 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.terminal_name.chars().count() > MAX_TERMINAL_NAME {
             return Err(ConfigError(format!(
-                "nom annoncé : {MAX_TERMINAL_NAME} caractères au plus"
+                "advertised name: {MAX_TERMINAL_NAME} characters at most"
             )));
         }
         if self.tos > 0xFC || self.tos % 4 != 0 {
             return Err(ConfigError(format!(
-                "priorité réseau : octet TOS {} invalide (DSCP 0 à 63, × 4)",
+                "network priority: invalid TOS byte {} (DSCP 0 to 63, × 4)",
                 self.tos
             )));
         }
         let dev = self.device_config();
         for (n, what) in [
-            (dev.channels_to_net, "sorties"),
-            (dev.channels_from_net, "entrées"),
+            (dev.channels_to_net, "outputs"),
+            (dev.channels_from_net, "inputs"),
         ] {
             if !(1..=MAX_DEVICE_CHANNELS).contains(&n) {
                 return Err(ConfigError(format!(
-                    "périphérique : {n} {what}, attendu 1 à {MAX_DEVICE_CHANNELS}"
+                    "device: {n} {what}, expected 1 to {MAX_DEVICE_CHANNELS}"
                 )));
             }
         }
@@ -373,33 +373,34 @@ impl Config {
         for s in &self.sources {
             Channel::new(s.channel).ok_or_else(|| {
                 ConfigError(format!(
-                    "source « {} » : canal {} hors 1..32766",
+                    "source \"{}\": channel {} outside 1..32766",
                     s.name, s.channel
                 ))
             })?;
             if !seen.insert(s.channel) {
-                return Err(ConfigError(format!("canal {} émis deux fois", s.channel)));
+                return Err(ConfigError(format!(
+                    "channel {} transmitted twice",
+                    s.channel
+                )));
             }
         }
         if self.sources.len() > lw_proto::adv::MAX_SOURCES {
-            return Err(ConfigError("plus de 240 sources".into()));
+            return Err(ConfigError("more than 240 sources".into()));
         }
         for d in &self.destinations {
             match (d.channel, d.group) {
                 (Some(c), None) => {
                     Channel::new(c).ok_or_else(|| {
-                        ConfigError(format!("destination : canal {c} hors 1..32766"))
+                        ConfigError(format!("destination: channel {c} outside 1..32766"))
                     })?;
                 }
                 (None, Some(g)) if g.is_multicast() => {}
                 (None, Some(g)) => {
-                    return Err(ConfigError(format!(
-                        "destination : {g} n'est pas multicast"
-                    )))
+                    return Err(ConfigError(format!("destination: {g} is not multicast")))
                 }
                 _ => {
                     return Err(ConfigError(
-                        "destination : indiquer soit `channel`, soit `group`".into(),
+                        "destination: specify either `channel` or `group`".into(),
                     ))
                 }
             }
@@ -415,7 +416,7 @@ impl Config {
                 let want = usize::from(StreamFormat::from(s.format).channels());
                 if chs.len() != want {
                     return Err(ConfigError(format!(
-                        "source « {} » : {} canaux du périphérique pour un flux de {want} canaux",
+                        "source \"{}\": {} device channels for a {want}-channel stream",
                         s.name,
                         chs.len()
                     )));
@@ -425,7 +426,7 @@ impl Config {
                     .find(|&&c| c == 0 || u32::from(c) > dev.channels_to_net)
                 {
                     return Err(ConfigError(format!(
-                        "source « {} » : sortie {c} hors 1..{} du périphérique",
+                        "source \"{}\": output {c} outside device range 1..{}",
                         s.name, dev.channels_to_net
                     )));
                 }
@@ -436,7 +437,7 @@ impl Config {
             if let Some(chs) = &d.device_channels {
                 if chs.len() != d.stream_channels() {
                     return Err(ConfigError(format!(
-                        "destination {} : {} entrées du périphérique pour un flux de {} canaux",
+                        "destination {}: {} device inputs for a {}-channel stream",
                         d.label(),
                         chs.len(),
                         d.stream_channels()
@@ -445,15 +446,13 @@ impl Config {
                 for &c in chs {
                     if c == 0 || u32::from(c) > dev.channels_from_net {
                         return Err(ConfigError(format!(
-                            "destination {} : entrée {c} hors 1..{} du périphérique",
+                            "destination {}: input {c} outside device range 1..{}",
                             d.label(),
                             dev.channels_from_net
                         )));
                     }
                     if !used.insert(c) {
-                        return Err(ConfigError(format!(
-                            "entrée {c} du périphérique patchée deux fois"
-                        )));
+                        return Err(ConfigError(format!("device input {c} patched twice")));
                     }
                 }
             }
@@ -515,7 +514,7 @@ mod tests {
     #[test]
     fn default_configuration_is_valid_and_initialised_once() {
         let dir = std::env::temp_dir().join(format!("openlw-config-{}", std::process::id()));
-        let path = dir.join("sous").join("lw-daemon.json");
+        let path = dir.join("sub").join("lw-daemon.json");
         Config::init_if_missing(&path).unwrap();
         let c = Config::load(&path).unwrap();
         assert!(c.auto_iface());
@@ -524,7 +523,7 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             r#"{"iface":"x"}"#,
-            "fichier existant conservé"
+            "existing file kept"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

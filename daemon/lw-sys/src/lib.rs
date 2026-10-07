@@ -403,7 +403,7 @@ pub mod service {
         let _ = NAME.set(name.to_string());
         *BODY.lock().unwrap_or_else(PoisonError::into_inner) = Some(body);
         service_dispatcher::start(name, ffi_service_main)
-            .map_err(|e| format!("gestionnaire de services Windows : {e}"))
+            .map_err(|e| format!("Windows Service Control Manager: {e}"))
     }
 }
 
@@ -440,9 +440,8 @@ pub mod xpc {
             handler(&request, uid)
         };
         // A panic must never cross the C boundary.
-        let response = catch_unwind(AssertUnwindSafe(run)).unwrap_or_else(|_| {
-            r#"{"ok":false,"error":"panique dans le gestionnaire"}"#.to_string()
-        });
+        let response = catch_unwind(AssertUnwindSafe(run))
+            .unwrap_or_else(|_| r#"{"ok":false,"error":"panic in handler"}"#.to_string());
         CString::new(response.replace('\0', " "))
             .unwrap_or_default()
             .into_raw()
@@ -474,7 +473,7 @@ pub mod xpc {
             let name = mach_name
                 .map(CString::new)
                 .transpose()
-                .map_err(|_| Error("nom de service invalide".into()))?;
+                .map_err(|_| Error("invalid service name".into()))?;
             let ctx = Box::into_raw(Box::new(handler));
             let name_ptr = name.as_ref().map_or(std::ptr::null(), |n| n.as_ptr());
             // SAFETY: valid or null string; `extern "C"` callbacks; `ctx` stays valid
@@ -485,7 +484,7 @@ pub mod xpc {
             if raw.is_null() {
                 // SAFETY: listener was not created; `ctx` is referenced nowhere else.
                 drop(unsafe { Box::from_raw(ctx) });
-                return Err(Error("création de l'écouteur XPC impossible".into()));
+                return Err(Error("cannot create the XPC listener".into()));
             }
             Ok(Self { raw, ctx })
         }
@@ -536,7 +535,7 @@ pub mod xpc {
 
     fn error_from(err: *const c_char) -> Error {
         if err.is_null() {
-            Error("erreur XPC".into())
+            Error("XPC error".into())
         } else {
             // SAFETY: `err` points to a static C-layer string.
             Error(
@@ -560,13 +559,12 @@ pub mod xpc {
     impl Client {
         /// Connect to Mach service (`privileged`: system-domain LaunchDaemon service).
         pub fn connect(mach_name: &str, privileged: bool) -> Result<Self, Error> {
-            let name =
-                CString::new(mach_name).map_err(|_| Error("nom de service invalide".into()))?;
+            let name = CString::new(mach_name).map_err(|_| Error("invalid service name".into()))?;
             // SAFETY: string valid during call; C layer copies name.
             let raw =
                 unsafe { super::ffi::lw_xpc_client_mach(name.as_ptr(), i32::from(privileged)) };
             if raw.is_null() {
-                return Err(Error("connexion XPC impossible".into()));
+                return Err(Error("cannot open the XPC connection".into()));
             }
             Ok(Self { raw })
         }
@@ -576,7 +574,7 @@ pub mod xpc {
             // SAFETY: `endpoint` is a valid XPC object while `Endpoint` lives; C layer retains it.
             let raw = unsafe { super::ffi::lw_xpc_client_endpoint(endpoint.0) };
             if raw.is_null() {
-                return Err(Error("connexion au point d'accès impossible".into()));
+                return Err(Error("cannot connect to the endpoint".into()));
             }
             Ok(Self { raw })
         }
@@ -586,8 +584,8 @@ pub mod xpc {
             &self,
             request: &str,
         ) -> Result<(String, Option<crate::shm::SharedObject>), Error> {
-            let req = CString::new(request)
-                .map_err(|_| Error("requête contenant un octet nul".into()))?;
+            let req =
+                CString::new(request).map_err(|_| Error("request contains a NUL byte".into()))?;
             let mut err: *const c_char = std::ptr::null();
             let mut obj: *mut c_void = std::ptr::null_mut();
             // SAFETY: open connection; output pointers valid during call.
@@ -603,8 +601,8 @@ pub mod xpc {
 
         /// Synchronous request: JSON sent, JSON received.
         pub fn call(&self, request: &str) -> Result<String, Error> {
-            let req = CString::new(request)
-                .map_err(|_| Error("requête contenant un octet nul".into()))?;
+            let req =
+                CString::new(request).map_err(|_| Error("request contains a NUL byte".into()))?;
             let mut err: *const c_char = std::ptr::null();
             // SAFETY: `raw` is an open connection; `req` and `err` valid during call.
             let out = unsafe { super::ffi::lw_xpc_call(self.raw, req.as_ptr(), &mut err) };
@@ -638,10 +636,10 @@ mod tests {
         if cfg!(target_os = "linux") {
             assert!(
                 r.is_ok() || r == Err(1),
-                "seul EPERM est admis sous Linux : {r:?}"
+                "only EPERM is accepted on Linux: {r:?}"
             );
         } else {
-            r.expect("passage en temps réel refusé");
+            r.expect("real-time promotion refused");
         }
     }
 
@@ -653,7 +651,7 @@ mod tests {
         let dt = super::rt::host_time_ns_of(t1 - t0);
         assert!(
             (45_000_000..500_000_000).contains(&dt),
-            "écart hôte {dt} ns"
+            "host delta {dt} ns"
         );
         assert!((45_000_000..500_000_000).contains(&(n1 - n0)));
     }
@@ -681,12 +679,12 @@ mod tests {
         } else {
             Duration::from_millis(5)
         };
-        assert!(worst < bound, "réveil tardif de {worst:?}");
+        assert!(worst < bound, "late wake-up by {worst:?}");
     }
 
     #[test]
     fn log_does_not_crash() {
-        super::log::write(super::log::Level::Info, "test", "lw-sys : message de test");
+        super::log::write(super::log::Level::Info, "test", "lw-sys: test message");
     }
 
     #[cfg(target_os = "macos")]
@@ -713,7 +711,7 @@ mod tests {
             super::xpc::Server::start(None, Box::new(|_req: &str, _uid: u32| panic!("test")))
                 .unwrap();
         let client = super::xpc::Client::from_endpoint(&server.endpoint()).unwrap();
-        assert!(client.call("{}").unwrap().contains("panique"));
+        assert!(client.call("{}").unwrap().contains("panic"));
     }
 
     #[cfg(target_os = "macos")]
@@ -734,12 +732,12 @@ mod tests {
     #[test]
     fn group_membership() {
         assert!(
-            super::auth::uid_in_group(0, "nogroup-inexistant"),
-            "root toujours autorisé"
+            super::auth::uid_in_group(0, "nogroup-nonexistent"),
+            "root always allowed"
         );
         assert!(
             !super::auth::uid_in_group(4_000_000, "admin"),
-            "UID inconnu refusé"
+            "unknown UID refused"
         );
     }
 
@@ -747,7 +745,7 @@ mod tests {
     #[test]
     fn xpc_unknown_service_is_an_error() {
         let client =
-            super::xpc::Client::connect("fr.francois-brille.openlw.inexistant", false).unwrap();
+            super::xpc::Client::connect("fr.francois-brille.openlw.nonexistent", false).unwrap();
         assert!(client.call("{}").is_err());
     }
 }

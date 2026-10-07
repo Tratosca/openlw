@@ -21,7 +21,7 @@ fn loopback() -> Iface {
         .unwrap()
         .into_iter()
         .find(|i| i.loopback)
-        .expect("interface de bouclage")
+        .expect("loopback interface")
 }
 
 /// Transmit `seconds` seconds in the given format and return receive statistics.
@@ -50,12 +50,12 @@ fn standard_stream_roundtrip() {
     let (tx, rx) = roundtrip(4001, StreamFormat::Standard, 1.0);
     assert!(
         (195..=207).contains(&tx.packets),
-        "200 paquets/s attendus, {} émis",
+        "200 packets/s expected, {} transmitted",
         tx.packets
     );
     assert_eq!(
         rx.packets, tx.packets,
-        "tout ce qui est émis doit être reçu sur lo0"
+        "everything transmitted must be received on lo0"
     );
     assert_eq!(
         (rx.lost, rx.late_or_dup, rx.resyncs, rx.invalid),
@@ -70,10 +70,10 @@ fn standard_stream_roundtrip() {
         rx.payload_types.keys().copied().collect::<Vec<_>>(),
         vec![96]
     );
-    assert!(rx.ssrc_is_group, "SSRC = groupe");
+    assert!(rx.ssrc_is_group, "SSRC = group");
     assert!(
         (rx.peak_dbfs + 20.0).abs() < 0.2,
-        "crête {} dBFS",
+        "peak {} dBFS",
         rx.peak_dbfs
     );
 }
@@ -83,7 +83,7 @@ fn aes67_stream_roundtrip() {
     let (tx, rx) = roundtrip(4002, StreamFormat::Aes67, 1.0);
     assert!(
         (980..=1030).contains(&tx.packets),
-        "1000 paquets/s attendus, {} émis",
+        "1000 packets/s expected, {} transmitted",
         tx.packets
     );
     assert_eq!(rx.packets, tx.packets);
@@ -94,7 +94,7 @@ fn aes67_stream_roundtrip() {
     );
     assert_eq!(rx.ts_steps.keys().copied().collect::<Vec<_>>(), vec![48]);
     eprintln!(
-        "AES67 : {} paquets, {} en retard > 1 ms, retard max {} µs",
+        "AES67: {} packets, {} late > 1 ms, max lateness {} µs",
         tx.packets, tx.late_packets, tx.max_late_us
     );
     // Scheduling delay depends on the OS (normal-priority thread): measured, not required.
@@ -137,11 +137,7 @@ fn advertisement_is_decodable() {
         assert_eq!((h.layer, h.tlv_version), (3, 2));
         pages.push(Advertisement::from_msg(&msg).unwrap());
     }
-    assert_eq!(
-        pages.len(),
-        3,
-        "2 pages complètes (8 + 2 sources) + 1 courte"
-    );
+    assert_eq!(pages.len(), 3, "2 full pages (8 + 2 sources) + 1 short");
     assert!(pages[0].full && pages[1].full && !pages[2].full);
     assert_eq!(pages[0].sources.len() + pages[1].sources.len(), 10);
     assert!(pages

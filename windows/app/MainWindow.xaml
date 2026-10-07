@@ -22,20 +22,20 @@
                 <!-- Livewire network -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Réseau Livewire" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="Livewire network" Style="{StaticResource SubtitleTextBlockStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Ellipse x:Name="StateDot" Width="10" Height="10" VerticalAlignment="Center"
                                      Fill="{ThemeResource ControlStrongFillColorDefaultBrush}" />
-                            <TextBlock x:Name="StateText" Text="Connexion au service OpenLW…" TextWrapping="Wrap" />
+                            <TextBlock x:Name="StateText" Text="Connecting to the OpenLW service…" TextWrapping="Wrap" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="Interface :" VerticalAlignment="Center" />
+                            <TextBlock Text="Interface:" VerticalAlignment="Center" />
                             <ComboBox x:Name="IfaceCombo" MinWidth="340" SelectionChanged="IfaceChanged" />
-                            <CheckBox x:Name="AdvertiseCheck" Content="Annoncer les sorties sur le réseau"
+                            <CheckBox x:Name="AdvertiseCheck" Content="Advertise outputs on the network"
                                       Margin="16,0,0,0" Click="AdvertiseClicked" />
                         </StackPanel>
                         <TextBlock Style="{StaticResource Hint}"
-                                   Text="Horloge : celle de l'ordinateur. Les écarts avec les autres appareils sont compensés automatiquement." />
+                                   Text="Clock: the computer's own. Drift relative to other devices is compensated automatically." />
                         <InfoBar x:Name="MessageBar" Severity="Error" IsOpen="False" IsClosable="True" />
                     </StackPanel>
                 </Border>
@@ -48,11 +48,11 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Spacing="8">
-                            <TextBlock Text="Pilote audio" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <TextBlock Text="Audio driver" Style="{StaticResource SubtitleTextBlockStyle}" />
                             <TextBlock TextWrapping="Wrap"
-                                       Text="Dans votre logiciel audio, choisissez le pilote ASIO® « OpenLW ». Un seul logiciel l'utilise à la fois ; ses entrées et ses sorties sont celles réglées ci-dessous." />
+                                       Text="In your audio software, select the ASIO® driver “OpenLW”. Only one application can use it at a time; its inputs and outputs are the ones set below." />
                             <TextBlock Style="{StaticResource Hint}"
-                                       Text="Les applications sans ASIO (navigateurs, visioconférence) ne voient pas OpenLW." />
+                                       Text="Applications without ASIO support (browsers, video conferencing) can't see OpenLW." />
                             <TextBlock Style="{StaticResource Hint}"
                                        Text="ASIO is a registered trademark of Steinberg Media Technologies GmbH." />
                         </StackPanel>
@@ -64,25 +64,25 @@
                 <!-- Inputs: network to computer -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Entrées (réseau vers ordinateur)" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="Inputs (network to computer)" Style="{StaticResource SubtitleTextBlockStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="Canaux Livewire reçus :" VerticalAlignment="Center" />
+                            <TextBlock Text="Received Livewire channels:" VerticalAlignment="Center" />
                             <ComboBox x:Name="InCount" MinWidth="220" SelectionChanged="ChannelCountChanged" />
                         </StackPanel>
                         <TextBlock Style="{StaticResource Hint}"
-                                   Text="Cliquez une case pour envoyer la source sur cette paire d'entrées du pilote OpenLW. Cliquez à nouveau pour la libérer. Le bouton casque fait écouter la source sur la sortie de Windows, sans la patcher." />
+                                   Text="Click a cell to send the source to that input pair of the OpenLW driver. Click it again to release the pair. The headphone button plays the source on the Windows output without patching it." />
                         <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled">
                             <ContentControl x:Name="GridHost" HorizontalContentAlignment="Left" />
                         </ScrollViewer>
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="Source non annoncée, canal :" VerticalAlignment="Center" />
-                            <TextBox x:Name="ManualChannel" PlaceholderText="1 à 32766" Width="110" KeyDown="ManualKeyDown" />
+                            <TextBlock Text="Unadvertised source, channel:" VerticalAlignment="Center" />
+                            <TextBox x:Name="ManualChannel" PlaceholderText="1 to 32766" Width="110" KeyDown="ManualKeyDown" />
                             <ComboBox x:Name="ManualKind" SelectedIndex="0">
-                                <x:String>Stéréo</x:String>
-                                <x:String>Retour (To Source)</x:String>
-                                <x:String>Surround 8 canaux</x:String>
+                                <x:String>Stereo</x:String>
+                                <x:String>Backfeed (To Source)</x:String>
+                                <x:String>8-channel surround</x:String>
                             </ComboBox>
-                            <Button Content="Ajouter à la grille" Click="AddManualClicked" />
+                            <Button Content="Add to grid" Click="AddManualClicked" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -90,37 +90,37 @@
                 <!-- Outputs: computer to network -->
                 <Border Style="{StaticResource Card}">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Sorties (ordinateur vers réseau)" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="Outputs (computer to network)" Style="{StaticResource SubtitleTextBlockStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="Canaux Livewire diffusés :" VerticalAlignment="Center" />
+                            <TextBlock Text="Transmitted Livewire channels:" VerticalAlignment="Center" />
                             <ComboBox x:Name="OutCount" MinWidth="220" SelectionChanged="ChannelCountChanged" />
                         </StackPanel>
                         <TextBlock Style="{StaticResource Hint}"
-                                   Text="Chaque paire de sorties du pilote OpenLW est diffusée sur le canal Livewire de votre choix, sous le nom indiqué. Une modification s'applique quand la case Diffuser est cochée." />
+                                   Text="Each output pair of the OpenLW driver is transmitted on the Livewire channel of your choice, under the name shown. Changes apply when Transmit is checked." />
                         <StackPanel x:Name="OutputRows" Spacing="6" />
                     </StackPanel>
                 </Border>
 
                 <!-- Advanced settings -->
                 <Expander x:Name="AdvancedExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Header="Réglages avancés : nom annoncé, latence de réception, priorité réseau"
+                          Header="Advanced settings: advertised name, receive latency, network priority"
                           Expanding="AdvancedExpanding" Collapsed="AdvancedCollapsed">
                     <StackPanel Spacing="14">
                         <StackPanel Spacing="4">
-                            <TextBox x:Name="TerminalName" Header="Nom annoncé" Width="300" HorizontalAlignment="Left"
+                            <TextBox x:Name="TerminalName" Header="Advertised name" Width="300" HorizontalAlignment="Left"
                                      KeyDown="TerminalKeyDown" LostFocus="TerminalLostFocus" />
                             <TextBlock Style="{StaticResource Hint}" MaxWidth="600" HorizontalAlignment="Left"
-                                       Text="Nom affiché par les autres appareils Livewire, 32 caractères au plus, accents remplacés. Vide : nom de l'ordinateur. Validez avec Entrée." />
+                                       Text="Name shown by other Livewire devices, 32 characters at most, accents replaced. Empty: the computer name. Press Enter to apply." />
                         </StackPanel>
                         <StackPanel Spacing="4">
-                            <ComboBox x:Name="LatencyCombo" Header="Latence de réception" MinWidth="360" SelectionChanged="LatencyChanged" />
+                            <ComboBox x:Name="LatencyCombo" Header="Receive latency" MinWidth="360" SelectionChanged="LatencyChanged" />
                             <TextBlock Style="{StaticResource Hint}" MaxWidth="600" HorizontalAlignment="Left"
-                                       Text="Tampons ajoutés à celui du logiciel qui enregistre. Plus la latence est faible, plus un retard du réseau ou de l'ordinateur risque de provoquer une coupure brève." />
+                                       Text="Buffering added to that of the recording software. The lower the latency, the more likely a network or computer delay is to cause a brief dropout." />
                         </StackPanel>
                         <StackPanel Spacing="4">
-                            <ComboBox x:Name="DscpCombo" Header="Priorité réseau (DSCP)" MinWidth="360" SelectionChanged="DscpChanged" />
+                            <ComboBox x:Name="DscpCombo" Header="Network priority (DSCP)" MinWidth="360" SelectionChanged="DscpChanged" />
                             <TextBlock Style="{StaticResource Hint}" MaxWidth="600" HorizontalAlignment="Left"
-                                       Text="Marquage des flux audio émis. Choisissez la valeur prévue par la QoS de vos commutateurs." />
+                                       Text="Marking of transmitted audio streams. Choose the value expected by your switches' QoS." />
                         </StackPanel>
                     </StackPanel>
                 </Expander>

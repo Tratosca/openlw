@@ -478,7 +478,7 @@ static DWORD WINAPI conn_main(LPVOID arg) {
                 nl[-1] = '\0';
             }
             char *resp = s->handler(buf, &caller, s->ctx);
-            const char *out = resp ? resp : "{\"ok\":false,\"error\":\"réponse vide\"}";
+            const char *out = resp ? resp : "{\"ok\":false,\"error\":\"empty response\"}";
             alive = write_all(s, pipe, &ov, out, strlen(out)) && write_all(s, pipe, &ov, "\n", 1);
             if (resp) {
                 s->free_response(resp);
@@ -657,7 +657,7 @@ lw_pipe_client *lw_pipe_client_connect(const char *name, uint32_t timeout_ms, co
     *error = NULL;
     wchar_t *path = pipe_path(name);
     if (path == NULL) {
-        *error = "nom de tube invalide";
+        *error = "invalid pipe name";
         return NULL;
     }
     /* Permissions limited to those granted to users by DACL; server can only identify
@@ -682,16 +682,16 @@ lw_pipe_client *lw_pipe_client_connect(const char *name, uint32_t timeout_ms, co
     }
     free(path);
     if (h == INVALID_HANDLE_VALUE) {
-        *error = err == ERROR_FILE_NOT_FOUND    ? "service OpenLW introuvable (tube absent)"
-                 : err == ERROR_ACCESS_DENIED   ? "accès au service OpenLW refusé"
-                 : err == ERROR_PIPE_BUSY       ? "service OpenLW occupé"
-                                                : "connexion au service OpenLW impossible";
+        *error = err == ERROR_FILE_NOT_FOUND    ? "OpenLW service not found (no pipe)"
+                 : err == ERROR_ACCESS_DENIED   ? "access to the OpenLW service denied"
+                 : err == ERROR_PIPE_BUSY       ? "OpenLW service busy"
+                                                : "cannot connect to the OpenLW service";
         return NULL;
     }
     struct lw_pipe_client *c = (struct lw_pipe_client *)calloc(1, sizeof *c);
     if (c == NULL) {
         CloseHandle(h);
-        *error = "mémoire insuffisante";
+        *error = "out of memory";
         return NULL;
     }
     c->pipe = h;
@@ -701,7 +701,7 @@ lw_pipe_client *lw_pipe_client_connect(const char *name, uint32_t timeout_ms, co
 char *lw_pipe_call(lw_pipe_client *c, const char *request, const char **error) {
     *error = NULL;
     if (c == NULL || request == NULL || strchr(request, '\n') != NULL) {
-        *error = "requête invalide";
+        *error = "invalid request";
         return NULL;
     }
     size_t rlen = strlen(request);
@@ -713,7 +713,7 @@ char *lw_pipe_call(lw_pipe_client *c, const char *request, const char **error) {
         while (left > 0) {
             DWORD n = 0;
             if (!WriteFile(c->pipe, p, left > PIPE_BUF_BYTES ? PIPE_BUF_BYTES : (DWORD)left, &n, NULL) || n == 0) {
-                *error = "connexion au service OpenLW interrompue";
+                *error = "connection to the OpenLW service interrupted";
                 return NULL;
             }
             p += n;
@@ -726,7 +726,7 @@ char *lw_pipe_call(lw_pipe_client *c, const char *request, const char **error) {
             size_t line = (size_t)(nl - c->buf);
             char *out = (char *)malloc(line + 1);
             if (out == NULL) {
-                *error = "mémoire insuffisante";
+                *error = "out of memory";
                 return NULL;
             }
             memcpy(out, c->buf, line);
@@ -741,12 +741,12 @@ char *lw_pipe_call(lw_pipe_client *c, const char *request, const char **error) {
         if (c->cap - c->len < 4096) {
             size_t ncap = c->cap ? c->cap * 2 : 8192;
             if (ncap > 64u * MAX_REQUEST_BYTES) {
-                *error = "réponse démesurée";
+                *error = "response too large";
                 return NULL;
             }
             char *bigger = (char *)realloc(c->buf, ncap);
             if (bigger == NULL) {
-                *error = "mémoire insuffisante";
+                *error = "out of memory";
                 return NULL;
             }
             c->buf = bigger;
@@ -754,7 +754,7 @@ char *lw_pipe_call(lw_pipe_client *c, const char *request, const char **error) {
         }
         DWORD n = 0;
         if (!ReadFile(c->pipe, c->buf + c->len, (DWORD)(c->cap - c->len), &n, NULL) || n == 0) {
-            *error = "connexion au service OpenLW interrompue";
+            *error = "connection to the OpenLW service interrupted";
             return NULL;
         }
         c->len += n;

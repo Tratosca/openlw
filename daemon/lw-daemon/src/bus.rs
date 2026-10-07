@@ -263,11 +263,11 @@ mod tests {
         let mut out = [0f32; 4];
         assert_eq!(r.pull(&mut out), 2);
         assert_eq!(out, [1.0, -1.0, 2.0, -2.0]);
-        assert_eq!(w.push(&[9.0; 20]), 7, "capacité 8, 1 trame encore présente");
+        assert_eq!(w.push(&[9.0; 20]), 7, "capacity 8, 1 frame still queued");
         assert_eq!(w.counters().overruns, 3);
         let mut big = [5f32; 20];
         assert_eq!(r.pull(&mut big), 8);
-        assert_eq!(big[16..], [0.0; 4], "manque complété par du silence");
+        assert_eq!(big[16..], [0.0; 4], "shortfall padded with silence");
         assert_eq!(r.counters().underruns, 2);
     }
 
@@ -327,7 +327,7 @@ mod tests {
         j.pull(&mut out);
         assert!(
             !j.primed() && out.iter().all(|&v| v == 0.0),
-            "silence avant amorçage"
+            "silence before priming"
         );
         w.push(&[1.0; 60]);
         j.pull(&mut out);

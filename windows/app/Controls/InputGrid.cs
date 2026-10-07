@@ -82,11 +82,11 @@ public sealed class InputGrid : Grid
         {
             List<int> pair = pairs[c];
             var head = new StackPanel { Spacing = 3, HorizontalAlignment = HorizontalAlignment.Center };
-            head.Children.Add(Caption($"Entrées {pair[0]}-{pair[^1]}", center: true));
+            head.Children.Add(Caption($"Inputs {pair[0]}-{pair[^1]}", center: true));
             var meter = new Meter(2, ColumnWidth - 16);
             columnMeters.Add(meter);
             head.Children.Add(meter);
-            var st = Caption("libre", center: true);
+            var st = Caption("free", center: true);
             columnStatus.Add(st);
             head.Children.Add(st);
             Place(head, 0, 4 + c);
@@ -94,7 +94,7 @@ public sealed class InputGrid : Grid
         if (rows.Count == 0)
         {
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var empty = Caption("Aucune source découverte. Choisissez l'interface, ou saisissez un canal ci-dessous.");
+            var empty = Caption("No sources discovered. Choose the interface, or enter a channel below.");
             Place(empty, 1, 0);
             SetColumnSpan(empty, 4 + pairs.Count);
             return;
@@ -111,7 +111,7 @@ public sealed class InputGrid : Grid
                 Content = new FontIcon { Glyph = "", FontSize = 14 }, // headphones
                 Padding = new Thickness(6, 4, 6, 4),
             };
-            ToolTipService.SetToolTip(listen, listeningRow == r ? "Arrêter l'écoute" : "Écouter sur la sortie de Windows");
+            ToolTipService.SetToolTip(listen, listeningRow == r ? "Stop listening" : "Listen on the Windows output");
             if (listeningRow == r)
             {
                 listen.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
@@ -128,7 +128,7 @@ public sealed class InputGrid : Grid
                 name.Children.Add(listenMeter);
             }
             Place(name, y, 2);
-            string kind = g.Source.PatchKind == "surround" ? " · surround" : g.Source.PatchKind == "backfeed" ? " · retour" : "";
+            string kind = g.Source.PatchKind == "surround" ? " · surround" : g.Source.PatchKind == "backfeed" ? " · backfeed" : "";
             Place(Caption(g.Origin + kind), y, 3);
 
             for (int c = 0; c < pairs.Count; c++)
@@ -143,15 +143,15 @@ public sealed class InputGrid : Grid
                     Height = 30,
                 };
                 ToolTipService.SetToolTip(cell, on
-                    ? $"Libérer les entrées {pairs[c][0]}-{pairs[c][^1]}"
-                    : $"Envoyer le canal {g.Source.Channel} sur les entrées {pairs[c][0]}-{pairs[c][^1]}");
+                    ? $"Release inputs {pairs[c][0]}-{pairs[c][^1]}"
+                    : $"Send channel {g.Source.Channel} to inputs {pairs[c][0]}-{pairs[c][^1]}");
                 cell.Click += (_, _) => Toggle?.Invoke(row, column);
                 Place(cell, y, 4 + c);
             }
             if (g.Removable)
             {
                 var remove = new Button { Content = "✕", Padding = new Thickness(6, 2, 6, 2) };
-                ToolTipService.SetToolTip(remove, "Retirer de la grille");
+                ToolTipService.SetToolTip(remove, "Remove from grid");
                 remove.Click += (_, _) => Remove?.Invoke(row);
                 Place(remove, y, 4 + pairs.Count);
             }

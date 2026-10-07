@@ -18,7 +18,7 @@ def item(tag, kind, value):
             "!" + ("H" if kind == 4 else "I") * len(value), *value
         )
     else:
-        raise ValueError(f"Type TlvMsg inconnu : {kind}")
+        raise ValueError(f"Unknown TlvMsg type: {kind}")
     return tag.encode("ascii") + bytes([kind]) + payload
 
 
@@ -93,10 +93,10 @@ def write_pcap(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("output", type=Path, help="Chemin du pcap de sortie (hors du dépôt)")
+    parser.add_argument("output", type=Path, help="Output pcap path (outside the repository)")
     args = parser.parse_args()
     write_pcap(args.output)
-    print(f"8 paquets écrits : {args.output}")
+    print(f"8 packets written: {args.output}")
 
 
 if __name__ == "__main__":

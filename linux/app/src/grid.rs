@@ -116,11 +116,11 @@ impl InputGrid {
         for (c, pair) in pairs.iter().enumerate() {
             let head = gtk::Box::new(gtk::Orientation::Vertical, 3);
             head.set_size_request(COLUMN_WIDTH, -1);
-            head.append(&caption(&pair_label("Entrées", pair), true));
+            head.append(&caption(&pair_label("Inputs", pair), true));
             let meter = Meter::new(2, COLUMN_WIDTH - 16);
             meter.widget().set_halign(gtk::Align::Center);
             head.append(meter.widget());
-            let status = caption("libre", true);
+            let status = caption("free", true);
             head.append(&status);
             self.column_meters.borrow_mut().push(meter);
             self.column_status.borrow_mut().push(status);
@@ -128,7 +128,7 @@ impl InputGrid {
         }
         if rows.is_empty() {
             let empty = caption(
-                "Aucune source découverte. Choisissez l'interface, ou saisissez un canal ci-dessous.",
+                "No sources discovered. Choose the interface, or enter a channel below.",
                 false,
             );
             empty.set_wrap(true);
@@ -144,9 +144,9 @@ impl InputGrid {
             let listen = gtk::Button::from_icon_name("audio-headphones-symbolic");
             listen.set_valign(gtk::Align::Center);
             listen.set_tooltip_text(Some(if on_air {
-                "Arrêter l'écoute"
+                "Stop listening"
             } else {
-                "Écouter sur la sortie audio de l'ordinateur"
+                "Listen on the computer's audio output"
             }));
             if on_air {
                 listen.add_css_class("suggested-action");
@@ -184,7 +184,7 @@ impl InputGrid {
 
             let kind = match g.source.patch_kind() {
                 "surround" => " · surround",
-                "backfeed" => " · retour",
+                "backfeed" => " · backfeed",
                 _ => "",
             };
             let origin = caption(&format!("{}{kind}", g.origin), false);
@@ -200,10 +200,10 @@ impl InputGrid {
                     cell.set_icon_name("object-select-symbolic");
                 }
                 cell.set_tooltip_text(Some(&if on {
-                    pair_label("Libérer les entrées", pair)
+                    pair_label("Release inputs", pair)
                 } else {
                     pair_label(
-                        &format!("Envoyer le canal {} sur les entrées", g.source.channel),
+                        &format!("Send channel {} to inputs", g.source.channel),
                         pair,
                     )
                 }));
@@ -216,7 +216,7 @@ impl InputGrid {
                 remove.add_css_class("flat");
                 remove.add_css_class("circular");
                 remove.set_valign(gtk::Align::Center);
-                remove.set_tooltip_text(Some("Retirer de la grille"));
+                remove.set_tooltip_text(Some("Remove from grid"));
                 let a = self.actions.clone();
                 remove.connect_clicked(move |_| (a.remove)(r));
                 self.grid
@@ -226,7 +226,7 @@ impl InputGrid {
     }
 }
 
-/// “Entrées 1-2” (first and last channel of a pair or a surround block).
+/// “Inputs 1-2” (first and last channel of a pair or a surround block).
 pub fn pair_label(prefix: &str, pair: &[u32]) -> String {
     format!(
         "{prefix} {}-{}",

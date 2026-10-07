@@ -27,7 +27,7 @@ static int gFailures = 0;
         if (cond) {                                                                                                    \
             printf("  ok   ");                                                                                         \
         } else {                                                                                                       \
-            printf("  ÉCHEC ");                                                                                        \
+            printf("  FAIL ");                                                                                         \
             gFailures++;                                                                                               \
         }                                                                                                              \
         printf(__VA_ARGS__);                                                                                           \
@@ -114,24 +114,24 @@ static int get_str(AudioObjectID obj, AudioObjectPropertySelector sel, char *buf
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        fprintf(stderr, "usage : %s <bundle.driver>\n", argv[0]);
+        fprintf(stderr, "usage: %s <bundle.driver>\n", argv[0]);
         return 2;
     }
-    printf("Chargement CFPlugIn de %s\n", argv[1]);
+    printf("CFPlugIn loading of %s\n", argv[1]);
     CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)argv[1], (CFIndex)strlen(argv[1]), true);
     CFPlugInRef plugin = CFPlugInCreate(NULL, url);
-    CHECK(plugin != NULL, "bundle chargé");
+    CHECK(plugin != NULL, "bundle loaded");
     if (plugin == NULL) {
         return 1;
     }
     CFArrayRef factories = CFPlugInFindFactoriesForPlugInType(kAudioServerPlugInTypeUUID);
-    CHECK(factories && CFArrayGetCount(factories) >= 1, "fabrique déclarée pour kAudioServerPlugInTypeUUID");
+    CHECK(factories && CFArrayGetCount(factories) >= 1, "factory declared for kAudioServerPlugInTypeUUID");
     if (!factories || CFArrayGetCount(factories) < 1) {
         return 1;
     }
     CFUUIDRef factory = CFArrayGetValueAtIndex(factories, 0);
     void *iunknown = CFPlugInInstanceCreate(NULL, factory, kAudioServerPlugInTypeUUID);
-    CHECK(iunknown != NULL, "instance créée par la fabrique LW_Create");
+    CHECK(iunknown != NULL, "instance created by the LW_Create factory");
     IUnknownVTbl **unk = (IUnknownVTbl **)iunknown;
     void *drv = NULL;
     HRESULT hr = (*unk)->QueryInterface(unk, CFUUIDGetUUIDBytes(kAudioServerPlugInDriverInterfaceUUID), &drv);
@@ -140,67 +140,67 @@ int main(int argc, char **argv) {
 
     CHECK(DRV->Initialize(gDrv, &gHostInterface) == 0, "Initialize");
 
-    printf("Propriétés\n");
+    printf("Properties\n");
     AudioObjectPropertyAddress a = {kAudioPlugInPropertyDeviceList, kAudioObjectPropertyScopeGlobal, 0};
     AudioObjectID devs[4] = {0};
     UInt32 size = 0;
     DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &a, 0, NULL, sizeof devs, &size, devs);
-    CHECK(size == sizeof(AudioObjectID) && devs[0] == 2, "un périphérique (id %u)", devs[0]);
+    CHECK(size == sizeof(AudioObjectID) && devs[0] == 2, "one device (id %u)", devs[0]);
     char name[128];
     CHECK(get_str(2, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW") == 0,
-          "nom « %s »", name);
+          "name “%s”", name);
     CHECK(get_str(2, kAudioDevicePropertyDeviceUID, name, sizeof name) == 0 &&
               strcmp(name, "fr.francois-brille.openlw.device") == 0,
-          "UID « %s »", name);
+          "UID “%s”", name);
     CFStringRef uid = CFSTR("fr.francois-brille.openlw.device");
     AudioObjectID found = 0;
     a.mSelector = kAudioPlugInPropertyTranslateUIDToDevice;
     DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &a, sizeof uid, &uid, sizeof found, &size, &found);
     CHECK(found == 2, "TranslateUIDToDevice");
-    CHECK(get_u32(2, kAudioObjectPropertyClass, kAudioObjectPropertyScopeGlobal) == kAudioDeviceClassID, "classe périphérique");
+    CHECK(get_u32(2, kAudioObjectPropertyClass, kAudioObjectPropertyScopeGlobal) == kAudioDeviceClassID, "device class");
     CHECK(get_u32(2, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal) == kAudioDeviceTransportTypeVirtual,
-          "transport virtuel");
+          "virtual transport");
     CHECK(get_u32(2, kAudioDevicePropertyDeviceCanBeDefaultDevice, kAudioObjectPropertyScopeGlobal) == 1,
-          "peut être le périphérique par défaut");
+          "can be the default device");
     Float64 rate = 0;
     a = (AudioObjectPropertyAddress){kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, 0};
     DRV->GetPropertyData(gDrv, 2, getpid(), &a, 0, NULL, sizeof rate, &size, &rate);
-    CHECK(rate == 48000.0, "fréquence nominale %.0f Hz", rate);
+    CHECK(rate == 48000.0, "nominal sample rate %.0f Hz", rate);
     AudioObjectID in = 0, out = 0;
     a = (AudioObjectPropertyAddress){kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput, 0};
     DRV->GetPropertyData(gDrv, 2, getpid(), &a, 0, NULL, sizeof in, &size, &in);
     a.mScope = kAudioObjectPropertyScopeOutput;
     DRV->GetPropertyData(gDrv, 2, getpid(), &a, 0, NULL, sizeof out, &size, &out);
-    CHECK(in == 3 && out == 4, "flux d'entrée %u, de sortie %u", in, out);
+    CHECK(in == 3 && out == 4, "input stream %u, output stream %u", in, out);
     CHECK(get_u32(3, kAudioStreamPropertyDirection, kAudioObjectPropertyScopeGlobal) == 1 &&
               get_u32(4, kAudioStreamPropertyDirection, kAudioObjectPropertyScopeGlobal) == 0,
-          "sens des flux");
+          "stream directions");
     AudioStreamBasicDescription f;
     a = (AudioObjectPropertyAddress){kAudioStreamPropertyVirtualFormat, kAudioObjectPropertyScopeGlobal, 0};
     DRV->GetPropertyData(gDrv, 4, getpid(), &a, 0, NULL, sizeof f, &size, &f);
     UInt32 ch = f.mChannelsPerFrame;
     CHECK(f.mFormatID == kAudioFormatLinearPCM && f.mBitsPerChannel == 32 && (f.mFormatFlags & kAudioFormatFlagIsFloat) &&
               f.mSampleRate == 48000.0 && ch == 2,
-          "format float32 48 kHz, %u canaux", ch);
+          "format float32 48 kHz, %u channels", ch);
     Boolean settable = true;
     a.mSelector = kAudioDevicePropertyNominalSampleRate;
     DRV->IsPropertySettable(gDrv, 2, getpid(), &a, &settable);
-    CHECK(!settable, "fréquence non modifiable");
+    CHECK(!settable, "sample rate not settable");
     a.mSelector = 'zzzz';
-    CHECK(!DRV->HasProperty(gDrv, 2, getpid(), &a), "propriété inconnue refusée");
+    CHECK(!DRV->HasProperty(gDrv, 2, getpid(), &a), "unknown property rejected");
 
     AudioServerPlugInIOCycleInfo cycle_info;
     memset(&cycle_info, 0, sizeof cycle_info);
 
-    printf("IO sans daemon\n");
+    printf("I/O without daemon\n");
     /* Mock service providing no region (real daemon may run on test machine). */
     void (*use_endpoint)(void *) =
         CFBundleGetFunctionPointerForName(CFPlugInGetBundle(plugin), CFSTR("lw_plugin_test_use_endpoint"));
-    CHECK(use_endpoint != NULL, "hook de test exporté");
+    CHECK(use_endpoint != NULL, "test hook exported");
     lw_server *empty = lw_xpc_server_start(NULL, handler, free_resp, NULL);
     void *empty_endpoint = lw_xpc_server_endpoint(empty);
     use_endpoint(empty_endpoint);
-    CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (daemon absent)");
+    CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (no daemon)");
     float *buf = calloc(512 * ch, sizeof(float));
     for (UInt32 i = 0; i < 512 * ch; i++) {
         buf[i] = 1.0f;
@@ -210,24 +210,24 @@ int main(int argc, char **argv) {
     for (UInt32 i = 0; i < 512 * ch; i++) {
         silent &= buf[i] == 0.0f;
     }
-    CHECK(silent, "entrée silencieuse sans daemon");
+    CHECK(silent, "silent input without daemon");
     CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
 
-    printf("IO avec daemon simulé (région partagée par XPC)\n");
+    printf("I/O with simulated daemon (shared region over XPC)\n");
     size_t rsize = lw_shm_size(8192, ch, ch);
     lw_host_clock clock;
     lw_host_clock_info(&clock);
     void *shmem = NULL;
     void *region = lw_shm_alloc(rsize, &shmem);
-    CHECK(region && lw_shm_init(region, rsize, 48000, 8192, ch, ch, &clock) == 0, "région créée (%zu octets)", rsize);
+    CHECK(region && lw_shm_init(region, rsize, 48000, 8192, ch, ch, &clock) == 0, "region created (%zu bytes)", rsize);
     lw_server *server = lw_xpc_server_start(NULL, handler, free_resp, NULL);
     lw_xpc_server_set_shmem(server, shmem);
     void *endpoint = lw_xpc_server_endpoint(server);
     use_endpoint(endpoint);
     lw_xpc_release(empty_endpoint);
     lw_xpc_server_stop(empty);
-    CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (attachement)");
-    CHECK(get_u32(2, kAudioDevicePropertyDeviceIsRunning, kAudioObjectPropertyScopeGlobal) == 1, "périphérique en marche");
+    CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (attach)");
+    CHECK(get_u32(2, kAudioDevicePropertyDeviceIsRunning, kAudioObjectPropertyScopeGlobal) == 1, "device running");
 
     /* Network → applications: daemon writes, plugin returns in ReadInput. Daemon maintains
      * 256-frame lead (plugin priming margin): read block was written 256 frames earlier. */
@@ -261,50 +261,50 @@ int main(int argc, char **argv) {
         lw_ring_read(region, LW_TO_NET, buf, 512);
         same_out &= memcmp(buf, src, 512 * ch * sizeof(float)) == 0;
     }
-    CHECK(same_in, "réseau → applications : 100 cycles de 512 trames identiques");
-    CHECK(same_out, "applications → réseau : 100 cycles de 512 trames identiques");
+    CHECK(same_in, "network → applications: 100 cycles of 512 identical frames");
+    CHECK(same_out, "applications → network: 100 cycles of 512 identical frames");
     uint64_t w, r, ov, un;
     lw_ring_counters(region, LW_FROM_NET, &w, &r, &ov, &un);
-    CHECK(ov == 0 && un == 0 && w == 51456, "compteurs sans perte (%llu trames)", (unsigned long long)w);
+    CHECK(ov == 0 && un == 0 && w == 51456, "counters without loss (%llu frames)", (unsigned long long)w);
 
-    printf("Horodatage zéro\n");
+    printf("Zero timestamp\n");
     Float64 st0, st1;
     UInt64 ht0, ht1, seed;
     DRV->GetZeroTimeStamp(gDrv, 2, 1, &st0, &ht0, &seed);
     usleep(400000); /* > 16384 frames at 48 kHz */
     DRV->GetZeroTimeStamp(gDrv, 2, 1, &st1, &ht1, &seed);
-    CHECK(st1 == st0 + 16384.0 && ht1 > ht0, "période 16384 trames, temps hôte croissant (%.0f → %.0f)", st0, st1);
+    CHECK(st1 == st0 + 16384.0 && ht1 > ht0, "period 16384 frames, host time increasing (%.0f → %.0f)", st0, st1);
     mach_timebase_info_data_t tb;
     mach_timebase_info(&tb);
     double period_s = (double)(ht1 - ht0) * tb.numer / tb.denom / 1e9;
-    CHECK(fabs(period_s - 16384.0 / 48000.0) < 1e-6, "durée d'une période %.6f s (attendu %.6f)", period_s,
+    CHECK(fabs(period_s - 16384.0 / 48000.0) < 1e-6, "period duration %.6f s (expected %.6f)", period_s,
           16384.0 / 48000.0);
 
     CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
 
-    printf("Nombre de canaux modifié par le daemon\n");
+    printf("Channel count changed by the daemon\n");
     void (*poll)(void) = CFBundleGetFunctionPointerForName(CFPlugInGetBundle(plugin), CFSTR("lw_plugin_test_poll"));
-    CHECK(poll != NULL, "hook de surveillance exporté");
+    CHECK(poll != NULL, "monitoring hook exported");
     gConfigRequests = 0;
     poll();
-    CHECK(gConfigRequests == 0, "géométrie inchangée : aucune demande à l'hôte");
+    CHECK(gConfigRequests == 0, "geometry unchanged: no request to the host");
     gGen = 2, gTo = 4, gFrom = 6;
     poll();
     poll();
-    CHECK(gConfigRequests == 1, "nouvelle géométrie : une demande de changement de configuration (%u)", gConfigRequests);
-    CHECK(DRV->PerformDeviceConfigurationChange(gDrv, 2, 0, NULL) == 0, "changement appliqué par l'hôte");
+    CHECK(gConfigRequests == 1, "new geometry: one configuration change request (%u)", gConfigRequests);
+    CHECK(DRV->PerformDeviceConfigurationChange(gDrv, 2, 0, NULL) == 0, "change applied by the host");
     a = (AudioObjectPropertyAddress){kAudioStreamPropertyVirtualFormat, kAudioObjectPropertyScopeGlobal, 0};
     AudioStreamBasicDescription fin, fout;
     DRV->GetPropertyData(gDrv, 3, getpid(), &a, 0, NULL, sizeof fin, &size, &fin);
     DRV->GetPropertyData(gDrv, 4, getpid(), &a, 0, NULL, sizeof fout, &size, &fout);
-    CHECK(fout.mChannelsPerFrame == 4 && fin.mChannelsPerFrame == 6, "formats : %u sorties, %u entrées",
+    CHECK(fout.mChannelsPerFrame == 4 && fin.mChannelsPerFrame == 6, "formats: %u outputs, %u inputs",
           fout.mChannelsPerFrame, fin.mChannelsPerFrame);
     size_t rsize2 = lw_shm_size(8192, 4, 6);
     void *shmem2 = NULL;
     void *region2 = lw_shm_alloc(rsize2, &shmem2);
-    CHECK(region2 && lw_shm_init(region2, rsize2, 48000, 8192, 4, 6, &clock) == 0, "région n° 2 créée (4 x 6)");
+    CHECK(region2 && lw_shm_init(region2, rsize2, 48000, 8192, 4, 6, &clock) == 0, "region #2 created (4 x 6)");
     lw_xpc_server_set_shmem(server, shmem2);
-    CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (rattachement)");
+    CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (reattach)");
     float six[512 * 6], back[512 * 6];
     for (UInt32 i = 0; i < 512 * 6; i++) {
         six[i] = (float)i / 4096.0f;
@@ -312,53 +312,53 @@ int main(int argc, char **argv) {
     lw_ring_write(region2, LW_FROM_NET, six, 512);
     lw_ring_write(region2, LW_FROM_NET, six, 256); /* Priming margin */
     DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, back, NULL);
-    CHECK(memcmp(six, back, sizeof six) == 0, "6 entrées restituées depuis la nouvelle région");
+    CHECK(memcmp(six, back, sizeof six) == 0, "6 inputs read back from the new region");
     poll();
-    CHECK(gConfigRequests == 1, "région à jour : plus de demande");
+    CHECK(gConfigRequests == 1, "region up to date: no further request");
     CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
 
-    printf("Noms du périphérique et des canaux\n");
+    printf("Device and channel names\n");
     {
         UInt32 before = gPropertyChanges;
-        gNames = ",\"name\":\"OpenLW (2 - Studio A)\",\"input_names\":[\"2 - Studio A G\",\"2 - Studio A D\",\"\",\"\","
-                 "\"Régie \\\"A\\\" G\",\"\"],\"output_names\":[\"4005 - STUDIO MAC G\",\"4005 - STUDIO MAC D\",\"\",\"\"]";
+        gNames = ",\"name\":\"OpenLW (2 - Studio A)\",\"input_names\":[\"2 - Studio A L\",\"2 - Studio A R\",\"\",\"\","
+                 "\"Café \\\"A\\\" L\",\"\"],\"output_names\":[\"4005 - STUDIO MAC L\",\"4005 - STUDIO MAC R\",\"\",\"\"]";
         poll();
         char name[128];
         CHECK(get_str(2, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW (2 - Studio A)") == 0,
-              "nom du périphérique : %s", name);
-        CHECK(gPropertyChanges > before, "changement de nom signalé à l'hôte");
+              "device name: %s", name);
+        CHECK(gPropertyChanges > before, "name change reported to the host");
         AudioObjectPropertyAddress ea = {kAudioObjectPropertyElementName, kAudioObjectPropertyScopeInput, 1};
         CFStringRef s = NULL;
         UInt32 sz = sizeof s;
         CHECK(DRV->GetPropertyData(gDrv, 2, getpid(), &ea, 0, NULL, sz, &sz, &s) == 0 && s &&
-                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "2 - Studio A G") == 0,
-              "entrée 1 : %s", name);
+                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "2 - Studio A L") == 0,
+              "input 1: %s", name);
         if (s) CFRelease(s);
         ea.mElement = 5;
         sz = sizeof s;
         CHECK(DRV->GetPropertyData(gDrv, 2, getpid(), &ea, 0, NULL, sz, &sz, &s) == 0 && s &&
-                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "Régie \"A\" G") == 0,
-              "entrée 5 (accent et guillemets échappés) : %s", name);
+                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "Café \"A\" L") == 0,
+              "input 5 (accent, escaped quotes): %s", name);
         if (s) CFRelease(s);
         ea.mScope = kAudioObjectPropertyScopeOutput;
         ea.mElement = 2;
         sz = sizeof s;
         CHECK(DRV->GetPropertyData(gDrv, 2, getpid(), &ea, 0, NULL, sz, &sz, &s) == 0 && s &&
-                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "4005 - STUDIO MAC D") == 0,
-              "sortie 2 : %s", name);
+                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "4005 - STUDIO MAC R") == 0,
+              "output 2: %s", name);
         if (s) CFRelease(s);
         ea.mElement = 9;
-        CHECK(!DRV->HasProperty(gDrv, 2, getpid(), &ea), "sortie 9 inexistante : pas de nom");
+        CHECK(!DRV->HasProperty(gDrv, 2, getpid(), &ea), "output 9 does not exist: no name");
         before = gPropertyChanges;
         poll();
-        CHECK(gPropertyChanges == before, "noms inchangés : pas de notification");
+        CHECK(gPropertyChanges == before, "names unchanged: no notification");
         gNames = "";
         poll();
         CHECK(get_str(2, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW") == 0,
-              "sans noms du daemon : « %s »", name);
+              "without names from the daemon: “%s”", name);
     }
 
-    printf("Marge d'entrée fixée par le daemon\n");
+    printf("Input margin set by the daemon\n");
     {
         enum { C = 6 };
         static float few[1024 * C], got[512 * C];
@@ -370,17 +370,17 @@ int main(int argc, char **argv) {
         }
         lw_ring_write(region2, LW_FROM_NET, few, 639); /* 512 + 127: below the 128-frame margin */
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got, NULL);
-        CHECK(got[0] == 0.0f, "512 + 127 trames : pas encore amorcé");
+        CHECK(got[0] == 0.0f, "512 + 127 frames: not primed yet");
         lw_ring_write(region2, LW_FROM_NET, few, 1);
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got, NULL);
-        CHECK(got[0] == 0.75f, "512 + 128 trames : amorcé avec la marge du préréglage faible");
+        CHECK(got[0] == 0.75f, "512 + 128 frames: primed with the low preset margin");
         CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
         gNames = ",\"input_margin\":256";
         poll();
         gNames = "";
     }
 
-    printf("Entrée par blocs de 4096 trames (cas d'Audacity)\n");
+    printf("Input in 4096-frame blocks (Audacity case)\n");
     {
         enum { B = 4096, C = 6 };
         static float blk[B * C], wr[48 * C];
@@ -421,9 +421,9 @@ int main(int argc, char **argv) {
             lw_ring_write(region2, LW_FROM_NET, wr + 24 * C, 24);
             written += 48;
         }
-        CHECK(reads >= 34 && silent_blocks == 0, "%llu blocs lus, aucun bloc silencieux", (unsigned long long)reads);
-        CHECK(stale == 0, "audio ancien jeté au démarrage (%llu trames anciennes lues)", (unsigned long long)stale);
-        CHECK(breaks == 0, "rampe continue d'un bloc à l'autre (%llu ruptures)", (unsigned long long)breaks);
+        CHECK(reads >= 34 && silent_blocks == 0, "%llu blocks read, no silent block", (unsigned long long)reads);
+        CHECK(stale == 0, "stale audio discarded at start (%llu stale frames read)", (unsigned long long)stale);
+        CHECK(breaks == 0, "ramp continuous across blocks (%llu breaks)", (unsigned long long)breaks);
         /* Underrun: daemon stops for 200 ms; silence, then clean resumption. */
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, B, &cycle_info, blk, NULL);
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, B, &cycle_info, blk, NULL);
@@ -431,7 +431,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < B * C; i++) {
             zero &= blk[i] == 0.0f;
         }
-        CHECK(zero, "manque de données : bloc silencieux");
+        CHECK(zero, "underrun: silent block");
         for (int i = 0; i < B + 300; i++) {
             for (int c = 0; c < C; c++) {
                 wr[c] = 0.25f;
@@ -439,10 +439,10 @@ int main(int argc, char **argv) {
             lw_ring_write(region2, LW_FROM_NET, wr, 1);
         }
         DRV->DoIOOperation(gDrv, 2, 3, 1, kAudioServerPlugInIOOperationReadInput, B, &cycle_info, blk, NULL);
-        CHECK(blk[0] == 0.25f && blk[B * C - 1] == 0.25f, "réamorçage après le manque");
+        CHECK(blk[0] == 0.25f && blk[B * C - 1] == 0.25f, "repriming after the underrun");
         CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
     }
-    printf("Deux périphériques (OpenLW In / OpenLW Out)\n");
+    printf("Two devices (OpenLW In / OpenLW Out)\n");
     {
         UInt32 before = gPropertyChanges;
         gNames = ",\"layout\":\"split\",\"input_device_name\":\"OpenLW In (2 - Studio A)\"";
@@ -451,17 +451,17 @@ int main(int argc, char **argv) {
         AudioObjectID devs[4] = {0};
         UInt32 sz = sizeof devs;
         DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &la, 0, NULL, sz, &sz, devs);
-        CHECK(sz == 2 * sizeof(AudioObjectID) && devs[0] == 5 && devs[1] == 7, "liste : %u périphérique(s), %u et %u",
+        CHECK(sz == 2 * sizeof(AudioObjectID) && devs[0] == 5 && devs[1] == 7, "list: %u device(s), %u and %u",
               (unsigned)(sz / sizeof(AudioObjectID)), devs[0], devs[1]);
-        CHECK(gPropertyChanges > before, "changement de la liste signalé à l'hôte");
+        CHECK(gPropertyChanges > before, "list change reported to the host");
         char name[128];
         CHECK(get_str(5, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW In (2 - Studio A)") == 0,
-              "entrée : %s", name);
+              "input: %s", name);
         CHECK(get_str(7, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW Out") == 0,
-              "sortie : %s", name);
+              "output: %s", name);
         CHECK(get_str(5, kAudioDevicePropertyDeviceUID, name, sizeof name) == 0 &&
                   strcmp(name, "fr.francois-brille.openlw.device.in") == 0,
-              "UID : %s", name);
+              "UID: %s", name);
         AudioObjectPropertyAddress sa = {kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput, 0};
         AudioObjectID st[2] = {0};
         sz = sizeof st;
@@ -471,60 +471,60 @@ int main(int argc, char **argv) {
         sa.mScope = kAudioObjectPropertyScopeOutput;
         sz = sizeof st;
         DRV->GetPropertyData(gDrv, 5, getpid(), &sa, 0, NULL, sz, &sz, st);
-        CHECK(in_n == 1 && in_stream == 6 && sz == 0, "OpenLW In : un flux d'entrée (6), aucune sortie");
+        CHECK(in_n == 1 && in_stream == 6 && sz == 0, "OpenLW In: one input stream (6), no output");
         sz = sizeof st;
         DRV->GetPropertyData(gDrv, 7, getpid(), &sa, 0, NULL, sz, &sz, st);
-        CHECK(sz == sizeof(AudioObjectID) && st[0] == 8, "OpenLW Out : un flux de sortie (8)");
+        CHECK(sz == sizeof(AudioObjectID) && st[0] == 8, "OpenLW Out: one output stream (8)");
         AudioObjectPropertyAddress fa = {kAudioStreamPropertyVirtualFormat, kAudioObjectPropertyScopeGlobal, 0};
         AudioStreamBasicDescription f6, f8;
         sz = sizeof f6;
         DRV->GetPropertyData(gDrv, 6, getpid(), &fa, 0, NULL, sz, &sz, &f6);
         sz = sizeof f8;
         DRV->GetPropertyData(gDrv, 8, getpid(), &fa, 0, NULL, sz, &sz, &f8);
-        CHECK(f6.mChannelsPerFrame == 6 && f8.mChannelsPerFrame == 4, "formats : %u entrées, %u sorties",
+        CHECK(f6.mChannelsPerFrame == 6 && f8.mChannelsPerFrame == 4, "formats: %u inputs, %u outputs",
               f6.mChannelsPerFrame, f8.mChannelsPerFrame);
 
         /* Separate I/O: read on OpenLW In, write on OpenLW Out. */
-        CHECK(DRV->StartIO(gDrv, 5, 1) == 0 && DRV->StartIO(gDrv, 7, 2) == 0, "StartIO des deux périphériques");
+        CHECK(DRV->StartIO(gDrv, 5, 1) == 0 && DRV->StartIO(gDrv, 7, 2) == 0, "StartIO on both devices");
         static float six[1024 * 6], back[512 * 6], four[512 * 4], got4[512 * 4];
         for (int i = 0; i < 1024 * 6; i++) {
             six[i] = 0.5f;
         }
         lw_ring_write(region2, LW_FROM_NET, six, 1024);
         DRV->DoIOOperation(gDrv, 5, 6, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, back, NULL);
-        CHECK(back[0] == 0.5f && back[512 * 6 - 1] == 0.5f, "OpenLW In restitue l'audio du réseau");
+        CHECK(back[0] == 0.5f && back[512 * 6 - 1] == 0.5f, "OpenLW In returns network audio");
         for (int i = 0; i < 512 * 4; i++) {
             four[i] = 0.25f;
         }
         DRV->DoIOOperation(gDrv, 7, 8, 2, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, four, NULL);
         lw_ring_read(region2, LW_TO_NET, got4, 512);
-        CHECK(got4[0] == 0.25f && got4[512 * 4 - 1] == 0.25f, "OpenLW Out envoie vers le réseau");
+        CHECK(got4[0] == 0.25f && got4[512 * 4 - 1] == 0.25f, "OpenLW Out sends to the network");
         CHECK(DRV->DoIOOperation(gDrv, 5, 8, 1, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, four, NULL) != 0,
-              "flux d'un autre périphérique refusé");
+              "stream of another device rejected");
 
         /* Channel count changed: one request per device, applied per direction. */
         UInt32 req = gConfigRequests;
         gGen = 3, gTo = 2, gFrom = 2;
         poll();
-        CHECK(gConfigRequests == req + 2, "deux demandes de changement de configuration (%u)", gConfigRequests - req);
+        CHECK(gConfigRequests == req + 2, "two configuration change requests (%u)", gConfigRequests - req);
         DRV->StopIO(gDrv, 5, 1);
-        CHECK(DRV->PerformDeviceConfigurationChange(gDrv, 5, 0, NULL) == 0, "changement appliqué à OpenLW In");
+        CHECK(DRV->PerformDeviceConfigurationChange(gDrv, 5, 0, NULL) == 0, "change applied to OpenLW In");
         sz = sizeof f6;
         DRV->GetPropertyData(gDrv, 6, getpid(), &fa, 0, NULL, sz, &sz, &f6);
         sz = sizeof f8;
         DRV->GetPropertyData(gDrv, 8, getpid(), &fa, 0, NULL, sz, &sz, &f8);
-        CHECK(f6.mChannelsPerFrame == 2 && f8.mChannelsPerFrame == 4, "entrées à 2, sorties encore à 4 (Out en marche)");
+        CHECK(f6.mChannelsPerFrame == 2 && f8.mChannelsPerFrame == 4, "inputs at 2, outputs still at 4 (Out running)");
         DRV->StopIO(gDrv, 7, 2);
         DRV->PerformDeviceConfigurationChange(gDrv, 7, 0, NULL);
         sz = sizeof f8;
         DRV->GetPropertyData(gDrv, 8, getpid(), &fa, 0, NULL, sz, &sz, &f8);
-        CHECK(f8.mChannelsPerFrame == 2, "sorties à 2 après OpenLW Out");
+        CHECK(f8.mChannelsPerFrame == 2, "outputs at 2 after OpenLW Out");
 
         gNames = "";
         poll();
         sz = sizeof devs;
         DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &la, 0, NULL, sz, &sz, devs);
-        CHECK(sz == sizeof(AudioObjectID) && devs[0] == 2, "retour à un périphérique duplex");
+        CHECK(sz == sizeof(AudioObjectID) && devs[0] == 2, "back to one duplex device");
     }
 
     use_endpoint(NULL);
@@ -538,6 +538,6 @@ int main(int argc, char **argv) {
     free(src);
     free(ahead);
 
-    printf("%s : %d échec(s)\n", gFailures ? "ÉCHEC" : "SUCCÈS", gFailures);
+    printf("%s: %d failure(s)\n", gFailures ? "FAIL" : "SUCCESS", gFailures);
     return gFailures ? 1 : 0;
 }

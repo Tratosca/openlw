@@ -34,7 +34,7 @@ enum MacAudio {
     }
 
     static func name(_ id: AudioObjectID) -> String {
-        string(id, kAudioObjectPropertyName) ?? "périphérique \(id)"
+        string(id, kAudioObjectPropertyName) ?? "device \(id)"
     }
 
     /// OpenLW input/output device if loaded by CoreAudio.

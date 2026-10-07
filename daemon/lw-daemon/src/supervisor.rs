@@ -51,8 +51,8 @@ impl Worker {
         self.stop.request();
         match self.handle.join() {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => error!("{} : {e}", self.name),
-            Err(_) => error!("{} : thread interrompu", self.name),
+            Ok(Err(e)) => error!("{}: {e}", self.name),
+            Err(_) => error!("{}: thread panicked", self.name),
         }
     }
 }
@@ -117,7 +117,7 @@ impl Session {
         shared.reset_streams(&nic, cfg.auto_iface());
         let discovery = {
             let (nic, dir) = (nic.clone(), shared.directory().clone());
-            Worker::spawn("découverte".into(), &stop, move |s| {
+            Worker::spawn("discovery".into(), &stop, move |s| {
                 discovery::run(&nic, &dir, &s)
             })?
         };
@@ -192,7 +192,7 @@ impl Session {
             };
             if let (Some(chs), Some(port)) = (&src.device_channels, &entry.port) {
                 table.outputs.push(device::OutRoute {
-                    label: format!("{} → canal {}", src.name, src.channel),
+                    label: format!("{} → channel {}", src.name, src.channel),
                     device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
                     writer: port.writer(),
                 });
@@ -248,7 +248,7 @@ impl Session {
             if let (Some(chs), Some(port)) = (&d.device_channels, &entry.port) {
                 let t = key.target;
                 table.inputs.push(device::InRoute {
-                    label: format!("{} → entrées {:?}", d.label(), chs),
+                    label: format!("{} → inputs {:?}", d.label(), chs),
                     device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
                     reader: bus::JitterReader::new(port.reader(), t, 4 * t),
                 });
@@ -265,7 +265,7 @@ impl Session {
         let patched = table.outputs.len() + table.inputs.len();
         match routes {
             Some(h) => h.set(table),
-            None if patched > 0 => error!("patch ignoré : aucun périphérique virtuel actif"),
+            None if patched > 0 => error!("patch ignored: no active virtual device"),
             None => {}
         }
 
@@ -278,7 +278,7 @@ impl Session {
             }
             if let Some(k) = adv_key {
                 let mut adv = Advertiser::new(&nic, &cfg.terminal(), cfg.adv_sources())?;
-                let w = Worker::spawn("annonce".into(), &self.stop, move |s| adv.run(&s))?;
+                let w = Worker::spawn("advertiser".into(), &self.stop, move |s| adv.run(&s))?;
                 self.advertiser = Some((k, w));
             }
         }
@@ -289,7 +289,7 @@ impl Session {
         });
 
         info!(
-            "session sur {} ({}, {}) : {} flux émis, {} reçus, {patched} route(s) vers le périphérique ; {started} flux démarré(s), {stopped} arrêté(s)",
+            "session on {} ({}, {}): {} stream(s) transmitted, {} received, {patched} device route(s); {started} stream(s) started, {stopped} stopped",
             nic.name,
             nic.friendly,
             nic.ipv4,
@@ -336,8 +336,8 @@ impl Session {
 fn join_error(w: Worker) -> Option<String> {
     match w.handle.join() {
         Ok(Ok(())) => None,
-        Ok(Err(e)) => Some(format!("{} : {e}", w.name)),
-        Err(_) => Some(format!("{} : thread interrompu", w.name)),
+        Ok(Err(e)) => Some(format!("{}: {e}", w.name)),
+        Err(_) => Some(format!("{}: thread panicked", w.name)),
     }
 }
 
@@ -356,7 +356,7 @@ pub fn run(
     let server = match control {
         Some(ep) => {
             let server = shared.serve(ep)?;
-            info!("canal de contrôle publié : {ep}");
+            info!("control channel published: {ep}");
             Some(server)
         }
         None => None,
@@ -381,7 +381,7 @@ pub fn supervise(
     let detector = {
         let (heard, stop) = (shared.heard().clone(), stop.clone());
         std::thread::Builder::new()
-            .name("détection".into())
+            .name("detector".into())
             .spawn(move || crate::detect::run(&heard, &stop))?
     };
     let (reload_tx, reload_rx) = std::sync::mpsc::channel::<Config>();
@@ -440,19 +440,19 @@ pub fn supervise(
                         };
                         match lw_pw::start(d.region.clone(), cfg, report) {
                             Ok(b) => nodes = Some(b),
-                            Err(e) => error!("nœuds PipeWire : {e}"),
+                            Err(e) => error!("PipeWire nodes: {e}"),
                         }
                     }
                     info!(
-                        "périphérique virtuel n° {generation} : {} sorties vers le réseau, {} entrées depuis le réseau{}",
+                        "virtual device #{generation}: {} outputs to the network, {} inputs from the network{}",
                         dc.channels_to_net,
                         dc.channels_from_net,
-                        if dc.loopback { ", boucle interne" } else { "" }
+                        if dc.loopback { ", internal loopback" } else { "" }
                     );
                     dev = Some((dc, ds, d));
                 }
                 Err(e) => {
-                    error!("périphérique virtuel : {e}");
+                    error!("virtual device: {e}");
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
@@ -494,7 +494,7 @@ pub fn supervise(
                                 last_error.clear();
                             }
                             Err(e) => {
-                                let msg = format!("session réseau impossible : {e}");
+                                let msg = format!("cannot start network session: {e}");
                                 if msg != last_error {
                                     error!("{msg}");
                                     last_error = msg;
@@ -509,9 +509,9 @@ pub fn supervise(
                         }
                         shared.set_searching(auto);
                         if auto {
-                            info!("recherche du réseau Livewire (annonces sur 239.192.255.3)");
+                            info!("searching for the Livewire network (advertisements on 239.192.255.3)");
                         } else {
-                            info!("interface {} absente : en attente", current.iface);
+                            info!("interface {} absent: waiting", current.iface);
                         }
                     }
                 }
@@ -520,7 +520,7 @@ pub fn supervise(
                 // Same interface: apply changes live, stream by stream.
                 if let Some(s) = session.as_mut() {
                     if let Err(e) = s.apply(&current, &shared, routes.as_ref()) {
-                        error!("modification inapplicable : {e}");
+                        error!("cannot apply change: {e}");
                     }
                 }
             }
@@ -550,9 +550,7 @@ pub fn supervise(
     }
     if let Some((_, ds, d)) = dev.take() {
         ds.request();
-        d.thread
-            .join()
-            .map_err(|_| "thread du périphérique interrompu")?;
+        d.thread.join().map_err(|_| "device thread panicked")?;
     }
     let _ = detector.join();
     Ok(())

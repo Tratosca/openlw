@@ -16,13 +16,11 @@ Prerequisite: Xcode (macOS 26 SDK or later for `NSGlassEffectView`). Before macO
 
 ## Window
 
-The current app uses French labels; the descriptions below explain their function in English.
-
 | Area | Contents | XPC commands |
 |---|---|---|
 | Livewire network | Active interface or search status; automatic selection (interface receiving Livewire advertisements) or forced Ethernet interface; output advertisement | `status` (5 Hz), `ifaces`, `set_iface`, `set_advertise` |
 | Mac inputs | Received channel count (1–16 stereo); default Mac input and button to select OpenLW; matrix rows: discovered sources (ADV), configured unadvertised streams, and manually entered channels; columns: device input pairs. Click to patch or release. Meter and state per pair (free, waiting, receiving audio) | `sources`, `config` (2 s), `patch_input`, `unpatch_input`, `remove_input` |
-| Mac outputs | Transmitted channel count (1–16 stereo); default Mac output and button to select OpenLW; one row per output pair: meter, channel, advertised name, format (Standard 5 ms, AES67 1 ms, Livestream 0.25 ms), transmission checkbox | `set_device_channels`, `patch_output`, `unpatch_output` |
+| Mac outputs | Transmitted channel count (1–16 stereo); default Mac output and button to select OpenLW; one row per output pair: meter, channel, advertised name, format (Standard 5 ms, AES67 1 ms, Livestream 0.25 ms), **Transmit** checkbox | `set_device_channels`, `patch_output`, `unpatch_output` |
 
 Reducing the channel count removes out-of-range patches after confirmation. The device is recreated, briefly interrupting audio in applications using it.
 
@@ -36,13 +34,13 @@ Reducing the channel count removes out-of-range patches after confirmation. The 
 
 XPC command: `set_advanced` (`terminal_name`, `latency`, `dscp`); CLI: `lw-daemon ctl set-advanced`.
 
-OpenLW menu > **Désinstaller OpenLW** (Uninstall OpenLW): runs `/Library/Application Support/OpenLW/uninstall.sh` with administrator privileges (provided by the installer).
+OpenLW menu > **Uninstall OpenLW…**: runs `/Library/Application Support/OpenLW/uninstall.sh` with administrator privileges (provided by the installer).
 
 **Preview:** the headphone button at the start of a row plays the source on the Mac's default output without patching it; a level meter replaces the provenance indicator. One source at a time; click again to stop. The app receives multicast directly on the session interface (daemon and app share port 5004 through `SO_REUSEPORT`). Stereo playback at 48 kHz through AudioQueue, with a 30 ms buffer; only channels 1 and 2 of a surround source are played. Preview is rejected when the Mac's default output is “OpenLW”, which would send it back to the network.
 
 **Matrix rows:** discovered sources, manually entered channels (persisted between launches), and configured but unadvertised streams. The ✕ button removes a manual or unadvertised row and releases its inputs if patched.
 
-**Audio device:** one “OpenLW” duplex device (fixed name, default), or separate “OpenLW In” and “OpenLW Out” devices. With separate devices, the option to name devices after patched channels produces names such as “OpenLW In (2 - Studio A)” and “OpenLW Out (31 - Mac 1-2)”. Channels always carry their source name (currently, for example, “2 - Studio A G”), visible in Audio MIDI Setup and applications that display it. Audacity stores devices by name: reselect the device after changing its layout or name.
+**Audio device:** one “OpenLW” duplex device (fixed name, default), or separate “OpenLW In” and “OpenLW Out” devices. With separate devices, the option to name devices after patched channels produces names such as “OpenLW In (2 - Studio A)” and “OpenLW Out (31 - Mac 1-2)”. Channels always carry their source name (currently, for example, “2 - Studio A L”), visible in Audio MIDI Setup and applications that display it. Audacity stores devices by name: reselect the device after changing its layout or name.
 
 A surround source occupies eight inputs starting at the clicked pair. Changing a transmitted output's channel stops the old channel before transmitting on the new one. Test sources with no associated outputs (configuration sine generator) are hidden.
 

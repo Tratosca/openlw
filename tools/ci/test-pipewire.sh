@@ -31,11 +31,11 @@ audio_nodes() {
             | grep -q "\"audio_nodes\": $want" && { echo "ok   status.audio_nodes = $want"; return 0; }
         sleep 0.5
     done
-    echo "ÉCHEC : status.audio_nodes différent de $want"; exit 1
+    echo "FAIL: status.audio_nodes is not $want"; exit 1
 }
 wait_nodes() {
     for i in $(seq 1 30); do [ "$(nodes)" = 2 ] && return 0; sleep 0.5; done
-    echo "ÉCHEC : nœuds absents"; cat /tmp/daemon.log; exit 1
+    echo "FAIL: nodes missing"; cat /tmp/daemon.log; exit 1
 }
 
 echo "--- daemon started before PipeWire"
@@ -77,7 +77,7 @@ peak = max((abs(l) for l, _ in active), default=0)
 mismatch = sum(1 for l, r in active if abs(l + r) > 1)
 ok = len(active) > 48000 and 15800 < peak < 16600 and mismatch == 0
 print("%s recorded %d frames, %d active, peak %d (expected ~16384), L/R mismatches %d"
-      % ("ok  " if ok else "ÉCHEC", n, len(active), peak, mismatch))
+      % ("ok  " if ok else "FAIL", n, len(active), peak, mismatch))
 sys.exit(0 if ok else 1)
 EOF
 
@@ -93,4 +93,4 @@ echo "ok   nodes published again after PipeWire restart"
 audio_nodes true
 
 echo "--- daemon log"; cat /tmp/daemon.log
-echo "SUCCÈS"'
+echo "SUCCESS"'

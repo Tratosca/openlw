@@ -6,17 +6,17 @@ WinUI 3 configuration app (C#, .NET 10, Windows App SDK, unpackaged and self-con
 
 | Section | Contents |
 |---|---|
-| Réseau Livewire | Connection state, interface (automatic or forced), source advertisement |
-| Pilote audio | How to select the ASIO® driver “OpenLW” in host applications; ASIO Compatible logo and trademark notice |
-| Entrées | Patch matrix (discovered, manual and unadvertised sources × input pairs), per-pair meters and state, headphone preview |
-| Sorties | One row per output pair: meter, Livewire channel, advertised name, format, transmission |
-| Réglages avancés | Advertised name, receive latency, DSCP |
+| Livewire network | Connection state, interface (automatic or forced), source advertisement |
+| Audio driver | How to select the ASIO® driver “OpenLW” in host applications; ASIO Compatible logo and trademark notice |
+| Inputs | Patch matrix (discovered, manual and unadvertised sources × input pairs), per-pair meters and state, headphone preview |
+| Outputs | One row per output pair: meter, Livewire channel, advertised name, format, transmission |
+| Advanced settings | Advertised name, receive latency, DSCP |
 
-User-facing strings are in French, like the macOS app.
+User-facing strings are in English, with the same wording as the macOS and Linux apps.
 
 ## Service connection
 
-Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon`, one JSON request per line ([ADR 0007](../../docs/adr/0007-canal-de-controle.md)). The app opens the pipe with exactly the rights granted to authenticated users and at Identification level. It runs as the signed-in user (`asInvoker`): changes are allowed to members of the local `OpenLW Users` group (added by the installer) and to elevated administrators; otherwise the service error is shown.
+Named pipe `\\.\pipe\fr.francois-brille.openlw.daemon`, one JSON request per line ([ADR 0007](../../docs/adr/0007-control-channel.md)). The app opens the pipe with exactly the rights granted to authenticated users and at Identification level. It runs as the signed-in user (`asInvoker`): changes are allowed to members of the local `OpenLW Users` group (added by the installer) and to elevated administrators; otherwise the service error is shown.
 
 ## Preview
 

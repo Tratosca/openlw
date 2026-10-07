@@ -128,7 +128,7 @@ impl Session {
                     .next()
                     .unwrap_or("")
                     .parse()
-                    .map_err(|_| Error::Invalid("adresse c="))?;
+                    .map_err(|_| Error::Invalid("c= address"))?;
                 sess.ttl = parts.next().and_then(|t| t.parse().ok());
                 have_c = true;
             } else if let Some(v) = line.strip_prefix("m=audio ") {
@@ -152,11 +152,11 @@ impl Session {
                 sess.bits = codec
                     .strip_prefix('L')
                     .and_then(|b| b.parse().ok())
-                    .ok_or(Error::Invalid("codec non linéaire"))?;
+                    .ok_or(Error::Invalid("non-linear codec"))?;
                 sess.rate = f
                     .next()
                     .and_then(|x| x.parse().ok())
-                    .ok_or(Error::Invalid("fréquence rtpmap"))?;
+                    .ok_or(Error::Invalid("rtpmap rate"))?;
                 sess.channels = f.next().and_then(|x| x.parse().ok()).unwrap_or(1);
                 have_map = true;
             } else if let Some(v) = line.strip_prefix("a=ptime:") {
@@ -180,7 +180,7 @@ impl Session {
         }
         if !(have_c && have_m && have_map) {
             return Err(Error::Invalid(
-                "SDP incomplet : c=, m=audio et a=rtpmap requis",
+                "incomplete SDP: c=, m=audio and a=rtpmap required",
             ));
         }
         if sess.samples_per_packet == 0 {

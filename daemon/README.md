@@ -1,6 +1,6 @@
 # Daemon — Rust Livewire / AES67 stack
 
-Cargo workspace for OpenLW's network service ([ADR 0001](../docs/adr/0001-daemon-rust.md)), for macOS, Linux, and Windows on x86_64 and ARM64 ([ADR 0006](../docs/adr/0006-multiplateforme.md)).
+Cargo workspace for OpenLW's network service ([ADR 0001](../docs/adr/0001-daemon-rust.md)), for macOS, Linux, and Windows on x86_64 and ARM64 ([ADR 0006](../docs/adr/0006-cross-platform.md)).
 
 | Crate | Purpose | Status |
 |---|---|---|
@@ -31,7 +31,7 @@ target/release/lw-daemon run --config lw-daemon.json --control    # Format: src/
 target/release/lw-daemon ctl status                               # Service control channel
 ```
 
-Control channel ([ADR 0007](../docs/adr/0007-canal-de-controle.md)): `--control` without a value publishes the installed service endpoint (XPC on macOS, Unix socket on Linux, named pipe on Windows); use `--control unix:/tmp/lw.sock` or `pipe:NAME` for testing. On Windows, the Service Control Manager starts `lw-daemon service` ([windows/README.md](../windows/README.md)).
+Control channel ([ADR 0007](../docs/adr/0007-control-channel.md)): `--control` without a value publishes the installed service endpoint (XPC on macOS, Unix socket on Linux, named pipe on Windows); use `--control unix:/tmp/lw.sock` or `pipe:NAME` for testing. On Windows, the Service Control Manager starts `lw-daemon service` ([windows/README.md](../windows/README.md)).
 
 Formats: `standard` (240 samples), `aes67` (48), `livestream` (12), `surround` (60, eight channels, 239.196). Use `--tos 136` for AF41. Multicast loopback is disabled on a physical NIC: a transmitter does not receive its own streams.
 

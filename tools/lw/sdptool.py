@@ -46,7 +46,7 @@ def check(text):
     problems, info = [], {}
     lines = [l.strip() for l in text.replace("\r\n", "\n").split("\n") if l.strip()]
     if not lines or lines[0] != "v=0":
-        problems.append("premiere ligne differente de v=0")
+        problems.append("first line is not v=0")
     for line in lines:
         if line.startswith("c=IN IP4 "):
             info["group"] = line[9:].split("/")[0]
@@ -58,7 +58,7 @@ def check(text):
             if m:
                 info["rtpmap"] = tuple(int(x) for x in m.groups())
             else:
-                problems.append(f"rtpmap non lineaire ou incomplet : {line}")
+                problems.append(f"rtpmap not linear or incomplete: {line}")
         elif line.startswith("a=ptime:"):
             info["ptime"] = float(line[8:])
         elif line.startswith("a=ts-refclk:"):
@@ -67,13 +67,13 @@ def check(text):
             info["mediaclk"] = line[11:]
     for key in ("group", "port", "rtpmap"):
         if key not in info:
-            problems.append(f"{key} absent")
+            problems.append(f"{key} missing")
     if "refclk" not in info:
-        problems.append("a=ts-refclk absent (pas de reference PTP ; pas de grandmaster)")
+        problems.append("a=ts-refclk missing (no PTP reference; no grandmaster)")
     if "mediaclk" not in info:
-        problems.append("a=mediaclk absent")
+        problems.append("a=mediaclk missing")
     if "rtpmap" in info and info["rtpmap"][2] != 48000:
-        problems.append("frequence differente de 48000")
+        problems.append("rate is not 48000")
     return info, problems
 
 
@@ -87,7 +87,7 @@ def main(argv=None):
     g.add_argument("--pt", type=int, default=96)
     g.add_argument("--samples", type=int, default=48)
     g.add_argument("--channels", type=int, default=2)
-    g.add_argument("--gm", help="identite du grandmaster, ex. 00-1D-C1-FF-FE-12-34-56")
+    g.add_argument("--gm", help="grandmaster identity, e.g. 00-1D-C1-FF-FE-12-34-56")
     g.add_argument("--domain", type=int, default=0)
     c = sub.add_parser("check")
     c.add_argument("file")
@@ -100,8 +100,8 @@ def main(argv=None):
     info, problems = check(open(args.file, encoding="latin-1").read())
     print(info)
     for p in problems:
-        print("ATTENTION :", p)
-    return 1 if any("absent" in p and "refclk" not in p and "mediaclk" not in p for p in problems) else 0
+        print("WARNING:", p)
+    return 1 if any("missing" in p and "refclk" not in p and "mediaclk" not in p for p in problems) else 0
 
 
 if __name__ == "__main__":

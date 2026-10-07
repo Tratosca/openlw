@@ -13,7 +13,7 @@ if [ "$PLATFORM" = linux/amd64 ]; then ARCH=amd64 RPMARCH=x86_64; else ARCH=arm6
 DIST=linux/packaging/dist
 
 # t MESSAGE COMMAND...: fails the run when COMMAND fails.
-lib='t() { m=$1; shift; if "$@" >/dev/null 2>&1; then echo "ok   $m"; else echo "ÉCHEC $m"; exit 1; fi; }'
+lib='t() { m=$1; shift; if "$@" >/dev/null 2>&1; then echo "ok   $m"; else echo "FAIL $m"; exit 1; fi; }'
 check='
 t "unit installed" test -f /usr/lib/systemd/user/openlw.service
 t "user unit enabled for all users" test -L /etc/systemd/user/default.target.wants/openlw.service
@@ -60,4 +60,4 @@ $check_app
 dnf remove -y -q openlw openlw-daemon >/dev/null
 $removed"
 fi
-echo SUCCÈS
+echo SUCCESS

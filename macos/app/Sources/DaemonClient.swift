@@ -63,7 +63,7 @@ final class DaemonClient {
         if dict["ok"] as? Bool == true {
             return .success(dict)
         }
-        return .failure(.refused(dict["error"] as? String ?? "erreur inconnue"))
+        return .failure(.refused(dict["error"] as? String ?? "unknown error"))
     }
 }
 
@@ -77,11 +77,11 @@ enum DaemonError: Error {
     var message: String {
         switch self {
         case .unreachable:
-            return "Le service OpenLW ne répond pas. Si le problème persiste, réinstallez OpenLW."
+            return "The OpenLW service is not responding. If the problem persists, reinstall OpenLW."
         case .encoding, .decoding:
-            return "Réponse illisible du service OpenLW. Réinstallez OpenLW pour mettre l'app et le service à la même version."
+            return "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version."
         case .refused(let reason):
-            return "Modification impossible : \(reason)"
+            return "Could not apply the change: \(reason)"
         }
     }
 }

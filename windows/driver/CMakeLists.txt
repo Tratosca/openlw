@@ -11,9 +11,9 @@ set(CMAKE_C_STANDARD 11)
 # Static C/C++ runtime: host applications load the driver without the Visual C++ Redistributable.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-set(ASIOSDK "${CMAKE_CURRENT_SOURCE_DIR}/sdk/ASIOSDK" CACHE PATH "SDK ASIO de Steinberg")
+set(ASIOSDK "${CMAKE_CURRENT_SOURCE_DIR}/sdk/ASIOSDK" CACHE PATH "Steinberg ASIO SDK")
 if(NOT EXISTS "${ASIOSDK}/common/iasiodrv.h")
-    message(FATAL_ERROR "SDK ASIO absent : lancer windows/driver/fetch-sdk.ps1 (ou .sh)")
+    message(FATAL_ERROR "ASIO SDK missing: run windows/driver/fetch-sdk.ps1 (or .sh)")
 endif()
 set(LWSYS "${CMAKE_CURRENT_SOURCE_DIR}/../../daemon/lw-sys/csrc")
 

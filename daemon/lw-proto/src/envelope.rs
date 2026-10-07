@@ -82,10 +82,10 @@ impl Header {
 
     /// Decode and validate header (Envelope version 7 required, like `CEnvelopeLayer1Base::ProcessMessage`).
     pub fn parse(buf: &[u8]) -> Result<Self, Error> {
-        let mut r = Reader::new(buf, "en-tête Envelope");
+        let mut r = Reader::new(buf, "Envelope header");
         let [layer, msg_type, tlv_version, version] = r.array()?;
         if version != ENVELOPE_VERSION {
-            return Err(Error::Invalid("version Envelope différente de 7"));
+            return Err(Error::Invalid("Envelope version is not 7"));
         }
         Ok(Self {
             layer,
@@ -110,7 +110,7 @@ pub fn encode(header: &Header, msg: &TlvMsg) -> Result<Vec<u8>, Error> {
 pub fn decode(buf: &[u8]) -> Result<(Header, TlvMsg), Error> {
     let header = Header::parse(buf)?;
     let body = buf.get(HEADER_LEN..).ok_or(Error::Truncated {
-        what: "datagramme Envelope",
+        what: "Envelope datagram",
         need: HEADER_LEN,
         have: buf.len(),
     })?;

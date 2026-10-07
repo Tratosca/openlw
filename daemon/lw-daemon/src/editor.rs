@@ -77,7 +77,7 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
             device_channels,
         } => {
             if channel.is_some() == group.is_some() {
-                return Err(ConfigError("indiquer soit un canal, soit un groupe".into()));
+                return Err(ConfigError("specify either a channel or a group".into()));
             }
             for d in &mut c.destinations {
                 if d.device_channels
@@ -112,7 +112,7 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
             });
             if c.destinations.len() == before {
                 return Err(ConfigError(format!(
-                    "aucun flux patché sur les entrées {device_channels:?}"
+                    "no stream patched to inputs {device_channels:?}"
                 )));
             }
         }
@@ -123,7 +123,7 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
             kind,
         } => {
             if channel.is_some() == group.is_some() {
-                return Err(ConfigError("indiquer soit un canal, soit un groupe".into()));
+                return Err(ConfigError("specify either a channel or a group".into()));
             }
             let before = c.destinations.len();
             c.destinations.retain(|d| match (channel, group) {
@@ -132,7 +132,7 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
                 _ => true,
             });
             if c.destinations.len() == before {
-                return Err(ConfigError("ce flux n'est pas reçu".into()));
+                return Err(ConfigError("this stream is not being received".into()));
             }
         }
         Edit::PatchOutput {
@@ -161,7 +161,7 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
             c.sources.retain(|s| s.channel != *channel);
             if c.sources.len() == before {
                 return Err(ConfigError(format!(
-                    "aucune source émise sur le canal {channel}"
+                    "no source transmitted on channel {channel}"
                 )));
             }
         }
@@ -182,7 +182,7 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
             }
             if let Some(d) = dscp {
                 if *d > 63 {
-                    return Err(ConfigError(format!("DSCP {d} hors 0..63")));
+                    return Err(ConfigError(format!("DSCP {d} outside 0..63")));
                 }
                 c.tos = u32::from(*d) << 2;
             }
@@ -281,7 +281,7 @@ mod tests {
         // Patched stream: removed too, its inputs are released.
         let c = apply(&c, &remove(7)).unwrap();
         assert!(c.destinations.is_empty());
-        assert!(apply(&c, &remove(7)).is_err(), "flux absent");
+        assert!(apply(&c, &remove(7)).is_err(), "stream absent");
         let backfeed = Edit::RemoveInput {
             channel: Some(7),
             group: None,
@@ -291,7 +291,7 @@ mod tests {
         let c = apply(&base(), &patch_in(7, [1, 2])).unwrap();
         assert!(
             apply(&c, &backfeed).is_err(),
-            "autre type sur le même canal"
+            "different kind on the same channel"
         );
     }
 
@@ -319,9 +319,9 @@ mod tests {
         .unwrap();
         assert!(
             c.sources.is_empty(),
-            "sortie 5-6 disparue : émission arrêtée"
+            "outputs 5-6 gone: transmission stopped"
         );
-        assert_eq!(c.destinations.len(), 1, "seul le patch 1-2 reste");
+        assert_eq!(c.destinations.len(), 1, "only the 1-2 patch remains");
         assert_eq!(c.device_config().channels_from_net, 4);
         assert!(apply(
             &c,
@@ -363,7 +363,7 @@ mod tests {
             latency: None,
             dscp: None,
         };
-        assert!(apply(&c, &long).is_err(), "nom de plus de 32 caractères");
+        assert!(apply(&c, &long).is_err(), "name longer than 32 characters");
         let bad = Edit::SetAdvanced {
             terminal_name: None,
             latency: None,
@@ -386,13 +386,13 @@ mod tests {
         assert_eq!(c.sources[0].device_channels, Some(vec![3, 4]));
         assert!(
             apply(&c, &out(4002, vec![1])).is_err(),
-            "stéréo : 2 sorties exigées"
+            "stereo: 2 outputs required"
         );
         assert!(
             apply(&c, &out(4002, vec![8, 9])).is_err(),
-            "sortie 9 inexistante"
+            "output 9 does not exist"
         );
-        assert!(apply(&c, &out(0, vec![1, 2])).is_err(), "canal 0 invalide");
+        assert!(apply(&c, &out(0, vec![1, 2])).is_err(), "channel 0 invalid");
         let c = apply(&c, &Edit::UnpatchOutput { channel: 4001 }).unwrap();
         assert!(c.sources.is_empty());
     }

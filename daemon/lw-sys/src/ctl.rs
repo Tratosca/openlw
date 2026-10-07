@@ -39,7 +39,7 @@ impl std::error::Error for Error {}
 /// Request caller, identified by transport.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Caller {
-    /// Readable identity (“uid 501”, “PC\\françois”).
+    /// Readable identity (“uid 501”, “PC\\francois”).
     pub label: String,
     /// Effective UID (macOS/Linux).
     pub uid: Option<u32>,
@@ -79,11 +79,11 @@ impl Caller {
 /// Who may modify configuration on this system (user-facing error message).
 pub fn edit_policy() -> &'static str {
     if cfg!(target_os = "macos") {
-        "réservé aux administrateurs de ce Mac (groupe admin)"
+        "reserved for administrators of this Mac (admin group)"
     } else if cfg!(windows) {
-        "réservé aux administrateurs (application lancée en tant qu'administrateur) et aux membres du groupe local « OpenLW Users »"
+        "reserved for administrators (app run as administrator) and members of the local “OpenLW Users” group"
     } else {
-        "réservé à l'utilisateur qui exécute le service OpenLW"
+        "reserved for the user running the OpenLW service"
     }
 }
 
@@ -135,13 +135,11 @@ impl Endpoint {
         if s == "service" {
             return Ok(Self::service());
         }
-        let (scheme, rest) = s.split_once(':').ok_or_else(|| {
-            Error(format!(
-                "point d'accès « {s} » : forme schéma:valeur attendue"
-            ))
-        })?;
+        let (scheme, rest) = s
+            .split_once(':')
+            .ok_or_else(|| Error(format!("endpoint “{s}”: expected scheme:value")))?;
         if rest.is_empty() {
-            return Err(Error(format!("point d'accès « {s} » : valeur vide")));
+            return Err(Error(format!("endpoint “{s}”: empty value")));
         }
         match scheme {
             #[cfg(target_os = "macos")]
@@ -159,7 +157,7 @@ impl Endpoint {
             #[cfg(windows)]
             "pipe" => Ok(Self::Pipe(rest.into())),
             other => Err(Error(format!(
-                "point d'accès « {other}: » non pris en charge sur ce système"
+                "endpoint “{other}:” not supported on this system"
             ))),
         }
     }
@@ -330,7 +328,7 @@ impl Client {
             ClientInner::Xpc(c) => c.call_with_shmem(request).map_err(|e| Error(e.0)),
             #[cfg(target_os = "macos")]
             ClientInner::Socket(_) => Err(Error(
-                "la région partagée ne passe que par XPC sur macOS".into(),
+                "on macOS the shared region is only available over XPC".into(),
             )),
             #[cfg(windows)]
             ClientInner::Pipe(c) => c.call_with_region(request),
@@ -340,9 +338,7 @@ impl Client {
 
 fn check_line(request: &str) -> Result<(), Error> {
     if request.contains('\n') {
-        Err(Error(
-            "requête sur plusieurs lignes (JSON compact attendu)".into(),
-        ))
+        Err(Error("multi-line request (compact JSON expected)".into()))
     } else {
         Ok(())
     }
@@ -387,7 +383,7 @@ mod unix {
         let rc = unsafe { crate::ffi::lw_peer_cred(stream.as_raw_fd(), &mut uid, &mut pid) };
         if rc != 0 {
             return Caller {
-                label: "pair inconnu".into(),
+                label: "unknown peer".into(),
                 uid: None,
                 pid: None,
                 may_edit: false,
@@ -416,7 +412,7 @@ mod unix {
                     let response =
                         catch_unwind(AssertUnwindSafe(|| (shared.handler)(&request, &caller)))
                             .unwrap_or_else(|_| {
-                                r#"{"ok":false,"error":"panique dans le gestionnaire"}"#.to_string()
+                                r#"{"ok":false,"error":"panic in handler"}"#.to_string()
                             });
                     let mut out = response.replace('\n', " ");
                     out.push('\n');
@@ -439,11 +435,11 @@ mod unix {
     impl SocketServer {
         pub(super) fn start(path: &Path, handler: Handler) -> Result<Self, Error> {
             let err =
-                |what: &str, e: std::io::Error| Error(format!("{what} {} : {e}", path.display()));
+                |what: &str, e: std::io::Error| Error(format!("{what} {}: {e}", path.display()));
             if let Some(dir) = path.parent() {
                 if !dir.as_os_str().is_empty() && !dir.exists() {
                     std::fs::create_dir_all(dir)
-                        .map_err(|e| err("création du répertoire de", e))?;
+                        .map_err(|e| err("creating the directory for", e))?;
                     // Private directory: only service user has access.
                     let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
                 }
@@ -451,14 +447,13 @@ mod unix {
             if path.exists() {
                 if UnixStream::connect(path).is_ok() {
                     return Err(Error(format!(
-                        "{} : déjà servi par un autre processus",
+                        "{}: already served by another process",
                         path.display()
                     )));
                 }
-                std::fs::remove_file(path)
-                    .map_err(|e| err("suppression de la socket orpheline", e))?;
+                std::fs::remove_file(path).map_err(|e| err("removing the stale socket", e))?;
             }
-            let listener = UnixListener::bind(path).map_err(|e| err("écoute sur", e))?;
+            let listener = UnixListener::bind(path).map_err(|e| err("listening on", e))?;
             listener
                 .set_nonblocking(true)
                 .map_err(|e| err("socket", e))?;
@@ -470,7 +465,7 @@ mod unix {
             });
             let s = shared.clone();
             let accept = std::thread::Builder::new()
-                .name("contrôle".into())
+                .name("control".into())
                 .spawn(move || {
                     while !s.stop.load(Ordering::Relaxed) {
                         match listener.accept() {
@@ -481,7 +476,7 @@ mod unix {
                                 *s.active.lock().unwrap_or_else(PoisonError::into_inner) += 1;
                                 let s2 = s.clone();
                                 let spawned = std::thread::Builder::new()
-                                    .name("contrôle-client".into())
+                                    .name("control-client".into())
                                     .spawn(move || {
                                         serve_connection(&s2, stream);
                                         let mut n = s2
@@ -500,7 +495,7 @@ mod unix {
                         }
                     }
                 })
-                .map_err(|e| err("thread d'écoute de", e))?;
+                .map_err(|e| err("listener thread for", e))?;
             Ok(Self {
                 path: path.to_path_buf(),
                 shared,
@@ -541,12 +536,12 @@ mod unix {
             let stream = UnixStream::connect(path).map_err(|e| {
                 Error(match e.kind() {
                     ErrorKind::NotFound | ErrorKind::ConnectionRefused => {
-                        format!("service OpenLW introuvable ({})", path.display())
+                        format!("OpenLW service not found ({})", path.display())
                     }
                     ErrorKind::PermissionDenied => {
-                        format!("accès au service OpenLW refusé ({})", path.display())
+                        format!("access to the OpenLW service denied ({})", path.display())
                     }
-                    _ => format!("connexion à {} : {e}", path.display()),
+                    _ => format!("connecting to {}: {e}", path.display()),
                 })
             })?;
             Ok(Self {
@@ -557,17 +552,18 @@ mod unix {
         pub(super) fn call(&self, request: &str) -> Result<String, Error> {
             check_line(request)?;
             let mut s = self.stream.lock().unwrap_or_else(PoisonError::into_inner);
-            let lost =
-                |e: std::io::Error| Error(format!("connexion au service OpenLW interrompue : {e}"));
+            let lost = |e: std::io::Error| {
+                Error(format!("connection to the OpenLW service interrupted: {e}"))
+            };
             let mut out = request.as_bytes().to_vec();
             out.push(b'\n');
             s.get_mut().write_all(&out).map_err(lost)?;
             let mut line = Vec::new();
             s.read_until(b'\n', &mut line).map_err(lost)?;
             if line.pop() != Some(b'\n') {
-                return Err(Error("connexion au service OpenLW interrompue".into()));
+                return Err(Error("connection to the OpenLW service interrupted".into()));
             }
-            String::from_utf8(line).map_err(|_| Error("réponse non UTF-8".into()))
+            String::from_utf8(line).map_err(|_| Error("non-UTF-8 response".into()))
         }
     }
 }
@@ -631,7 +627,7 @@ mod windows {
                 if let Some(h) = holder.filter(|h| Some(*h) != caller.pid) {
                     if let Some(name) = process_alive(h) {
                         return json!({ "ok": false, "error": format!(
-                            "OpenLW est déjà utilisé par une autre application ({name}, processus {h})"
+                            "OpenLW is already in use by another application ({name}, process {h})"
                         ) })
                         .to_string();
                     }
@@ -687,9 +683,8 @@ mod windows {
             };
             ctx.handle(&request, &caller)
         };
-        let response = catch_unwind(AssertUnwindSafe(run)).unwrap_or_else(|_| {
-            r#"{"ok":false,"error":"panique dans le gestionnaire"}"#.to_string()
-        });
+        let response = catch_unwind(AssertUnwindSafe(run))
+            .unwrap_or_else(|_| r#"{"ok":false,"error":"panic in handler"}"#.to_string());
         CString::new(response.replace(['\0', '\n'], " "))
             .unwrap_or_default()
             .into_raw()
@@ -715,7 +710,7 @@ mod windows {
 
     impl PipeServer {
         pub(super) fn start(name: &str, handler: Handler) -> Result<Self, Error> {
-            let cname = CString::new(name).map_err(|_| Error("nom de tube invalide".into()))?;
+            let cname = CString::new(name).map_err(|_| Error("invalid pipe name".into()))?;
             let group = CString::new(EDIT_GROUP_WINDOWS).unwrap_or_default();
             let ctx = Box::into_raw(Box::new(Ctx {
                 handler,
@@ -737,7 +732,7 @@ mod windows {
                 // SAFETY: server was not created; `ctx` is referenced nowhere else.
                 drop(unsafe { Box::from_raw(ctx) });
                 return Err(Error(format!(
-                    "tube \\\\.\\pipe\\{name} indisponible (déjà servi par un autre processus ?)"
+                    "pipe \\\\.\\pipe\\{name} unavailable (already served by another process?)"
                 )));
             }
             Ok(Self { raw, ctx })
@@ -784,14 +779,14 @@ mod windows {
 
     impl PipeClient {
         pub(super) fn connect(name: &str) -> Result<Self, Error> {
-            let cname = CString::new(name).map_err(|_| Error("nom de tube invalide".into()))?;
+            let cname = CString::new(name).map_err(|_| Error("invalid pipe name".into()))?;
             let mut err: *const c_char = std::ptr::null();
             // SAFETY: string valid during call; valid output pointer.
             let raw = unsafe {
                 crate::ffi::lw_pipe_client_connect(cname.as_ptr(), CONNECT_TIMEOUT_MS, &mut err)
             };
             if raw.is_null() {
-                return Err(error_from(err, "connexion au service OpenLW impossible"));
+                return Err(error_from(err, "cannot connect to the OpenLW service"));
             }
             Ok(Self {
                 raw: Mutex::new(raw),
@@ -800,14 +795,14 @@ mod windows {
 
         pub(super) fn call(&self, request: &str) -> Result<String, Error> {
             check_line(request)?;
-            let req = CString::new(request)
-                .map_err(|_| Error("requête contenant un octet nul".into()))?;
+            let req =
+                CString::new(request).map_err(|_| Error("request contains a NUL byte".into()))?;
             let raw = self.raw.lock().unwrap_or_else(PoisonError::into_inner);
             let mut err: *const c_char = std::ptr::null();
             // SAFETY: open client, used by one thread at a time (mutex); valid strings.
             let out = unsafe { crate::ffi::lw_pipe_call(*raw, req.as_ptr(), &mut err) };
             if out.is_null() {
-                return Err(error_from(err, "erreur du tube"));
+                return Err(error_from(err, "pipe error"));
             }
             // SAFETY: terminated C-allocated string; freed immediately after copying.
             let s = unsafe { CStr::from_ptr(out) }
@@ -823,7 +818,7 @@ mod windows {
             request: &str,
         ) -> Result<(String, Option<SharedObject>), Error> {
             let mut v: Value = serde_json::from_str(request)
-                .map_err(|e| Error(format!("requête JSON invalide : {e}")))?;
+                .map_err(|e| Error(format!("invalid JSON request: {e}")))?;
             if let Some(o) = v.as_object_mut() {
                 o.insert("want_shmem".into(), Value::Bool(true));
             }
@@ -876,7 +871,7 @@ mod tests {
     #[test]
     fn endpoint_parse_and_display() {
         assert_eq!(Endpoint::parse("service").unwrap(), Endpoint::service());
-        assert!(Endpoint::parse("nimporte").is_err());
+        assert!(Endpoint::parse("whatever").is_err());
         assert!(Endpoint::parse("ftp:x").is_err());
         let ep = test_endpoint("parse");
         assert_eq!(Endpoint::parse(&ep.to_string()).unwrap(), ep);
@@ -886,21 +881,18 @@ mod tests {
     fn roundtrip_identifies_caller() {
         let ep = test_endpoint("roundtrip");
         let server = Server::start(&ep, echo()).unwrap();
-        assert!(Server::start(&ep, echo()).is_err(), "nom déjà servi");
+        assert!(Server::start(&ep, echo()).is_err(), "name already served");
         let client = Client::connect(&ep).unwrap();
         for i in 0..50 {
             let resp = client.call(&format!("{{\"n\":{i}}}")).unwrap();
             let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
             assert_eq!(v["echo"]["n"], i);
-            assert_eq!(v["pid"], std::process::id(), "processus appelant identifié");
+            assert_eq!(v["pid"], std::process::id(), "calling process identified");
         }
-        assert!(
-            client.call("{\n}").is_err(),
-            "requête sur plusieurs lignes refusée"
-        );
+        assert!(client.call("{\n}").is_err(), "multi-line request refused");
         drop(client);
         drop(server);
-        assert!(Client::connect(&ep).is_err(), "serveur arrêté");
+        assert!(Client::connect(&ep).is_err(), "server stopped");
     }
 
     #[test]
@@ -929,7 +921,7 @@ mod tests {
         let ep = test_endpoint("panic");
         let _server = Server::start(&ep, Box::new(|_: &str, _: &Caller| panic!("test"))).unwrap();
         let client = Client::connect(&ep).unwrap();
-        assert!(client.call("{}").unwrap().contains("panique"));
+        assert!(client.call("{}").unwrap().contains("panic"));
     }
 
     /// On Linux, service user may edit; on macOS, administrators only.
@@ -943,7 +935,7 @@ mod tests {
         } else {
             assert!(c.may_edit);
         }
-        assert!(Caller::from_uid(0, None).may_edit, "root toujours autorisé");
+        assert!(Caller::from_uid(0, None).may_edit, "root always allowed");
     }
 
     #[cfg(windows)]
@@ -960,7 +952,7 @@ mod tests {
         let client = Client::connect(&ep).unwrap();
         let (resp, obj) = client.call_with_region(r#"{"cmd":"attach"}"#).unwrap();
         assert!(resp.contains("\"shmem\""));
-        let mapped = Region::map(obj.expect("section reçue")).unwrap();
+        let mapped = Region::map(obj.expect("section received")).unwrap();
         assert_eq!(mapped.geometry(), region.geometry());
         // Same process: new attachment accepted; `detach` releases the region.
         assert!(client

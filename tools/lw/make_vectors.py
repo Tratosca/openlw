@@ -83,7 +83,7 @@ def main(argv=None):
     sdp = generate(channel_to_group(101), "192.168.10.20", "MAC TEST 1", pt=96, samples=48,
                    gm="00-1D-C1-FF-FE-12-34-56", domain=0)
     (out / "sdp" / "aes67-ch101.sdp").write_bytes(sdp.encode())
-    print(f"vecteurs ecrits dans {out}")
+    print(f"vectors written to {out}")
     return 0
 
 

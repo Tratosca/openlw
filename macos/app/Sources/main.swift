@@ -42,14 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func uninstall(_ sender: Any) {
         guard FileManager.default.isExecutableFile(atPath: Self.uninstaller) else {
-            alert("Désinstalleur introuvable", "\(Self.uninstaller) est absent. OpenLW n'a pas été installé par son installeur.")
+            alert("Uninstaller Not Found", "\(Self.uninstaller) is missing. OpenLW was not installed by its installer.")
             return
         }
         let confirm = NSAlert()
-        confirm.messageText = "Désinstaller OpenLW ?"
-        confirm.informativeText = "Le périphérique « OpenLW », le service réseau et cette app sont retirés. Les réglages sont supprimés. Le son du Mac s'interrompt quelques secondes."
-        confirm.addButton(withTitle: "Désinstaller")
-        confirm.addButton(withTitle: "Annuler")
+        confirm.messageText = "Uninstall OpenLW?"
+        confirm.informativeText = "The “OpenLW” device, the network service, and this app are removed. Settings are deleted. Mac audio stops for a few seconds."
+        confirm.addButton(withTitle: "Uninstall")
+        confirm.addButton(withTitle: "Cancel")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
         // Administrator privileges requested by macOS (standard authentication dialog).
         let script = "do shell script quoted form of \"\(Self.uninstaller)\" with administrator privileges"
@@ -57,10 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let e = error {
             if (e[NSAppleScript.errorNumber] as? Int) == -128 { return } // Authentication canceled
-            alert("Désinstallation incomplète", e[NSAppleScript.errorMessage] as? String ?? "Erreur inconnue.")
+            alert("Uninstallation Incomplete", e[NSAppleScript.errorMessage] as? String ?? "Unknown error.")
             return
         }
-        alert("OpenLW est désinstallé", "Cette app va se fermer.")
+        alert("OpenLW has been uninstalled.", "This app will now quit.")
         NSApp.terminate(nil)
     }
 
@@ -82,21 +82,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         bar.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "À propos de OpenLW", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About OpenLW", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Désinstaller OpenLW…", action: #selector(uninstall(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Uninstall OpenLW…", action: #selector(uninstall(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Masquer OpenLW", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "Quitter OpenLW", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Hide OpenLW", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Quit OpenLW", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         // Edit menu: copy/paste in text fields.
         let editItem = NSMenuItem()
         bar.addItem(editItem)
-        let edit = NSMenu(title: "Édition")
-        edit.addItem(withTitle: "Couper", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copier", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Coller", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Tout sélectionner", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = edit
         NSApp.mainMenu = bar
     }

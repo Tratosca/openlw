@@ -26,27 +26,27 @@ use crate::settings::{ManualSource, Settings};
 
 const MAX_PAIRS: u32 = 16;
 const LATENCIES: [(&str, &str); 3] = [
-    ("low", "Faible : ≈ 8 ms ajoutées, réseau dédié"),
-    ("normal", "Normale : ≈ 17 ms ajoutées"),
+    ("low", "Low: ≈ 8 ms added, dedicated network"),
+    ("normal", "Normal: ≈ 17 ms added"),
     (
         "safe",
-        "Sûre : ≈ 35 ms ajoutées, réseau partagé ou ordinateur chargé",
+        "Safe: ≈ 35 ms added, shared network or busy computer",
     ),
 ];
 const DSCPS: [(u32, &str); 3] = [
-    (46, "EF (46) : défaut Livewire"),
-    (34, "AF41 (34) : recommandé pour AES67"),
-    (0, "Aucune (0)"),
+    (46, "EF (46): Livewire default"),
+    (34, "AF41 (34): recommended for AES67"),
+    (0, "None (0)"),
 ];
 const FORMATS: [(&str, &str); 3] = [
     ("standard", "Standard (5 ms)"),
     ("aes67", "AES67 (1 ms)"),
-    ("livestream", "Livestream (0,25 ms)"),
+    ("livestream", "Livestream (0.25 ms)"),
 ];
 const MANUAL_KINDS: [(&str, &str); 3] = [
-    ("stereo", "Stéréo"),
-    ("backfeed", "Retour (To Source)"),
-    ("surround", "Surround 8 canaux"),
+    ("stereo", "Stereo"),
+    ("backfeed", "Backfeed (To Source)"),
+    ("surround", "8-Channel Surround"),
 ];
 
 #[derive(Default)]
@@ -146,13 +146,13 @@ impl Window {
 
         // ---------- Livewire network ----------
         let network = group(
-            "Réseau Livewire",
-            "Horloge : celle de l'ordinateur. Les écarts avec les autres appareils sont compensés automatiquement.",
+            "Livewire Network",
+            "Clock: the computer's own. Drift relative to other devices is compensated automatically.",
         );
         let state_dot = gtk::Label::new(Some("●"));
         state_dot.add_css_class("dim-label");
         let state_row = adw::ActionRow::builder()
-            .title("Connexion au service OpenLW…")
+            .title("Connecting to the OpenLW service…")
             .build();
         state_row.add_prefix(&state_dot);
         let iface_model = gtk::StringList::new(&[]);
@@ -161,8 +161,8 @@ impl Window {
             .model(&iface_model)
             .build();
         let advertise_row = adw::SwitchRow::builder()
-            .title("Annoncer les sorties sur le réseau")
-            .subtitle("Les autres appareils Livewire voient les canaux diffusés et leur nom.")
+            .title("Advertise Outputs on the Network")
+            .subtitle("Other Livewire devices see the transmitted channels and their names.")
             .build();
         network.add(&state_row);
         network.add(&iface_row);
@@ -170,23 +170,21 @@ impl Window {
 
         // ---------- Audio device (PipeWire nodes) ----------
         let device = group(
-            "Périphérique audio",
-            "Les applications PipeWire, PulseAudio et JACK voient les mêmes périphériques.",
+            "Audio Device",
+            "PipeWire, PulseAudio and JACK applications see the same devices.",
         );
         let nodes_icon = gtk::Image::from_icon_name("content-loading-symbolic");
-        let nodes_row = adw::ActionRow::builder()
-            .title("Périphériques audio")
-            .build();
+        let nodes_row = adw::ActionRow::builder().title("Audio Devices").build();
         nodes_row.add_prefix(&nodes_icon);
         device.add(&nodes_row);
         for (title, subtitle) in [
             (
                 "OpenLW Out",
-                "Choisissez-le comme sortie : ce que les applications y jouent est diffusé sur le réseau, selon les sorties réglées plus bas.",
+                "Choose it as the output: what applications play to it is transmitted to the network, according to the outputs set below.",
             ),
             (
                 "OpenLW In",
-                "Choisissez-le comme entrée : il reçoit l'audio du réseau, selon la grille des entrées.",
+                "Choose it as the input: it receives audio from the network, according to the input grid.",
             ),
         ] {
             device.add(&adw::ActionRow::builder().title(title).subtitle(subtitle).build());
@@ -194,10 +192,10 @@ impl Window {
 
         // ---------- Inputs ----------
         let inputs = group(
-            "Entrées (réseau vers ordinateur)",
-            "Cliquez une case pour envoyer la source sur cette paire d'entrées d'OpenLW In. Cliquez à nouveau pour la libérer. Le bouton casque fait écouter la source sur la sortie audio de l'ordinateur, sans la patcher.",
+            "Inputs (Network to Computer)",
+            "Click a cell to send the source to that pair of OpenLW In inputs. Click again to release it. The headphone button plays the source on the computer's audio output, without patching it.",
         );
-        let in_count = count_row("Canaux Livewire reçus", "entrées");
+        let in_count = count_row("Received Livewire Channels", "inputs");
         inputs.add(&in_count);
         let grid = InputGrid::new(GridActions {
             toggle: Box::new(on!(weak, |w, r, c| w.toggle_input(r, c))),
@@ -215,12 +213,12 @@ impl Window {
         grid_card.append(&grid_scroll);
         let manual = adw::PreferencesGroup::new();
         let manual_entry = adw::EntryRow::builder()
-            .title("Source non annoncée : canal (1 à 32766)")
+            .title("Unadvertised source, channel (1 to 32766)")
             .input_purpose(gtk::InputPurpose::Digits)
             .build();
         let manual_kind = gtk::DropDown::from_strings(&MANUAL_KINDS.map(|(_, t)| t));
         manual_kind.set_valign(gtk::Align::Center);
-        let add = gtk::Button::with_label("Ajouter à la grille");
+        let add = gtk::Button::with_label("Add to Grid");
         add.set_valign(gtk::Align::Center);
         manual_entry.add_suffix(&manual_kind);
         manual_entry.add_suffix(&add);
@@ -230,34 +228,34 @@ impl Window {
 
         // ---------- Outputs ----------
         let outputs_group = group(
-            "Sorties (ordinateur vers réseau)",
-            "Chaque paire de canaux d'OpenLW Out est diffusée sur le canal Livewire de votre choix, sous le nom indiqué. Une modification s'applique quand la diffusion est activée.",
+            "Outputs (Computer to Network)",
+            "Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.",
         );
-        let out_count = count_row("Canaux Livewire diffusés", "sorties");
+        let out_count = count_row("Transmitted Livewire Channels", "outputs");
         outputs_group.add(&out_count);
 
         // ---------- Advanced settings ----------
         let advanced_group = adw::PreferencesGroup::new();
         let advanced = adw::ExpanderRow::builder()
-            .title("Réglages avancés")
-            .subtitle("Nom annoncé, latence de réception, priorité réseau")
+            .title("Advanced Settings")
+            .subtitle("Advertised name, receive latency, network priority")
             .expanded(settings.advanced_visible)
             .build();
         let terminal_row = adw::EntryRow::builder()
-            .title("Nom annoncé (vide : nom de l'ordinateur)")
+            .title("Advertised name (empty: computer name)")
             .show_apply_button(true)
-            .tooltip_text("Nom affiché par les autres appareils Livewire, 32 caractères au plus, accents remplacés.")
+            .tooltip_text("Name shown by other Livewire devices: 32 characters at most, accented letters replaced.")
             .build();
         let latency_row = adw::ComboRow::builder()
-            .title("Latence de réception")
-            .subtitle("Ajoutée à celle du logiciel qui enregistre")
-            .tooltip_text("Tampons ajoutés à celui du logiciel qui enregistre. Plus la latence est faible, plus un retard du réseau ou de l'ordinateur risque de provoquer une coupure brève.")
+            .title("Receive Latency")
+            .subtitle("Added to the recording software's own latency")
+            .tooltip_text("Buffers added to the recording software's own buffer. The lower the latency, the more likely a network or computer delay causes a brief dropout.")
             .model(&gtk::StringList::new(&LATENCIES.map(|(_, t)| t)))
             .build();
         let dscp_row = adw::ComboRow::builder()
-            .title("Priorité réseau (DSCP)")
-            .subtitle("Selon la QoS des commutateurs")
-            .tooltip_text("Marquage des flux audio émis. Choisissez la valeur prévue par la QoS de vos commutateurs.")
+            .title("Network Priority (DSCP)")
+            .subtitle("Depends on the switches' QoS")
+            .tooltip_text("Marking of transmitted audio streams. Choose the value expected by your switches' QoS policy.")
             .model(&gtk::StringList::new(&DSCPS.map(|(_, t)| t)))
             .build();
         advanced.add_row(&terminal_row);
@@ -297,14 +295,14 @@ impl Window {
         toasts.set_child(Some(&scroll));
         let banner = adw::Banner::builder()
             .title(DaemonError::Unreachable.message())
-            .button_label("Démarrer le service")
+            .button_label("Start Service")
             .build();
         let menu = gio::Menu::new();
-        menu.append(Some("À propos d'OpenLW"), Some("app.about"));
+        menu.append(Some("About OpenLW"), Some("app.about"));
         let menu_button = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .menu_model(&menu)
-            .tooltip_text("Menu principal")
+            .tooltip_text("Main Menu")
             .primary(true)
             .build();
         let header = adw::HeaderBar::new();
@@ -506,7 +504,7 @@ impl Window {
         self.banner.set_revealed(!ok);
         if !ok {
             set_dot(&self.state_dot, "error");
-            self.state_row.set_title("Service OpenLW injoignable");
+            self.state_row.set_title("OpenLW service unreachable");
             self.state_row.set_subtitle("");
             self.st.borrow_mut().audio_nodes = None;
             self.show_nodes();
@@ -520,15 +518,16 @@ impl Window {
         if link.searching {
             set_dot(&self.state_dot, "warning");
             if link.auto {
-                self.state_row.set_title("Recherche du réseau Livewire");
+                self.state_row
+                    .set_title("Searching for the Livewire network");
                 self.state_row.set_subtitle(
-                    "Branchez l'ordinateur sur le réseau Livewire, ou choisissez l'interface.",
+                    "Connect the computer to the Livewire network, or choose the interface.",
                 );
             } else {
                 self.state_row
-                    .set_title(&format!("Interface « {} » indisponible", st.config.iface));
+                    .set_title(&format!("Interface “{}” unavailable", st.config.iface));
                 self.state_row
-                    .set_subtitle("Branchez-la, ou choisissez Automatique.");
+                    .set_subtitle("Plug it in, or choose Automatic.");
             }
             return;
         }
@@ -539,9 +538,9 @@ impl Window {
             format!("{} ({})", link.friendly, link.iface)
         };
         self.state_row
-            .set_title(&format!("Connecté au réseau Livewire par {name}"));
+            .set_title(&format!("Connected to the Livewire network via {name}"));
         self.state_row.set_subtitle(&if link.auto {
-            format!("{} · interface choisie automatiquement", link.ipv4)
+            format!("{} · interface chosen automatically", link.ipv4)
         } else {
             link.ipv4.clone()
         });
@@ -553,23 +552,23 @@ impl Window {
         let (icon, title, subtitle) = match (st.reachable, st.audio_nodes) {
             (Some(true), Some(true)) => (
                 "object-select-symbolic",
-                "Périphériques publiés dans PipeWire",
-                "OpenLW Out et OpenLW In apparaissent dans les réglages du son et dans les logiciels audio.",
+                "Devices published in PipeWire",
+                "OpenLW Out and OpenLW In appear in the sound settings and in audio software.",
             ),
             (Some(true), Some(false)) => (
                 "dialog-warning-symbolic",
-                "PipeWire injoignable",
-                "Les périphériques OpenLW apparaîtront dès que PipeWire répondra (nouvelle tentative toutes les 5 s).",
+                "PipeWire unreachable",
+                "OpenLW devices will appear as soon as PipeWire responds (retrying every 5 s).",
             ),
             (Some(true), None) => (
                 "dialog-warning-symbolic",
-                "Aucun périphérique audio",
-                "Ce service OpenLW a été compilé sans PipeWire. Installez le paquet OpenLW de votre distribution.",
+                "No audio devices",
+                "This OpenLW service was built without PipeWire. Install your distribution's OpenLW package.",
             ),
             _ => (
                 "content-loading-symbolic",
-                "Périphériques audio",
-                "Disponibles quand le service OpenLW fonctionne.",
+                "Audio Devices",
+                "Available when the OpenLW service is running.",
             ),
         };
         self.nodes_icon.set_icon_name(Some(icon));
@@ -641,11 +640,11 @@ impl Window {
             let (config, link) = (&st.config, &st.link);
             let auto = config.auto_iface();
             let auto_title = if !auto {
-                "Automatique".to_string()
+                "Automatic".to_string()
             } else if link.searching {
-                "Automatique · recherche en cours".to_string()
+                "Automatic · searching".to_string()
             } else {
-                format!("Automatique · {}", link.friendly)
+                format!("Automatic · {}", link.friendly)
             };
             let mut items = vec![(auto_title, "auto".to_string())];
             let mut found: Vec<&Iface> = st
@@ -657,7 +656,7 @@ impl Window {
             items.extend(found.iter().map(|i| (i.title(), i.name.clone())));
             if !auto && st.ifaces.iter().all(|i| i.name != config.iface) {
                 items.push((
-                    format!("{} (indisponible)", config.iface),
+                    format!("{} (unavailable)", config.iface),
                     config.iface.clone(),
                 ));
             }
@@ -715,11 +714,15 @@ impl Window {
                 add(s.clone(), &s.terminal.clone(), false);
             }
             for m in &settings.manual {
-                add(DiscoveredSource::manual(m.channel, &m.kind), "saisi", true);
+                add(DiscoveredSource::manual(m.channel, &m.kind), "manual", true);
             }
             for p in &st.config.inputs {
                 if let Some(ch) = p.channel {
-                    add(DiscoveredSource::manual(ch, &p.kind), "non annoncé", true);
+                    add(
+                        DiscoveredSource::manual(ch, &p.kind),
+                        "not advertised",
+                        true,
+                    );
                 }
             }
             let listening = st.listening.as_ref().and_then(|(ch, kind)| {
@@ -751,9 +754,9 @@ impl Window {
                     .iter()
                     .find(|(chs, _)| chs.contains(&first))
                 {
-                    None => "libre",
-                    Some((_, true)) => "audio reçu",
-                    Some((_, false)) => "en attente",
+                    None => "free",
+                    Some((_, true)) => "receiving audio",
+                    Some((_, false)) => "waiting",
                 }
             })
             .collect();
@@ -889,21 +892,21 @@ impl Window {
         let mut lost = Vec::new();
         if lost_out > 0 {
             let s = if lost_out > 1 { "s" } else { "" };
-            lost.push(format!("{lost_out} diffusion{s} arrêtée{s}"));
+            lost.push(format!("{lost_out} transmission{s} stopped"));
         }
         if lost_in > 0 {
             let s = if lost_in > 1 { "s" } else { "" };
-            lost.push(format!("{lost_in} source{s} retirée{s} des entrées"));
+            lost.push(format!("{lost_in} source{s} removed from the inputs"));
         }
         let dialog = adw::MessageDialog::new(
             Some(&self.win),
-            Some("Réduire le nombre de canaux ?"),
+            Some("Reduce the Number of Channels?"),
             Some(&format!(
-                "{}. Les logiciels qui utilisent OpenLW In ou OpenLW Out retrouvent les périphériques après quelques secondes.",
+                "{}. Software using OpenLW In or OpenLW Out finds the devices again after a few seconds.",
                 capitalize(&lost.join(", "))
             )),
         );
-        dialog.add_responses(&[("cancel", "Annuler"), ("reduce", "Réduire")]);
+        dialog.add_responses(&[("cancel", "Cancel"), ("reduce", "Reduce")]);
         dialog.set_response_appearance("reduce", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -929,7 +932,7 @@ impl Window {
             .filter(|c| (1..=32766).contains(c))
         else {
             self.show_error(Some(
-                DaemonError::Refused("canal invalide. Saisissez un nombre de 1 à 32766.".into())
+                DaemonError::Refused("invalid channel. Enter a number from 1 to 32766.".into())
                     .message(),
             ));
             return;
@@ -973,7 +976,7 @@ impl Window {
         if first + width - 1 > from_net {
             self.show_error(Some(
                 DaemonError::Refused(format!(
-                    "une source surround occupe 8 entrées. Choisissez une paire de 1-2 à {}-{}.",
+                    "a surround source takes 8 inputs. Choose a pair from 1-2 to {}-{}.",
                     from_net.saturating_sub(7),
                     from_net.saturating_sub(6)
                 ))
@@ -1016,7 +1019,7 @@ impl Window {
             set.save();
         }
         // A received stream stays in the configuration, even unpatched (displaced by another
-        // patch): without remove_input the row would come back as "non annoncé".
+        // patch): without remove_input the row would come back as "not advertised".
         let received = self
             .st
             .borrow()
@@ -1060,7 +1063,7 @@ impl Window {
         let Some(ipv4) = ipv4 else {
             self.show_error(Some(
                 DaemonError::Refused(
-                    "l'ordinateur n'est pas encore relié au réseau Livewire. Choisissez l'interface, puis réessayez."
+                    "the computer is not connected to the Livewire network yet. Choose the interface, then try again."
                         .into(),
                 )
                 .message(),
@@ -1112,7 +1115,7 @@ impl Window {
         }
         let Some(ch) = row.channel() else {
             self.show_error(Some(
-                DaemonError::Refused("canal invalide. Saisissez un nombre de 1 à 32766.".into())
+                DaemonError::Refused("invalid channel. Enter a number from 1 to 32766.".into())
                     .message(),
             ));
             // Nothing transmitted: the switch shows the configured state, even while editing.
@@ -1188,7 +1191,7 @@ impl Window {
         let proc = match proc {
             Ok(p) => p,
             Err(e) => {
-                self.show_error(Some(format!("Démarrage impossible : {e}.")));
+                self.show_error(Some(format!("Could not start the service: {e}.")));
                 return;
             }
         };
@@ -1205,11 +1208,11 @@ impl Window {
                 Ok((_, err)) => {
                     let detail = err.as_deref().map(str::trim).unwrap_or_default();
                     w.show_error(Some(format!(
-                        "Démarrage impossible{}{detail}. Consultez le journal : journalctl --user -u openlw.",
-                        if detail.is_empty() { "" } else { " : " }
+                        "Could not start the service{}{detail}. Check the log: journalctl --user -u openlw.",
+                        if detail.is_empty() { "" } else { ": " }
                     )));
                 }
-                Err(e) => w.show_error(Some(format!("Démarrage impossible : {e}."))),
+                Err(e) => w.show_error(Some(format!("Could not start the service: {e}."))),
             }
         });
     }
@@ -1222,7 +1225,7 @@ impl Window {
             .developer_name("François Brille")
             .version(env!("CARGO_PKG_VERSION"))
             .license_type(gtk::License::Apache20)
-            .comments("Audio Livewire® et AES67 sur l'ordinateur, par PipeWire.\n\nProjet expérimental, fourni « en l'état », sans aucune garantie. Ne convient pas aux environnements critiques (chaîne d'antenne, systèmes de sécurité).\n\nLivewire est une marque de TLS Corp.")
+            .comments("Livewire® and AES67 audio on the computer, through PipeWire.\n\nExperimental project, provided “as is”, without any warranty. Not suitable for critical environments (on-air chains, safety systems).\n\nLivewire is a trademark of TLS Corp.")
             .build();
         about.present();
     }
@@ -1244,7 +1247,7 @@ impl OutputRow {
     fn new(pair: Vec<u32>, weak: &Weak<Window>) -> Rc<Self> {
         // Explicit layout rather than an action row: the suffixes would squeeze the title.
         let row = adw::PreferencesRow::builder()
-            .title(pair_label("Sorties", &pair))
+            .title(pair_label("Outputs", &pair))
             .activatable(false)
             .build();
         let line = gtk::Box::builder()
@@ -1255,21 +1258,21 @@ impl OutputRow {
             .margin_end(12)
             .build();
         let label = gtk::Label::builder()
-            .label(pair_label("Sorties", &pair))
+            .label(pair_label("Outputs", &pair))
             .xalign(0.0)
             .width_chars(10)
             .build();
         let meter = Meter::new(2, 110);
         let channel = gtk::Entry::builder()
-            .placeholder_text("canal")
-            .width_chars(6)
-            .max_width_chars(6)
+            .placeholder_text("channel")
+            .width_chars(7)
+            .max_width_chars(7)
             .input_purpose(gtk::InputPurpose::Digits)
             .valign(gtk::Align::Center)
             .build();
         channel.add_css_class("monospace");
         let name = gtk::Entry::builder()
-            .placeholder_text("nom annoncé")
+            .placeholder_text("advertised name")
             .width_chars(12)
             .hexpand(true)
             .valign(gtk::Align::Center)
@@ -1278,9 +1281,9 @@ impl OutputRow {
         format.set_valign(gtk::Align::Center);
         let emit = gtk::Switch::builder()
             .valign(gtk::Align::Center)
-            .tooltip_text("Diffuser")
+            .tooltip_text("Transmit")
             .build();
-        let emit_label = gtk::Label::new(Some("Diffuser"));
+        let emit_label = gtk::Label::new(Some("Transmit"));
         line.append(&label);
         line.append(meter.widget());
         line.append(&channel);
@@ -1396,7 +1399,7 @@ fn count_row(title: &str, unit: &str) -> adw::ComboRow {
         .map(|n| {
             format!(
                 "{n} {} ({} {unit})",
-                if n == 1 { "canal" } else { "canaux" },
+                if n == 1 { "channel" } else { "channels" },
                 2 * n
             )
         })

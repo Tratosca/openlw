@@ -45,7 +45,7 @@ fn device_geometry_follows_configuration() {
         .unwrap()
         .into_iter()
         .find(|i| i.loopback)
-        .expect("interface de bouclage");
+        .expect("loopback interface");
     let shared = Shared::new(None, 0);
     let ep = test_endpoint();
     let server = shared.serve(&ep).unwrap();
@@ -80,7 +80,7 @@ fn device_geometry_follows_configuration() {
         // Modification commands require edit privileges (see ctl::edit_policy).
         let probe = call(&client, json!({"cmd":"set_advertise","advertise":false}));
         if probe["ok"] != true {
-            eprintln!("ignoré : modifications refusées à l'utilisateur du test ({probe})");
+            eprintln!("skipped: changes refused for the test user ({probe})");
             stop.request();
             h.join().unwrap().unwrap();
             return;
@@ -107,7 +107,7 @@ fn device_geometry_follows_configuration() {
             &client,
             json!({"cmd":"set_device_channels","to_net":40,"from_net":2}),
         );
-        assert_eq!(r["ok"], false, "au-delà de 32 canaux : refusé");
+        assert_eq!(r["ok"], false, "more than 32 channels: refused");
 
         // Automatic mode: loopback interface is never a candidate.
         assert_eq!(

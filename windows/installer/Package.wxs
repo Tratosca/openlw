@@ -6,8 +6,8 @@
      xmlns:fire="http://wixtoolset.org/schemas/v4/wxs/firewall">
   <Package Name="OpenLW" Manufacturer="François Brille" Version="$(Version)"
            UpgradeCode="{B029ECEC-58E9-4697-91CB-A38FD927504C}" Scope="perMachine"
-           Language="1036" Codepage="1252" InstallerVersion="500">
-    <MajorUpgrade DowngradeErrorMessage="Une version plus récente d'OpenLW est déjà installée." />
+           Language="1033" Codepage="1252" InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of OpenLW is already installed." />
     <MediaTemplate EmbedCab="yes" />
     <Property Id="ARPURLINFOABOUT" Value="https://francois-brille.fr" />
 
@@ -30,7 +30,7 @@
          the installing user is added (name resolved from UserSID). Removed on uninstall.
          Square brackets are MSI property syntax: literal ones are escaped as [\[] and [\]]. -->
     <CustomAction Id="CreateEditGroup" Directory="System64Folder" Execute="deferred" Impersonate="no" Return="ignore"
-                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;net localgroup 'OpenLW Users' /add /comment:'Peut modifier la configuration d''OpenLW' 2>$null; $u = (New-Object Security.Principal.SecurityIdentifier '[UserSID]').Translate([\[]Security.Principal.NTAccount[\]]).Value; net localgroup 'OpenLW Users' $u /add&quot;" />
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -Command &quot;net localgroup 'OpenLW Users' /add /comment:'Can change the OpenLW configuration' 2>$null; $u = (New-Object Security.Principal.SecurityIdentifier '[UserSID]').Translate([\[]Security.Principal.NTAccount[\]]).Value; net localgroup 'OpenLW Users' $u /add&quot;" />
     <CustomAction Id="DeleteEditGroup" Directory="System64Folder" Execute="deferred" Impersonate="no" Return="ignore"
                   ExeCommand="&quot;[System64Folder]net.exe&quot; localgroup &quot;OpenLW Users&quot; /delete" />
     <InstallExecuteSequence>
@@ -45,10 +45,10 @@
       <Component Id="DaemonComponent">
         <File Id="lw_daemon" Source="$(DaemonExe)" Name="lw-daemon.exe" KeyPath="yes">
           <!-- Livewire and AES67 multicast reception: local subnet only. -->
-          <fire:FirewallException Id="FwDaemon" Name="OpenLW (service réseau)" Protocol="udp" Scope="localSubnet" Profile="all" />
+          <fire:FirewallException Id="FwDaemon" Name="OpenLW (network service)" Protocol="udp" Scope="localSubnet" Profile="all" />
         </File>
         <ServiceInstall Name="OpenLW" DisplayName="OpenLW"
-                        Description="Service réseau d'OpenLW : audio Livewire et AES67, pilote audio."
+                        Description="OpenLW network service: Livewire and AES67 audio, audio driver."
                         Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Arguments="service" />
         <ServiceControl Id="OpenLWService" Name="OpenLW" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
         <util:EventSource Name="OpenLW" Log="Application" EventMessageFile="[#lw_daemon]" />
@@ -91,9 +91,9 @@
       <Component Id="AppExeComponent">
         <File Id="openlw_exe" Source="$(AppDir)\OpenLW.exe" KeyPath="yes">
           <!-- Headphone preview: multicast reception from the local subnet. -->
-          <fire:FirewallException Id="FwApp" Name="OpenLW (pré-écoute)" Protocol="udp" Scope="localSubnet" Profile="all" />
+          <fire:FirewallException Id="FwApp" Name="OpenLW (headphone preview)" Protocol="udp" Scope="localSubnet" Profile="all" />
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="OpenLW" WorkingDirectory="APPFOLDER"
-                    Description="Réseau Livewire, patch et pilote audio" Advertise="yes" />
+                    Description="Livewire network, patching and audio driver" Advertise="yes" />
         </File>
       </Component>
       <Files Include="$(AppDir)\**">

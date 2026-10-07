@@ -118,7 +118,7 @@ pub fn run_from(
     let sock = tx_socket(iface, stream.port, opts)?;
     let dest = SocketAddrV4::new(group, stream.port);
     let _dscp = mark_dscp(&sock, dest, opts.tos)
-        .map_err(|e| crate::error!("{group} : marquage DSCP refusé (erreur {e})"))
+        .map_err(|e| crate::error!("{group}: DSCP marking refused (error {e})"))
         .ok()
         .flatten();
     // Sequence and timestamp derived from the host clock: a restarted stream resumes where a
@@ -142,7 +142,7 @@ pub fn run_from(
         match lw_sys::rt::promote_for_packet_interval(interval) {
             Ok(()) => report.realtime = true,
             Err(kr) => {
-                crate::error!("{group} : ordonnancement temps réel refusé (code {kr})")
+                crate::error!("{group}: real-time scheduling refused (code {kr})")
             }
         }
     }
@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(v.len(), 960);
         let peak = v.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
         let db = 20.0 * (f64::from(peak) / 8_388_607.0).log10();
-        assert!((db + 20.0).abs() < 0.1, "crête {db} dBFS");
+        assert!((db + 20.0).abs() < 0.1, "peak {db} dBFS");
         assert!(v.chunks_exact(2).all(|f| f.first() == f.get(1)));
     }
 }

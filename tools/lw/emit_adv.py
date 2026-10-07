@@ -22,14 +22,14 @@ ADV_PORT = 4001
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--iface")
-    parser.add_argument("--ip", help="IP a annoncer (defaut : celle de l'interface)")
+    parser.add_argument("--ip", help="IP to advertise (default: the interface address)")
     parser.add_argument("--channel", type=int, required=True)
     parser.add_argument("--name", default="LWRE TEST")
     parser.add_argument("--terminal", default="openlw-test")
     parser.add_argument("--fast", type=int, default=2, help="2 stereo L24, 3 stereo L16, 4 surround")
     parser.add_argument("--seconds", type=float, default=120)
     parser.add_argument("--advv", type=int, default=1)
-    parser.add_argument("--dry-run", action="store_true", help="affiche le datagramme en hexadecimal sans emettre")
+    parser.add_argument("--dry-run", action="store_true", help="print the datagram in hexadecimal without sending")
     args = parser.parse_args(argv)
 
     ip = args.ip
@@ -54,7 +54,7 @@ def main(argv=None):
         time.sleep(max(0.0, next_send - time.monotonic()))
         msg = advertisement(args.advv, ip, sources, name=args.terminal, full=send_full)
         sock.sendto(encode_datagram(msg, seq), (ADV_GROUP, ADV_PORT))
-        print(f"{time.strftime('%H:%M:%S')} {'complete' if send_full else 'courte'} seq={seq}")
+        print(f"{time.strftime('%H:%M:%S')} {'full' if send_full else 'short'} seq={seq}")
         seq = (seq + 1) & 0xFFFFFFFF or 1  # Envelope sequence number is never zero
         if send_full and first_cycle:
             next_send, first_cycle, send_full = time.monotonic() + 1 + random.uniform(-0.5, 0.5), False, True

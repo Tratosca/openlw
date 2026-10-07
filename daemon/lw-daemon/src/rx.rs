@@ -137,7 +137,7 @@ pub fn run_into(
     // The thread blocks in recv: real-time policy accounts only for decoding time.
     if sink.is_some() {
         if let Err(kr) = lw_sys::rt::promote_for_packet_interval(Duration::from_millis(1)) {
-            crate::error!("réception {group} : temps réel refusé (code {kr})");
+            crate::error!("receive {group}: real-time scheduling refused (code {kr})");
         }
     }
     let mut stats = RxStats::new(group);

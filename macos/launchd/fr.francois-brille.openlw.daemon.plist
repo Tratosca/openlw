@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Livewire network service LaunchDaemon, installed by the package (macos/installer/build-pkg.sh) :
+  Livewire network service LaunchDaemon, installed by the package (macos/installer/build-pkg.sh):
     /Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist   (root:wheel, 644)
     /Library/Application Support/OpenLW/lw-daemon        (universal binary)
     /Library/Application Support/OpenLW/lw-daemon.json   (settings, modified by OpenLW)

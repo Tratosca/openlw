@@ -45,6 +45,6 @@ docker run -d --name openlw-gtk-sources --platform "$PLATFORM" -v "$PWD/tools/lw
     openlw-gtk sh -c '
 python3 emit_adv.py --iface eth0 --channel 101 --name "STUDIO A PGM" --terminal "studio-a" --seconds 86400 &
 python3 emit_rtp.py --iface eth0 --channel 101 --mode standard --seconds 86400 --level-dbfs -14 &
-python3 emit_adv.py --iface eth0 --channel 2204 --name "CODEC RETOUR" --terminal "codec-1" --ip 192.168.215.250 --fast 3 --seconds 86400 &
+python3 emit_adv.py --iface eth0 --channel 2204 --name "CODEC RETURN" --terminal "codec-1" --ip 192.168.215.250 --fast 3 --seconds 86400 &
 wait' >/dev/null
 echo "Preview: http://localhost:$PORT (logs: docker exec openlw-gtk-preview cat /tmp/app.log /tmp/daemon.log)"

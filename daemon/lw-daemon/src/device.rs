@@ -156,7 +156,7 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
         .name("lw-device".into())
         .spawn(move || {
             if let Err(kr) = lw_sys::rt::promote_for_packet_interval(TICK) {
-                crate::error!("périphérique : temps réel refusé (code {kr})");
+                crate::error!("device: real-time scheduling refused (code {kr})");
             }
             let (ch_in, ch_out) = (from_apps.channels() as usize, to_apps.channels() as usize);
             let ring = reg.geometry().ring_frames as usize;
@@ -362,8 +362,7 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                 }
             }
         });
-    let thread =
-        thread.map_err(|_| lw_sys::shm::Error("création du thread du périphérique impossible"))?;
+    let thread = thread.map_err(|_| lw_sys::shm::Error("cannot create the device thread"))?;
     Ok(Device {
         region,
         status,

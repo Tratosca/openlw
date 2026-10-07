@@ -162,7 +162,7 @@ impl Source {
     fn from_msg(slot: u16, m: &TlvMsg) -> Result<Self, Error> {
         let num = |tag| {
             m.number(tag)
-                .ok_or(Error::Invalid("champ numérique absent dans une source"))
+                .ok_or(Error::Invalid("numeric field missing from a source"))
         };
         let byte = |tag| m.number(tag).map(|v| v as u8).unwrap_or(0);
         Ok(Self {
@@ -195,7 +195,7 @@ pub struct Advertisement {
 impl Advertisement {
     pub fn to_msg(&self) -> Result<TlvMsg, Error> {
         if self.sources.len() > SOURCES_PER_PAGE {
-            return Err(Error::TooLong("plus de 8 sources par datagramme"));
+            return Err(Error::TooLong("more than 8 sources per datagram"));
         }
         let t = &self.terminal;
         let mut term = TlvMsg::new(INDI)
@@ -216,7 +216,7 @@ impl Advertisement {
         if self.full {
             for s in &self.sources {
                 if s.slot == 0 || usize::from(s.slot) > MAX_SOURCES {
-                    return Err(Error::Invalid("emplacement de source hors 1..240"));
+                    return Err(Error::Invalid("source slot outside 1..240"));
                 }
                 msg = msg.with(slot_tag(s.slot), Value::Msg(s.to_msg()));
             }
@@ -227,19 +227,19 @@ impl Advertisement {
     pub fn from_msg(msg: &TlvMsg) -> Result<Self, Error> {
         if msg.id != NEST {
             return Err(Error::Invalid(
-                "message d'annonce : identifiant différent de NEST",
+                "advertisement message: identifier is not NEST",
             ));
         }
         let full = match msg.number(ADVT) {
             Some(1) => true,
             Some(2) => false,
-            _ => return Err(Error::Invalid("ADVT absent ou inconnu")),
+            _ => return Err(Error::Invalid("ADVT missing or unknown")),
         };
-        let term = msg.msg(TERM).ok_or(Error::Invalid("bloc TERM absent"))?;
+        let term = msg.msg(TERM).ok_or(Error::Invalid("TERM block missing"))?;
         let terminal = Terminal {
             advv: term.number(ADVV).unwrap_or(0) as u32,
             hwid: term.number(HWID).unwrap_or(0) as u16,
-            ip: Ipv4Addr::from(term.number(INIP).ok_or(Error::Invalid("INIP absent"))? as u32),
+            ip: Ipv4Addr::from(term.number(INIP).ok_or(Error::Invalid("INIP missing"))? as u32),
             control_port: term.number(UDPC).unwrap_or(DEFAULT_CONTROL_PORT.into()) as u16,
             nums: term.number(NUMS).unwrap_or(0) as u16,
             name: term.get(ATRN).and_then(Value::as_text),
@@ -359,7 +359,7 @@ mod tests {
         let msg = src.to_msg();
         assert!(
             matches!(msg.get(PSNM), Some(Value::Str(_))),
-            "PSNM en type 3 (chaîne)"
+            "PSNM as type 3 (string)"
         );
     }
 

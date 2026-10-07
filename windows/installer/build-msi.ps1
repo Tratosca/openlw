@@ -63,7 +63,7 @@ if ($env:SIGN_CERT_THUMBPRINT) {
 
 Write-Host "=== MSI"
 $wixVersion = "5.0.2"
-if (-not ((wix --version) -like "$wixVersion*")) { throw "WiX $wixVersion attendu (dotnet tool install --global wix --version $wixVersion)" }
+if (-not ((wix --version) -like "$wixVersion*")) { throw "WiX $wixVersion required (dotnet tool install --global wix --version $wixVersion)" }
 $msi = Join-Path $root "build\OpenLW-$Version-$Arch.msi"
 wix extension add -g "WixToolset.Util.wixext/$wixVersion" "WixToolset.Firewall.wixext/$wixVersion"
 if ($LASTEXITCODE) { throw "wix extension add" }
@@ -75,4 +75,4 @@ if ($LASTEXITCODE) { throw "wix build" }
 if ($env:SIGN_CERT_THUMBPRINT) {
     signtool sign /sha1 $env:SIGN_CERT_THUMBPRINT /fd sha256 /tr http://timestamp.digicert.com /td sha256 $msi
 }
-Write-Host "OK : $msi"
+Write-Host "OK: $msi"

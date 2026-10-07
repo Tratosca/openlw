@@ -44,7 +44,7 @@ $(STAMP): build/x86_64/$(NAME) build/arm64/$(NAME) Info.plist
 	@touch $@
 
 check-min: $(STAMP)
-	@for a in x86_64 arm64; do printf '%s : ' $$a; \
+	@for a in x86_64 arm64; do printf '%s: ' $$a; \
 	  otool -arch $$a -l "$(EXE)" | awk '/LC_VERSION_MIN_MACOSX|LC_BUILD_VERSION/{f=1} f&&/version|minos/{print $$2; f=0; exit}'; done
 	@ls "$(APP)/Contents/Frameworks"
 

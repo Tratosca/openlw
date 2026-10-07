@@ -12,7 +12,7 @@
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
     </windowsSettings>
   </application>
-  <!-- Runs as the signed-in user: changes are allowed to members of the local OpenLW group (ADR 0007). -->
+  <!-- Runs as the signed-in user: changes are allowed to members of the local OpenLW Users group (ADR 0007). -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">

@@ -148,7 +148,7 @@ impl TlvMsg {
         let start = out.len();
         out.extend_from_slice(&self.id.0.to_be_bytes());
         let count =
-            u16::try_from(self.items.len()).map_err(|_| Error::TooLong("nombre d'items TlvMsg"))?;
+            u16::try_from(self.items.len()).map_err(|_| Error::TooLong("TlvMsg item count"))?;
         out.extend_from_slice(&count.to_be_bytes());
         for (tag, value) in &self.items {
             out.extend_from_slice(&tag.0.to_be_bytes());
@@ -192,7 +192,7 @@ impl TlvMsg {
 
     fn decode_at_depth(buf: &[u8], depth: usize) -> Result<Self, Error> {
         if depth > MAX_DEPTH {
-            return Err(Error::Invalid("imbrication TlvMsg trop profonde"));
+            return Err(Error::Invalid("TlvMsg nesting too deep"));
         }
         let mut r = Reader::new(buf, "TlvMsg");
         let id = FourCc(r.u32()?);
@@ -238,7 +238,7 @@ impl TlvMsg {
                     let n = usize::from(r.u16()?);
                     Value::Msg(Self::decode_at_depth(r.take(n)?, depth + 1)?)
                 }
-                _ => return Err(Error::Invalid("type d'item TlvMsg inconnu")),
+                _ => return Err(Error::Invalid("unknown TlvMsg item type")),
             };
             items.push((tag, value));
         }
@@ -247,7 +247,7 @@ impl TlvMsg {
 }
 
 fn len16(n: usize) -> Result<u16, Error> {
-    u16::try_from(n).map_err(|_| Error::TooLong("valeur TlvMsg"))
+    u16::try_from(n).map_err(|_| Error::TooLong("TlvMsg value"))
 }
 
 #[cfg(test)]
@@ -288,7 +288,7 @@ mod tests {
             Some("abc")
         );
         for cut in 0..raw.len() {
-            assert!(TlvMsg::decode(&raw[..cut]).is_err(), "coupure à {cut}");
+            assert!(TlvMsg::decode(&raw[..cut]).is_err(), "cut at {cut}");
         }
     }
 

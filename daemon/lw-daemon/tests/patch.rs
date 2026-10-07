@@ -54,7 +54,7 @@ fn patch_network_to_device_and_back() {
     let reload = |session: &mut Session| {
         let next = reload_rx
             .recv_timeout(Duration::from_secs(1))
-            .expect("rechargement demandé");
+            .expect("reload requested");
         let old = std::mem::replace(
             session,
             Session::start(&next, lo.clone(), &shared, Some(&routes), &stop).unwrap(),
@@ -76,7 +76,7 @@ fn patch_network_to_device_and_back() {
         r#"{"cmd":"patch_input","channel":21,"device_channels":[3,4]}"#,
         &Caller {
             may_edit: false,
-            ..Caller::trusted("invité")
+            ..Caller::trusted("guest")
         },
     ))
     .unwrap();
@@ -116,11 +116,11 @@ fn patch_network_to_device_and_back() {
     }
     assert!(
         (db(peaks[2]) + 12.0).abs() < 0.2 && (db(peaks[3]) + 12.0).abs() < 0.2,
-        "entrées 3-4 : {peaks:?}"
+        "inputs 3-4: {peaks:?}"
     );
     assert!(
         peaks[0] == 0.0 && peaks[1] == 0.0 && peaks[4..].iter().all(|&p| p == 0.0),
-        "autres entrées muettes : {peaks:?}"
+        "other inputs silent: {peaks:?}"
     );
     let st = dev.snapshot();
     assert_eq!(st.inputs.len(), 1);
@@ -175,7 +175,7 @@ fn patch_network_to_device_and_back() {
     std::thread::sleep(Duration::from_millis(200));
     rx_stop.request();
     let stats = receiver.join().unwrap();
-    assert!(stats.packets > 250, "{} paquets reçus", stats.packets);
+    assert!(stats.packets > 250, "{} packets received", stats.packets);
     assert_eq!(stats.lost, 0);
     assert_eq!(
         stats.payload_sizes.keys().copied().collect::<Vec<_>>(),
@@ -184,7 +184,7 @@ fn patch_network_to_device_and_back() {
     // Last interval peak (established signal): −6 dBFS.
     assert!(
         (stats.peak_dbfs + 6.0).abs() < 0.2,
-        "crête {}",
+        "peak {}",
         stats.peak_dbfs
     );
 
@@ -265,11 +265,11 @@ fn input_changes_do_not_interrupt_emission() {
     stop.request();
     dev.thread.join().unwrap();
     let expected = (elapsed.as_millis() / 5) as u64;
-    assert_eq!(stats.resyncs, 0, "flux émis relancé : {stats:?}");
-    assert_eq!(stats.lost, 0, "paquets perdus : {stats:?}");
+    assert_eq!(stats.resyncs, 0, "transmitted stream restarted: {stats:?}");
+    assert_eq!(stats.lost, 0, "packets lost: {stats:?}");
     assert!(
         stats.packets >= expected,
-        "{} paquets pour {expected} attendus",
+        "{} packets, {expected} expected",
         stats.packets
     );
 }

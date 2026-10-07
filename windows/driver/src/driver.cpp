@@ -53,7 +53,7 @@ HINSTANCE g_module = nullptr;
 std::atomic<long> g_objects{0};
 std::atomic<long> g_locks{0};
 
-void log_msg(int level, const std::string &msg) { lw_log(level, "pilote", msg.c_str()); }
+void log_msg(int level, const std::string &msg) { lw_log(level, "driver", msg.c_str()); }
 
 // UTF-8 → ANSI code page (ASIO hosts display ANSI strings), truncated to cap - 1.
 void to_ansi(const std::string &utf8, char *out, size_t cap) {
@@ -171,7 +171,7 @@ public:
         const char *err = nullptr;
         client_ = lw_pipe_client_connect(kServicePipe, 2000, &err);
         if (client_ == nullptr) {
-            *error = std::string("service OpenLW injoignable : ") + (err ? err : "erreur inconnue");
+            *error = std::string("OpenLW service unreachable: ") + (err ? err : "unknown error");
             return false;
         }
         return true;
@@ -189,7 +189,7 @@ public:
         const char *err = nullptr;
         char *out = lw_pipe_call(client_, request, &err);
         if (out == nullptr) {
-            *error = std::string("service OpenLW : ") + (err ? err : "erreur inconnue");
+            *error = std::string("OpenLW service: ") + (err ? err : "unknown error");
             close();
             return false;
         }
@@ -214,12 +214,12 @@ bool read_geometry(Control &c, Geometry *g, std::string *error) {
     }
     if (r.find("\"ok\":true") == std::string::npos) {
         std::string e;
-        *error = json_string(r, "error", &e) ? e : "périphérique OpenLW indisponible";
+        *error = json_string(r, "error", &e) ? e : "OpenLW device unavailable";
         return false;
     }
     if (!json_u64(r, "generation", &g->generation) || !json_u64(r, "channels_to_net", &g->to_net) ||
         !json_u64(r, "channels_from_net", &g->from_net)) {
-        *error = "réponse du service incomplète";
+        *error = "incomplete service response";
         return false;
     }
     uint64_t m = 0;
@@ -292,7 +292,7 @@ public:
         uint64_t h = 0;
         if (r.find("\"ok\":true") == std::string::npos || !json_u64(r, "handle", &h) || h == 0) {
             std::string e;
-            return fail(json_string(r, "error", &e) ? e : "région partagée refusée par le service");
+            return fail(json_string(r, "error", &e) ? e : "shared region refused by the service");
         }
         handle_ = reinterpret_cast<void *>(static_cast<uintptr_t>(h));
         base_ = lw_shm_map(handle_, &size_);
@@ -309,12 +309,12 @@ public:
             }
             lw_shm_release(handle_);
             handle_ = nullptr;
-            return fail("région partagée invalide (version, horloge ou nombre de canaux)");
+            return fail("invalid shared region (version, clock or channel count)");
         }
         qpc_freq_ = clock.ns_denom;
         start_monitor();
-        log_msg(1, "attaché : " + std::to_string(geom_.from_net) + " entrées, " + std::to_string(geom_.to_net) +
-                       " sorties, génération " + std::to_string(geom_.generation));
+        log_msg(1, "attached: " + std::to_string(geom_.from_net) + " inputs, " + std::to_string(geom_.to_net) +
+                       " outputs, generation " + std::to_string(geom_.generation));
         return ASIOTrue;
     }
 
@@ -322,7 +322,7 @@ public:
     long getDriverVersion() override { return kVersion; }
     void getErrorMessage(char *string) override {
         std::lock_guard<std::mutex> l(error_mutex_);
-        to_ansi(error_.empty() ? "aucune erreur" : error_, string, 124);
+        to_ansi(error_.empty() ? "no error" : error_, string, 124);
     }
 
     ASIOError start() override {
@@ -438,7 +438,7 @@ public:
         size_t i = static_cast<size_t>(info->channel);
         std::string name = i < names.size() && !names[i].empty()
                                ? names[i]
-                               : std::string(info->isInput ? "Entrée " : "Sortie ") + std::to_string(i + 1);
+                               : std::string(info->isInput ? "Input " : "Output ") + std::to_string(i + 1);
         to_ansi(name, info->name, sizeof info->name);
         return ASE_OK;
     }
@@ -556,7 +556,7 @@ private:
         const uint64_t period = static_cast<uint64_t>(buffer_size_);
         int rc = lw_rt_promote(period * 1000000000ull / 48000, 0, 0);
         if (rc != 0) {
-            log_msg(2, "temps réel MMCSS refusé (code " + std::to_string(rc) + ")");
+            log_msg(2, "MMCSS real-time scheduling refused (code " + std::to_string(rc) + ")");
         }
         const size_t n = static_cast<size_t>(buffer_size_);
         const size_t ch_in = static_cast<size_t>(geom_.from_net), ch_out = static_cast<size_t>(geom_.to_net);
@@ -672,8 +672,8 @@ private:
             ASIOCallbacks *cb = callbacks_;
             if (changed && !requested && cb != nullptr && cb->asioMessage != nullptr &&
                 cb->asioMessage(kAsioSelectorSupported, kAsioResetRequest, nullptr, nullptr) == 1) {
-                log_msg(2, err.empty() ? "périphérique OpenLW modifié : réinitialisation demandée"
-                                       : "service OpenLW perdu (" + err + ") : réinitialisation demandée");
+                log_msg(2, err.empty() ? "OpenLW device changed: reset requested"
+                                       : "OpenLW service lost (" + err + "): reset requested");
                 cb->asioMessage(kAsioResetRequest, 0, nullptr, nullptr);
                 requested = true;
             }

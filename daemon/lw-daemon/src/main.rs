@@ -22,7 +22,7 @@ use lw_proto::channel::{Channel, AUDIO_PORT};
 use lw_sys::ctl::Endpoint;
 
 #[derive(Parser)]
-#[command(version, about = "Daemon et outil Livewire / AES67 d'OpenLW")]
+#[command(version, about = "OpenLW Livewire / AES67 daemon and tool")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -255,7 +255,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // Also in system log and log file (service without stderr).
-            lw_daemon::error!("erreur : {e}");
+            lw_daemon::error!("error: {e}");
             ExitCode::FAILURE
         }
     }
@@ -285,19 +285,19 @@ fn print_sources(dir: &lw_daemon::discovery::Directory, json: bool) -> Res {
         return Ok(());
     }
     println!(
-        "{:>6}  {:<16} {:<16} {:<10} {:<20} terminal",
-        "canal", "nom", "groupe", "type", ""
+        "{:>7}  {:<16} {:<16} {:<10} {:<20} terminal",
+        "channel", "name", "group", "type", ""
     );
     for s in &sources {
         println!(
-            "{:>6}  {:<16} {:<16} {:<10} {:<20} {}",
+            "{:>7}  {:<16} {:<16} {:<10} {:<20} {}",
             s.channel, s.name, s.stream, s.kind, s.terminal, s.terminal_ip
         );
     }
     for (ip, name, known, nums) in dir.terminals() {
         if known < usize::from(nums) || name.is_none() {
             println!(
-                "  (terminal {ip} : {known}/{nums} sources connues, annonce complète en attente)"
+                "  (terminal {ip}: {known}/{nums} sources known, waiting for full advertisement)"
             );
         }
     }
@@ -313,7 +313,7 @@ fn print_rx(s: &RxStats, json: bool) {
         return;
     }
     info!(
-        "{} pkts={} perdus={} retard/doublon={} resync={} PT={} charge={} Δts={} SSRC=groupe:{} gigue={:.1} éch crête={:.1} dBFS",
+        "{} pkts={} lost={} late/dup={} resync={} PT={} payload={} Δts={} SSRC=group:{} jitter={:.1} smp peak={:.1} dBFS",
         s.group,
         s.packets,
         s.lost,
@@ -358,14 +358,14 @@ fn run(cli: Cli) -> Res {
             no_rt,
         } => {
             let nic = iface::find(&iface)?;
-            let ch = Channel::new(channel).ok_or("canal hors 1..32766")?;
+            let ch = Channel::new(channel).ok_or("channel outside 1..32766")?;
             let fmt: Format = format.into();
             let mut stream = tx::TxStream::new(ch, fmt.into());
             stream.payload_type = pt;
             stream.tone = tx::Tone::new(tone, level);
             let stop = stop_after(seconds);
             info!(
-                "émission canal {channel} → {}:{} sur {} ({}), {:?}",
+                "transmitting channel {channel} → {}:{} on {} ({}), {:?}",
                 stream.group(),
                 stream.port,
                 nic.name,
@@ -398,8 +398,8 @@ fn run(cli: Cli) -> Res {
             let report = tx::run(&nic, &stream, opts, &stop)?;
             stop.request();
             if let Some(h) = adv {
-                let (full, short) = h.join().map_err(|_| "thread d'annonce")??;
-                info!("annonces : {full} complètes, {short} courtes");
+                let (full, short) = h.join().map_err(|_| "advertisement thread panicked")??;
+                info!("advertisements: {full} full, {short} short");
             }
             info!("{}", serde_json::to_string(&report)?);
             Ok(())
@@ -416,12 +416,12 @@ fn run(cli: Cli) -> Res {
             let nic = iface::find(&iface)?;
             let group = match (channel, group) {
                 (Some(c), _) => Channel::new(c)
-                    .ok_or("canal hors 1..32766")?
+                    .ok_or("channel outside 1..32766")?
                     .group(Kind::from(kind).into()),
                 (None, Some(g)) => g,
-                (None, None) => return Err("indiquer --channel ou --group".into()),
+                (None, None) => return Err("specify --channel or --group".into()),
             };
-            info!("réception {group}:{port} sur {} ({})", nic.name, nic.ipv4);
+            info!("receiving {group}:{port} on {} ({})", nic.name, nic.ipv4);
             let stop = stop_after(seconds);
             let final_stats = rx::run(&nic, group, port, &stop, Duration::from_secs(1), |s| {
                 print_rx(s, json)
@@ -464,7 +464,7 @@ fn run(cli: Cli) -> Res {
         } => {
             let nic = iface::find(&iface)?;
             info!(
-                "écoute des annonces sur {} ({}) pendant {seconds} s",
+                "listening for advertisements on {} ({}) for {seconds} s",
                 nic.name, nic.ipv4
             );
             let dir = lw_daemon::discovery::Directory::new();
@@ -552,12 +552,12 @@ fn run(cli: Cli) -> Res {
                 (&action, reply.get("sources").and_then(|s| s.as_array()))
             {
                 println!(
-                    "{:>6}  {:<16} {:<16} {:<10} terminal",
-                    "canal", "nom", "groupe", "type"
+                    "{:>7}  {:<16} {:<16} {:<10} terminal",
+                    "channel", "name", "group", "type"
                 );
                 for s in list {
                     println!(
-                        "{:>6}  {:<16} {:<16} {:<10} {} ({})",
+                        "{:>7}  {:<16} {:<16} {:<10} {} ({})",
                         s["channel"],
                         s["name"].as_str().unwrap_or(""),
                         s["stream"].as_str().unwrap_or(""),
@@ -573,7 +573,7 @@ fn run(cli: Cli) -> Res {
             if reply.get("ok") == Some(&serde_json::Value::Bool(true)) {
                 Ok(())
             } else {
-                Err("le daemon a renvoyé une erreur".into())
+                Err("the daemon returned an error".into())
             }
         }
     }
@@ -605,13 +605,13 @@ fn run_windows_service(config: Option<PathBuf>, log_file: Option<PathBuf>) -> Re
             let result = Config::load(&config)
                 .map_err(|e| e.to_string())
                 .and_then(|cfg| {
-                    info!("service {WINDOWS_SERVICE} démarré ({})", config.display());
+                    info!("service {WINDOWS_SERVICE} started ({})", config.display());
                     lw_daemon::supervisor::run(cfg, Some(config), &stop, Some(&Endpoint::service()))
                         .map_err(|e| e.to_string())
                 });
             stop.request();
             if let Err(e) = &result {
-                lw_daemon::error!("service {WINDOWS_SERVICE} : {e}");
+                lw_daemon::error!("service {WINDOWS_SERVICE}: {e}");
             }
             result
         }),

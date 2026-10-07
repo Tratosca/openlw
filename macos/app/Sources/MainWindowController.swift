@@ -30,9 +30,9 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     // Header.
     private let stateDot = NSView()
-    private let stateLabel = NSTextField(labelWithString: "Connexion au service OpenLW…")
+    private let stateLabel = NSTextField(labelWithString: "Connecting to the OpenLW service…")
     private let ifacePopup = NSPopUpButton()
-    private let advertiseCheck = NSButton(checkboxWithTitle: "Annoncer les sorties sur le réseau", target: nil, action: nil)
+    private let advertiseCheck = NSButton(checkboxWithTitle: "Advertise outputs on the network", target: nil, action: nil)
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
 
     // Livewire channels per direction (device pairs, 1–16).
@@ -43,15 +43,15 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     // Mac default input/output.
     private let macInputLabel = NSTextField(labelWithString: "")
     private let macOutputLabel = NSTextField(labelWithString: "")
-    private let useInput = NSButton(title: "Utiliser OpenLW", target: nil, action: nil)
-    private let useOutput = NSButton(title: "Utiliser OpenLW", target: nil, action: nil)
+    private let useInput = NSButton(title: "Use OpenLW", target: nil, action: nil)
+    private let useOutput = NSButton(title: "Use OpenLW", target: nil, action: nil)
 
     // Inputs.
-    private let namingCheck = NSButton(checkboxWithTitle: "Nommer les périphériques d'après les canaux patchés, par exemple « OpenLW In (2 - Studio A) »",
+    private let namingCheck = NSButton(checkboxWithTitle: "Name devices after patched channels, for example “OpenLW In (2 - Studio A)”",
                                        target: nil, action: nil)
     private let layoutPopup = NSPopUpButton()
-    static let layouts = [("duplex", "Un périphérique « OpenLW » (entrée et sortie)"),
-                          ("split", "Deux périphériques « OpenLW In » et « OpenLW Out »")]
+    static let layouts = [("duplex", "One “OpenLW” device (input and output)"),
+                          ("split", "Two devices, “OpenLW In” and “OpenLW Out”")]
     private let grid = InputGridView()
     private let manualChannel = NSTextField()
     private let manualKind = NSPopUpButton()
@@ -66,10 +66,10 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     private let terminalField = NSTextField()
     private let latencyPopup = NSPopUpButton()
     private let dscpPopup = NSPopUpButton()
-    static let latencies = [("low", "Faible : ≈ 8 ms ajoutées, réseau dédié"),
-                            ("normal", "Normale : ≈ 17 ms ajoutées"),
-                            ("safe", "Sûre : ≈ 35 ms ajoutées, réseau partagé ou Mac chargé")]
-    static let dscps = [(46, "EF (46) : défaut Livewire"), (34, "AF41 (34) : recommandé pour AES67"), (0, "Aucune (0)")]
+    static let latencies = [("low", "Low: ≈ 8 ms added, dedicated network"),
+                            ("normal", "Normal: ≈ 17 ms added"),
+                            ("safe", "Safe: ≈ 35 ms added, shared network or busy Mac")]
+    static let dscps = [(46, "EF (46): Livewire default"), (34, "AF41 (34): recommended for AES67"), (0, "None (0)")]
     private static let advancedKey = "advancedVisible"
 
     private var timers: [Timer] = []
@@ -79,7 +79,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         super.init(window: window)
     }
 
-    required init?(coder: NSCoder) { fatalError("non utilisé") }
+    required init?(coder: NSCoder) { fatalError("unused") }
 
     convenience init(client: DaemonClient) {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 720),
@@ -143,7 +143,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     private func buildHeader() -> GlassPanel {
-        let panel = GlassPanel(title: "Réseau Livewire")
+        let panel = GlassPanel(title: "Livewire Network")
         stateDot.wantsLayer = true
         stateDot.layer?.cornerRadius = 5
         stateDot.layer?.backgroundColor = NSColor.systemGray.cgColor
@@ -159,13 +159,13 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         ifacePopup.action = #selector(ifaceChosen(_:))
         advertiseCheck.target = self
         advertiseCheck.action = #selector(advertiseToggled(_:))
-        let ifaceLabel = NSTextField(labelWithString: "Interface :")
+        let ifaceLabel = NSTextField(labelWithString: "Interface:")
         ifaceLabel.font = Theme.body
         let controls = NSStackView(views: [ifaceLabel, ifacePopup, NSView(), advertiseCheck])
         controls.spacing = 8
         ifacePopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
 
-        let clock = NSTextField(labelWithString: "Horloge : celle du Mac. Les écarts avec les autres appareils sont compensés automatiquement.")
+        let clock = NSTextField(labelWithString: "Clock: the Mac's own. Drift relative to other devices is compensated automatically.")
         clock.font = Theme.small
         clock.textColor = .secondaryLabelColor
 
@@ -186,8 +186,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     private func buildInputs() -> GlassPanel {
-        let panel = GlassPanel(title: "Entrées du Mac (réseau vers Mac)")
-        let hint = NSTextField(wrappingLabelWithString: "Cliquez une case pour envoyer la source sur cette paire d'entrées du périphérique OpenLW. Cliquez à nouveau pour la libérer. Les applications enregistrent depuis « OpenLW » (ou « OpenLW In »). Le bouton casque fait écouter la source sur la sortie du Mac, sans la patcher.")
+        let panel = GlassPanel(title: "Mac Inputs (Network to Mac)")
+        let hint = NSTextField(wrappingLabelWithString: "Click a cell to send the source to that input pair of the OpenLW device. Click again to release it. Applications record from “OpenLW” (or “OpenLW In”). The headphone button plays the source on the Mac's output without patching it.")
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
 
@@ -197,19 +197,19 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         grid.onRemove = { [weak self] row in self?.removeRow(row) }
 
 
-        let addLabel = NSTextField(labelWithString: "Source non annoncée, canal :")
+        let addLabel = NSTextField(labelWithString: "Unadvertised source, channel:")
         addLabel.font = Theme.body
-        manualChannel.placeholderString = "1 à 32766"
+        manualChannel.placeholderString = "1 to 32766"
         manualChannel.font = Theme.mono
         manualChannel.target = self
         manualChannel.action = #selector(addManual(_:))
         manualChannel.widthAnchor.constraint(equalToConstant: 90).isActive = true
-        manualKind.addItems(withTitles: ["Stéréo", "Retour (To Source)", "Surround 8 canaux"])
-        let add = NSButton(title: "Ajouter à la grille", target: self, action: #selector(addManual(_:)))
+        manualKind.addItems(withTitles: ["Stereo", "Backfeed (To Source)", "8-channel surround"])
+        let add = NSButton(title: "Add to Grid", target: self, action: #selector(addManual(_:)))
         let addRow = NSStackView(views: [addLabel, manualChannel, manualKind, add])
         addRow.spacing = 8
 
-        let countRow = countControls(inCount, label: "Canaux Livewire reçus :", unit: "entrées",
+        let countRow = countControls(inCount, label: "Received Livewire channels:", unit: "inputs",
                                      macLabel: macInputLabel, use: useInput, useAction: #selector(useOpenLWInput(_:)))
         let v = NSStackView(views: [countRow, hint, grid, addRow])
         v.orientation = .vertical
@@ -222,8 +222,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     private func buildDevice() -> GlassPanel {
-        let panel = GlassPanel(title: "Périphérique audio")
-        let label = NSTextField(labelWithString: "Présentation dans macOS :")
+        let panel = GlassPanel(title: "Audio Device")
+        let label = NSTextField(labelWithString: "Layout in macOS:")
         label.font = Theme.body
         layoutPopup.addItems(withTitles: Self.layouts.map { $0.1 })
         layoutPopup.target = self
@@ -232,7 +232,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         row.spacing = 8
         namingCheck.target = self
         namingCheck.action = #selector(namingToggled(_:))
-        let hint = NSTextField(wrappingLabelWithString: "Avec deux périphériques, l'entrée et la sortie portent chacune leur nom dans les applications. Les canaux portent toujours le nom de leur source (Configuration audio et MIDI, Logic…). Après un changement de présentation ou de nom, sélectionnez de nouveau le périphérique dans les applications qui le retrouvent par son nom, comme Audacity.")
+        let hint = NSTextField(wrappingLabelWithString: "With two devices, the input and the output each have their own name in applications. Channels always carry the name of their source (Audio MIDI Setup, Logic…). After changing the layout or the names, select the device again in applications that find it by name, such as Audacity.")
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
         let v = NSStackView(views: [row, namingCheck, hint])
@@ -251,14 +251,14 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     private func buildOutputs() -> GlassPanel {
-        let panel = GlassPanel(title: "Sorties du Mac (Mac vers réseau)")
-        let hint = NSTextField(wrappingLabelWithString: "Choisissez « OpenLW » (ou « OpenLW Out ») comme sortie du Mac ou de votre application. Chaque paire de sorties est diffusée sur le canal Livewire de votre choix, sous le nom indiqué. Une modification s'applique quand la case Diffuser est cochée.")
+        let panel = GlassPanel(title: "Mac Outputs (Mac to Network)")
+        let hint = NSTextField(wrappingLabelWithString: "Choose “OpenLW” (or “OpenLW Out”) as the output of the Mac or of your application. Each output pair is transmitted on the Livewire channel of your choice, under the name entered. Changes apply while Transmit is checked.")
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
         outputStack.orientation = .vertical
         outputStack.alignment = .leading
         outputStack.spacing = 6
-        let countRow = countControls(outCount, label: "Canaux Livewire diffusés :", unit: "sorties",
+        let countRow = countControls(outCount, label: "Transmitted Livewire channels:", unit: "outputs",
                                      macLabel: macOutputLabel, use: useOutput, useAction: #selector(useOpenLWOutput(_:)))
         let v = NSStackView(views: [countRow, hint, outputStack])
         v.orientation = .vertical
@@ -272,13 +272,13 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     private func buildAdvanced() -> GlassPanel {
-        let panel = GlassPanel(title: "Réglages avancés")
+        let panel = GlassPanel(title: "Advanced Settings")
         advancedToggle.setButtonType(.pushOnPushOff)
         advancedToggle.bezelStyle = .disclosure
         advancedToggle.title = ""
         advancedToggle.target = self
         advancedToggle.action = #selector(advancedToggled(_:))
-        let toggleLabel = NSTextField(labelWithString: "Nom annoncé, latence de réception, priorité réseau")
+        let toggleLabel = NSTextField(labelWithString: "Advertised name, receive latency, network priority")
         toggleLabel.font = Theme.small
         toggleLabel.textColor = .secondaryLabelColor
         let toggleRow = NSStackView(views: [advancedToggle, toggleLabel])
@@ -302,7 +302,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             h.widthAnchor.constraint(lessThanOrEqualToConstant: 560).isActive = true
             return v
         }
-        terminalField.placeholderString = Host.current().localizedName ?? "nom de l'ordinateur"
+        terminalField.placeholderString = Host.current().localizedName ?? "computer name"
         terminalField.widthAnchor.constraint(equalToConstant: 260).isActive = true
         terminalField.target = self
         terminalField.action = #selector(terminalNameEntered(_:))
@@ -317,12 +317,12 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         advancedBody.alignment = .leading
         advancedBody.spacing = 12
         for v in [
-            row("Nom annoncé du Mac :", terminalField,
-                "Nom affiché par les autres appareils Livewire, 32 caractères au plus, accents remplacés. Vide : nom de l'ordinateur. Validez avec Retour."),
-            row("Latence de réception :", latencyPopup,
-                "Tampons ajoutés à celui de l'application qui enregistre. Plus la latence est faible, plus un retard du réseau ou du Mac risque de provoquer une coupure brève."),
-            row("Priorité réseau (DSCP) :", dscpPopup,
-                "Marquage des flux audio émis par le Mac. Choisissez la valeur prévue par la QoS de vos commutateurs."),
+            row("Advertised Mac name:", terminalField,
+                "Name shown by other Livewire devices, 32 characters at most, accents replaced. Empty: computer name. Press Return to apply."),
+            row("Receive latency:", latencyPopup,
+                "Buffering added to that of the recording application. The lower the latency, the more likely a network or Mac delay causes a brief dropout."),
+            row("Network priority (DSCP):", dscpPopup,
+                "Marking of the audio streams transmitted by the Mac. Choose the value expected by the QoS policy of your switches."),
         ] {
             advancedBody.addArrangedSubview(v)
         }
@@ -367,7 +367,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         let title = NSTextField(labelWithString: label)
         title.font = Theme.body
         popup.addItems(withTitles: (1...Self.maxPairs).map { n in
-            "\(n) \(n == 1 ? "canal" : "canaux") (\(2 * n) \(unit))"
+            "\(n) \(n == 1 ? "channel" : "channels") (\(2 * n) \(unit))"
         })
         popup.target = self
         popup.action = #selector(channelCountChosen(_:))
@@ -495,14 +495,14 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         if link.searching {
             stateDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
             stateLabel.stringValue = link.auto
-                ? "Recherche du réseau Livewire. Branchez le Mac sur le réseau Livewire, ou choisissez l'interface."
-                : "Interface « \(config.iface) » indisponible. Branchez-la, ou choisissez Automatique."
+                ? "Searching for the Livewire network. Connect the Mac to the Livewire network, or choose the interface."
+                : "Interface “\(config.iface)” unavailable. Connect it, or choose Automatic."
             return
         }
         stateDot.layer?.backgroundColor = NSColor.systemGreen.cgColor
         let name = link.friendly == link.iface ? link.iface : "\(link.friendly) (\(link.iface))"
-        stateLabel.stringValue = "Connecté au réseau Livewire par \(name) · \(link.ipv4)"
-            + (link.auto ? " · interface choisie automatiquement" : "")
+        stateLabel.stringValue = "Connected to the Livewire network via \(name) · \(link.ipv4)"
+            + (link.auto ? " · interface chosen automatically" : "")
     }
 
     /// Mac default input/output and buttons to select “OpenLW”.
@@ -510,8 +510,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         for (input, label, button) in [(true, macInputLabel, useInput), (false, macOutputLabel, useOutput)] {
             let lw = MacAudio.livewireDevice(input: input)
             let current = MacAudio.defaultDevice(input: input)
-            let name = current.map(MacAudio.name) ?? "aucune"
-            label.stringValue = (input ? "Entrée du Mac : " : "Sortie du Mac : ") + name
+            let name = current.map(MacAudio.name) ?? "none"
+            label.stringValue = (input ? "Mac input: " : "Mac output: ") + name
             button.isHidden = lw == nil || current == lw
         }
     }
@@ -552,18 +552,18 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         let auto = config.autoIface
         let autoTitle: String
         if !auto {
-            autoTitle = "Automatique"
+            autoTitle = "Automatic"
         } else if link.searching {
-            autoTitle = "Automatique · recherche en cours"
+            autoTitle = "Automatic · searching"
         } else {
-            autoTitle = "Automatique · \(link.friendly)"
+            autoTitle = "Automatic · \(link.friendly)"
         }
         var items: [(String, String)] = [(autoTitle, "auto")]
         var listed = ifaces.filter { $0.candidate || (!auto && $0.name == config.iface) }
         listed.sort { ($0.livewire ? 0 : 1, $0.name) < ($1.livewire ? 0 : 1, $1.name) }
         items += listed.map { ($0.title, $0.name) }
         if !auto && !ifaces.contains(where: { $0.name == config.iface }) {
-            items.append(("\(config.iface) (indisponible)", config.iface))
+            items.append(("\(config.iface) (unavailable)", config.iface))
         }
         let existing = ifacePopup.itemArray.filter { !$0.isSeparatorItem }.map { "\($0.title)|\($0.representedObject as? String ?? "")" }
         if existing != items.map({ "\($0.0)|\($0.1)" }) {
@@ -600,10 +600,10 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
                                 origin: origin, removable: removable))
         }
         for s in discovered { add(s, origin: s.terminal, removable: false) }
-        for s in manual { add(s, origin: "saisi", removable: true) }
+        for s in manual { add(s, origin: "manual", removable: true) }
         for p in config.inputs {
             guard let ch = p.channel else { continue }
-            add(DiscoveredSource(channel: ch, name: "", kind: p.kind, terminal: ""), origin: "non annoncé", removable: true)
+            add(DiscoveredSource(channel: ch, name: "", kind: p.kind, terminal: ""), origin: "not advertised", removable: true)
         }
         gridRows = rows
         grid.rows = rows
@@ -615,8 +615,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         grid.listenLevel = listening == nil ? nil : listener.takePeak()
         grid.columnLevels = grid.pairs.map { pair in pair.map { DeviceMeters.peak(meters.fromNet, channels: [$0]) } }
         grid.columnStatus = grid.pairs.map { pair in
-            guard let primed = meters.inputsPrimed.first(where: { $0.key.contains(pair[0]) })?.value else { return "libre" }
-            return primed ? "audio reçu" : "en attente"
+            guard let primed = meters.inputsPrimed.first(where: { $0.key.contains(pair[0]) })?.value else { return "free" }
+            return primed ? "receiving audio" : "waiting"
         }
         for row in outputRows {
             row.meter.levels = row.pair.map { DeviceMeters.peak(meters.toNet, channels: [$0]) }
@@ -659,13 +659,13 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         let lostIn = config.inputs.filter { ($0.deviceChannels.max() ?? 0) > fromNet }.count
         if lostOut + lostIn > 0, let window = window {
             let alert = NSAlert()
-            alert.messageText = "Réduire le nombre de canaux ?"
+            alert.messageText = "Reduce the number of channels?"
             var lost: [String] = []
-            if lostOut > 0 { lost.append("\(lostOut) diffusion\(lostOut > 1 ? "s" : "") arrêtée\(lostOut > 1 ? "s" : "")") }
-            if lostIn > 0 { lost.append("\(lostIn) source\(lostIn > 1 ? "s" : "") retirée\(lostIn > 1 ? "s" : "") des entrées") }
-            alert.informativeText = lost.joined(separator: ", ") + ". Le son du périphérique « OpenLW » s'interrompt un instant."
-            alert.addButton(withTitle: "Réduire")
-            alert.addButton(withTitle: "Annuler")
+            if lostOut > 0 { lost.append(lostOut == 1 ? "1 transmission stopped" : "\(lostOut) transmissions stopped") }
+            if lostIn > 0 { lost.append(lostIn == 1 ? "1 source removed from the inputs" : "\(lostIn) sources removed from the inputs") }
+            alert.informativeText = lost.joined(separator: ", ") + ". Audio on the “OpenLW” device stops for a moment."
+            alert.addButton(withTitle: "Reduce")
+            alert.addButton(withTitle: "Cancel")
             alert.beginSheetModal(for: window) { [weak self] response in
                 guard let self = self else { return }
                 if response == .alertFirstButtonReturn {
@@ -684,11 +684,11 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     private func useOpenLW(input: Bool) {
         guard let lw = MacAudio.livewireDevice(input: input) else {
-            show(.refused("le périphérique OpenLW est introuvable. Réinstallez OpenLW."))
+            show(.refused("the OpenLW device cannot be found. Reinstall OpenLW."))
             return
         }
         if !MacAudio.setDefault(lw, input: input) {
-            show(.refused("macOS a refusé de changer \(input ? "l'entrée" : "la sortie") par défaut."))
+            show(.refused("macOS refused to change the default \(input ? "input" : "output")."))
         }
         updateMacDevices()
     }
@@ -699,7 +699,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     @objc private func addManual(_ sender: Any) {
         guard let ch = Int(manualChannel.stringValue.trimmingCharacters(in: .whitespaces)), (1...32766).contains(ch) else {
-            show(.refused("canal invalide. Saisissez un nombre de 1 à 32766."))
+            show(.refused("invalid channel. Enter a number from 1 to 32766."))
             return
         }
         let kind = ["stereo", "backfeed", "surround"][max(0, manualKind.indexOfSelectedItem)]
@@ -722,7 +722,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         let width = r.source.patchKind == "surround" ? 8 : 2
         let first = pair[0]
         guard first + width - 1 <= config.channelsFromNet else {
-            show(.refused("une source surround occupe 8 entrées. Choisissez une paire de 1-2 à \(config.channelsFromNet - 7)-\(config.channelsFromNet - 6)."))
+            show(.refused("a surround source occupies 8 inputs. Choose a pair from 1-2 to \(config.channelsFromNet - 7)-\(config.channelsFromNet - 6)."))
             return
         }
         mutate(["cmd": "patch_input", "channel": r.source.channel, "kind": r.source.patchKind,
@@ -738,7 +738,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         }
         manual.removeAll { $0.channel == s.channel && $0.patchKind == s.patchKind }
         // A received stream stays in the configuration, even unpatched (displaced by another
-        // patch): without remove_input the row would come back as "non annoncé".
+        // patch): without remove_input the row would come back as "not advertised".
         if config.inputs.contains(where: { $0.channel == s.channel && $0.kind == s.patchKind }) {
             mutate(["cmd": "remove_input", "channel": s.channel, "kind": s.patchKind])
         } else {
@@ -777,11 +777,11 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     /// Preview `s` on Mac's default audio output.
     func listen(to s: DiscoveredSource) {
         guard !statusIface.isEmpty, !statusIP.isEmpty else {
-            show(.refused("le Mac n'est pas encore relié au réseau Livewire. Choisissez l'interface, puis réessayez."))
+            show(.refused("the Mac is not connected to the Livewire network yet. Choose the interface, then try again."))
             return
         }
         if MacAudio.livewireIsDefault(input: false) {
-            show(.refused("la sortie du Mac est le périphérique OpenLW : l'écoute repartirait sur le réseau. Choisissez une autre sortie dans Réglages Système > Son."))
+            show(.refused("the Mac's output is the OpenLW device, so listening would send the audio back to the network. Choose another output in System Settings > Sound."))
             return
         }
         let group = s.stream.isEmpty ? livewireGroup(channel: s.channel, kind: s.patchKind) : s.stream
@@ -813,7 +813,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             return
         }
         guard let ch = row.channel else {
-            show(.refused("canal invalide. Saisissez un nombre de 1 à 32766."))
+            show(.refused("invalid channel. Enter a number from 1 to 32766."))
             row.show(previous)
             return
         }
@@ -844,27 +844,27 @@ final class OutputRow: NSStackView, NSTextFieldDelegate {
     private let channelField = NSTextField()
     private let nameField = NSTextField()
     private let formatPopup = NSPopUpButton()
-    private let emitCheck = NSButton(checkboxWithTitle: "Diffuser", target: nil, action: nil)
+    private let emitCheck = NSButton(checkboxWithTitle: "Transmit", target: nil, action: nil)
     var onApply: ((OutputRow) -> Void)?
 
-    static let formats = [("standard", "Standard (5 ms)"), ("aes67", "AES67 (1 ms)"), ("livestream", "Livestream (0,25 ms)")]
+    static let formats = [("standard", "Standard (5 ms)"), ("aes67", "AES67 (1 ms)"), ("livestream", "Livestream (0.25 ms)")]
 
     init(pair: [Int]) {
         self.pair = pair
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 10
-        let label = NSTextField(labelWithString: "Sorties \(pair[0])-\(pair[1])")
+        let label = NSTextField(labelWithString: "Outputs \(pair[0])-\(pair[1])")
         label.font = Theme.body
         label.widthAnchor.constraint(equalToConstant: 80).isActive = true
         meter.translatesAutoresizingMaskIntoConstraints = false
         meter.widthAnchor.constraint(equalToConstant: 110).isActive = true
         meter.heightAnchor.constraint(equalToConstant: 10).isActive = true
         meter.levels = [nil, nil]
-        channelField.placeholderString = "canal"
+        channelField.placeholderString = "channel"
         channelField.font = Theme.mono
         channelField.widthAnchor.constraint(equalToConstant: 70).isActive = true
-        nameField.placeholderString = "nom annoncé"
+        nameField.placeholderString = "advertised name"
         nameField.widthAnchor.constraint(equalToConstant: 170).isActive = true
         formatPopup.addItems(withTitles: Self.formats.map { $0.1 })
         for f in [channelField, nameField] {
@@ -879,7 +879,7 @@ final class OutputRow: NSStackView, NSTextFieldDelegate {
         show(nil)
     }
 
-    required init?(coder: NSCoder) { fatalError("non utilisé") }
+    required init?(coder: NSCoder) { fatalError("unused") }
 
     var enabled: Bool { emitCheck.state == .on }
     var channel: Int? {

@@ -60,7 +60,7 @@ pub fn find(name: &str) -> std::io::Result<Iface> {
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("interface {name} introuvable ou sans IPv4"),
+                format!("interface {name} not found or has no IPv4 address"),
             )
         })
 }
@@ -109,6 +109,6 @@ mod tests {
             .any(|i| i.loopback && i.ipv4 == Ipv4Addr::LOCALHOST));
         let lo = ifs.iter().find(|i| i.loopback).unwrap();
         assert_eq!(find(&lo.name).unwrap().ipv4, Ipv4Addr::LOCALHOST);
-        assert!(find("interface-inexistante").is_err());
+        assert!(find("no-such-interface").is_err());
     }
 }

@@ -51,7 +51,7 @@ _ws.malformed || _ws.expert.severity == error
 
 FourCC tags are displayed as ASCII; non-printable bytes are escaped as `\xNN`. TlvMsg types 1–9 are decoded; arrays remain typed and u64 values retain precision. Types 2/3 display bytes and a string if the content is printable ASCII, after removing trailing NULs. PSID/LPID fields expose the channel masked to 15 bits; FSID/BSID/INIP also expose an IPv4 address.
 
-The ADV summary shows the name and sources present in the packet without retaining earlier advertisements. A short advertisement therefore shows the dissector's current French placeholders `<absent>` for ATRN and `<aucune>` for sources. A malformed packet may have a partial summary; inspect expert information.
+The ADV summary shows the name and sources present in the packet without retaining earlier advertisements. A short advertisement therefore shows the `<none>` placeholder for ATRN and for sources. A malformed packet may have a partial summary; inspect expert information.
 
 ## Generation and validation
 

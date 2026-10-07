@@ -48,7 +48,7 @@ public sealed record Iface(string Name, string Friendly, string Ipv4, bool Loopb
         get
         {
             string b = Friendly == Name ? $"{Name} · {Ipv4}" : $"{Friendly} ({Name}) · {Ipv4}";
-            return Livewire ? b + " · réseau Livewire" : b;
+            return Livewire ? b + " · Livewire network" : b;
         }
     }
 }

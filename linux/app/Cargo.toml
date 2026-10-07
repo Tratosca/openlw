@@ -44,8 +44,8 @@ license-file = ["../../LICENSE", "0"]
 section = "sound"
 priority = "optional"
 extended-description = """\
-App de réglage d'OpenLW (GTK 4, libadwaita) : réseau Livewire, grille des entrées, \
-sorties diffusées, pré-écoute."""
+OpenLW configuration app (GTK 4, libadwaita): Livewire network, input grid, \
+transmitted outputs, preview."""
 depends = "$auto, openlw-daemon (>= 0.5.0)"
 assets = [
     ["target/release/openlw", "usr/bin/", "755"],
@@ -56,7 +56,7 @@ assets = [
 
 [package.metadata.generate-rpm]
 name = "openlw"
-summary = "OpenLW : audio Livewire et AES67 sur l'ordinateur"
+summary = "OpenLW: Livewire and AES67 audio on the computer"
 license = "Apache-2.0"
 assets = [
     { source = "target/release/openlw", dest = "/usr/bin/openlw", mode = "755" },

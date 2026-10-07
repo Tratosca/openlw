@@ -22,14 +22,14 @@ impl DaemonError {
     pub fn message(&self) -> String {
         match self {
             DaemonError::Unreachable => {
-                "Le service OpenLW ne répond pas. Démarrez-le, ou réinstallez OpenLW si le problème persiste."
+                "The OpenLW service is not responding. Start it, or reinstall OpenLW if the problem persists."
                     .into()
             }
             DaemonError::Decoding => {
-                "Réponse illisible du service OpenLW. Réinstallez OpenLW pour mettre l'app et le service à la même version."
+                "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version."
                     .into()
             }
-            DaemonError::Refused(reason) => format!("Modification impossible : {reason}"),
+            DaemonError::Refused(reason) => format!("Could not apply the change: {reason}"),
         }
     }
 }
@@ -98,7 +98,7 @@ fn parse(line: &str) -> Result<Value, DaemonError> {
         let reason = v
             .get("error")
             .and_then(Value::as_str)
-            .unwrap_or("erreur inconnue");
+            .unwrap_or("unknown error");
         Err(DaemonError::Refused(reason.into()))
     }
 }
@@ -113,10 +113,10 @@ mod tests {
     fn replies_and_errors() {
         assert!(parse(r#"{"ok":true,"status":{}}"#).is_ok());
         assert_eq!(
-            parse(r#"{"ok":false,"error":"refusé"}"#),
-            Err(DaemonError::Refused("refusé".into()))
+            parse(r#"{"ok":false,"error":"refused"}"#),
+            Err(DaemonError::Refused("refused".into()))
         );
-        assert_eq!(parse("pas du json"), Err(DaemonError::Decoding));
+        assert_eq!(parse("not json"), Err(DaemonError::Decoding));
         assert_eq!(parse("[1]"), Err(DaemonError::Decoding));
     }
 

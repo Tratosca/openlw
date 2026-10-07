@@ -64,7 +64,7 @@ final class GlassPanel: NSView {
         ])
     }
 
-    required init?(coder: NSCoder) { fatalError("non utilisé") }
+    required init?(coder: NSCoder) { fatalError("unused") }
 }
 
 /// Horizontal meter, one segment per channel; −60…0 dBFS scale.
@@ -196,9 +196,9 @@ final class InputGridView: NSView {
         let r = Int((p.y - headerHeight) / rowHeight)
         guard r < rows.count else { return nil }
         let menu = NSMenu()
-        menu.addItem(ClosureItem(listeningRow == r ? "Arrêter l'écoute" : "Écouter") { [weak self] in self?.onListen?(r) })
+        menu.addItem(ClosureItem(listeningRow == r ? "Stop Listening" : "Listen") { [weak self] in self?.onListen?(r) })
         if rows[r].removable {
-            menu.addItem(ClosureItem("Retirer de la grille") { [weak self] in self?.onRemove?(r) })
+            menu.addItem(ClosureItem("Remove from Grid") { [weak self] in self?.onRemove?(r) })
         }
         return menu
     }
@@ -226,7 +226,7 @@ final class InputGridView: NSView {
         for (c, pair) in pairs.enumerated() {
             let x = labelWidth + CGFloat(c) * columnWidth
             let name = pair.count > 2 ? "\(pair.first ?? 1)-\(pair.last ?? 8)" : "\(pair[0])-\(pair[1])"
-            text("Entrées \(name)", NSRect(x: x, y: 0, width: columnWidth, height: 16), font: Theme.small, color: .secondaryLabelColor, center: true)
+            text("Inputs \(name)", NSRect(x: x, y: 0, width: columnWidth, height: 16), font: Theme.small, color: .secondaryLabelColor, center: true)
             let levels = c < columnLevels.count ? columnLevels[c] : []
             let mrect = NSRect(x: x + 14, y: 19, width: columnWidth - 28, height: 9)
             for (i, level) in levels.prefix(2).enumerated() {
@@ -243,7 +243,7 @@ final class InputGridView: NSView {
             }
         }
         if rows.isEmpty {
-            text("Aucune source découverte. Choisissez l'interface, ou saisissez un canal ci-dessous.",
+            text("No sources discovered. Choose the interface, or enter a channel below.",
                  NSRect(x: 0, y: headerHeight + 6, width: bounds.width, height: 18), font: Theme.body, color: .secondaryLabelColor)
             return
         }
@@ -276,7 +276,7 @@ final class InputGridView: NSView {
                     (db > -6 ? Theme.meterRed : (db > -18 ? Theme.meterAmber : Theme.meterGreen)).setFill()
                     NSRect(x: track.minX, y: track.minY, width: track.width * CGFloat((db + 60) / 60), height: track.height).fill()
                 }
-                text("écoute", NSRect(x: track.maxX + 6, y: y + 8, width: 50, height: 16), font: Theme.small, color: Theme.accent)
+                text("listening", NSRect(x: track.maxX + 6, y: y + 8, width: 50, height: 16), font: Theme.small, color: Theme.accent)
             } else {
                 let kind = s.kind == "surround" ? " · surround" : ""
                 text(row.origin + kind, originRect, font: Theme.small, color: .secondaryLabelColor)
@@ -310,7 +310,7 @@ final class InputGridView: NSView {
             NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
         }
         let color: NSColor = active ? .white : .secondaryLabelColor
-        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Écouter") {
+        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Listen") {
             let size = NSSize(width: 14, height: 13)
             let target = NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height)
             let tinted = NSImage(size: size, flipped: false) { bounds in
@@ -336,7 +336,7 @@ final class ClosureItem: NSMenuItem {
         target = self
     }
 
-    required init(coder: NSCoder) { fatalError("non utilisé") }
+    required init(coder: NSCoder) { fatalError("unused") }
 
     @objc private func fire() { run() }
 }

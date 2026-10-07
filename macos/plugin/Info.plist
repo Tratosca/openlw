@@ -7,7 +7,7 @@
 		<string>fr.francois-brille.openlw.daemon</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>fr</string>
+	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>OpenLW</string>
 	<key>CFBundleIdentifier</key>

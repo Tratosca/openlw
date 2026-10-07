@@ -22,15 +22,15 @@ public sealed partial class MainWindow : Window
     private const int MaxPairs = 16;
     private static readonly (string Value, string Title)[] Latencies =
     [
-        ("low", "Faible : ≈ 8 ms ajoutées, réseau dédié"),
-        ("normal", "Normale : ≈ 17 ms ajoutées"),
-        ("safe", "Sûre : ≈ 35 ms ajoutées, réseau partagé ou ordinateur chargé"),
+        ("low", "Low: ≈ 8 ms added, dedicated network"),
+        ("normal", "Normal: ≈ 17 ms added"),
+        ("safe", "Safe: ≈ 35 ms added, shared network or busy computer"),
     ];
     private static readonly (int Dscp, string Title)[] Dscps =
     [
-        (46, "EF (46) : défaut Livewire"),
-        (34, "AF41 (34) : recommandé pour AES67"),
-        (0, "Aucune (0)"),
+        (46, "EF (46): Livewire default"),
+        (34, "AF41 (34): recommended for AES67"),
+        (0, "None (0)"),
     ];
 
     private readonly DaemonClient client = new();
@@ -66,10 +66,10 @@ public sealed partial class MainWindow : Window
         updating = true;
         foreach (ComboBox c in new[] { InCount, OutCount })
         {
-            string unit = c == InCount ? "entrées" : "sorties";
+            string unit = c == InCount ? "inputs" : "outputs";
             for (int n = 1; n <= MaxPairs; n++)
             {
-                c.Items.Add($"{n} {(n == 1 ? "canal" : "canaux")} ({2 * n} {unit})");
+                c.Items.Add($"{n} {(n == 1 ? "channel" : "channels")} ({2 * n} {unit})");
             }
         }
         foreach (var l in Latencies)
@@ -200,14 +200,14 @@ public sealed partial class MainWindow : Window
         {
             StateDot.Fill = Brush(0xFF, 0x9F, 0x0A);
             StateText.Text = link.Auto
-                ? "Recherche du réseau Livewire. Branchez l'ordinateur sur le réseau Livewire, ou choisissez l'interface."
-                : $"Interface « {config.Iface} » indisponible. Branchez-la, ou choisissez Automatique.";
+                ? "Searching for the Livewire network. Connect the computer to the Livewire network, or choose the interface."
+                : $"Interface “{config.Iface}” unavailable. Connect it, or choose Automatic.";
             return;
         }
         StateDot.Fill = Brush(0x34, 0xC7, 0x59);
         string name = link.Friendly == link.Iface ? link.Iface : $"{link.Friendly} ({link.Iface})";
-        StateText.Text = $"Connecté au réseau Livewire par {name} · {link.Ipv4}" +
-                         (link.Auto ? " · interface choisie automatiquement" : "");
+        StateText.Text = $"Connected to the Livewire network via {name} · {link.Ipv4}" +
+                         (link.Auto ? " · interface chosen automatically" : "");
     }
 
     // ---------- Display updates ----------
@@ -245,13 +245,13 @@ public sealed partial class MainWindow : Window
     private void UpdateIfaceCombo()
     {
         bool auto = config.AutoIface;
-        string autoTitle = !auto ? "Automatique" : link.Searching ? "Automatique · recherche en cours" : $"Automatique · {link.Friendly}";
+        string autoTitle = !auto ? "Automatic" : link.Searching ? "Automatic · searching" : $"Automatic · {link.Friendly}";
         var items = new List<(string Title, string Name)> { (autoTitle, "auto") };
         items.AddRange(ifaces.Where(i => i.Candidate || (!auto && i.Name == config.Iface))
             .OrderBy(i => i.Livewire ? 0 : 1).ThenBy(i => i.Name).Select(i => (i.Title, i.Name)));
         if (!auto && ifaces.All(i => i.Name != config.Iface))
         {
-            items.Add(($"{config.Iface} (indisponible)", config.Iface));
+            items.Add(($"{config.Iface} (unavailable)", config.Iface));
         }
         updating = true;
         var existing = IfaceCombo.Items.OfType<ComboBoxItem>().Select(i => $"{i.Content}|{i.Tag}").ToList();
@@ -292,11 +292,11 @@ public sealed partial class MainWindow : Window
         }
         foreach (ManualSource m in settings.Manual)
         {
-            Add(new DiscoveredSource(m.Channel, "", "", m.Kind, ""), "saisi", true);
+            Add(new DiscoveredSource(m.Channel, "", "", m.Kind, ""), "manual", true);
         }
         foreach (InputPatch p in config.Inputs.Where(p => p.Channel is not null))
         {
-            Add(new DiscoveredSource(p.Channel!.Value, "", "", p.Kind, ""), "non annoncé", true);
+            Add(new DiscoveredSource(p.Channel!.Value, "", "", p.Kind, ""), "not advertised", true);
         }
         gridRows = rows;
         int idx = listening is { } l ? rows.FindIndex(r => r.Source.Channel == l.Channel && r.Source.PatchKind == l.Kind) : -1;
@@ -310,7 +310,7 @@ public sealed partial class MainWindow : Window
         var status = pairs.Select(p =>
         {
             var route = meters.Inputs.FirstOrDefault(r => r.Channels.Contains(p[0]));
-            return route.Channels is null ? "libre" : route.Primed ? "audio reçu" : "en attente";
+            return route.Channels is null ? "free" : route.Primed ? "receiving audio" : "waiting";
         }).ToList();
         grid.ShowLevels(columns, status, listening is null ? null : listener.TakePeak());
         foreach (OutputRowView row in outputRows)
@@ -396,19 +396,19 @@ public sealed partial class MainWindow : Window
             var lost = new List<string>();
             if (lostOut > 0)
             {
-                lost.Add($"{lostOut} diffusion{(lostOut > 1 ? "s" : "")} arrêtée{(lostOut > 1 ? "s" : "")}");
+                lost.Add($"{lostOut} transmission{(lostOut > 1 ? "s" : "")} stopped");
             }
             if (lostIn > 0)
             {
-                lost.Add($"{lostIn} source{(lostIn > 1 ? "s" : "")} retirée{(lostIn > 1 ? "s" : "")} des entrées");
+                lost.Add($"{lostIn} source{(lostIn > 1 ? "s" : "")} removed from the inputs");
             }
             var dialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
-                Title = "Réduire le nombre de canaux ?",
-                Content = string.Join(", ", lost) + ". Le logiciel qui utilise le pilote OpenLW doit le réinitialiser.",
-                PrimaryButtonText = "Réduire",
-                CloseButtonText = "Annuler",
+                Title = "Reduce the number of channels?",
+                Content = string.Join(", ", lost) + ". The software using the OpenLW driver must reset it.",
+                PrimaryButtonText = "Reduce",
+                CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Primary)
@@ -432,7 +432,7 @@ public sealed partial class MainWindow : Window
     {
         if (!int.TryParse(ManualChannel.Text.Trim(), out int ch) || ch < 1 || ch > 32766)
         {
-            ShowError(new DaemonError(DaemonErrorKind.Refused, "canal invalide. Saisissez un nombre de 1 à 32766."));
+            ShowError(new DaemonError(DaemonErrorKind.Refused, "invalid channel. Enter a number from 1 to 32766."));
             return;
         }
         string kind = new[] { "stereo", "backfeed", "surround" }[Math.Max(0, ManualKind.SelectedIndex)];
@@ -463,7 +463,7 @@ public sealed partial class MainWindow : Window
         if (first + width - 1 > config.ChannelsFromNet)
         {
             ShowError(new DaemonError(DaemonErrorKind.Refused,
-                $"une source surround occupe 8 entrées. Choisissez une paire de 1-2 à {config.ChannelsFromNet - 7}-{config.ChannelsFromNet - 6}."));
+                $"a surround source occupies 8 inputs. Choose a pair from 1-2 to {config.ChannelsFromNet - 7}-{config.ChannelsFromNet - 6}."));
             UpdateGrid();
             return;
         }
@@ -486,7 +486,7 @@ public sealed partial class MainWindow : Window
         settings.Manual.RemoveAll(m => m.Channel == s.Channel && (m.Kind is "stereo" or "backfeed" or "surround" ? m.Kind : "stereo") == s.PatchKind);
         settings.Save();
         // A received stream stays in the configuration, even unpatched (displaced by another
-        // patch): without remove_input the row would come back as "non annoncé".
+        // patch): without remove_input the row would come back as "not advertised".
         if (config.Inputs.Any(i => i.Channel == s.Channel && i.Kind == s.PatchKind))
         {
             Mutate(Cmd("remove_input", ("channel", s.Channel), ("kind", s.PatchKind)));
@@ -512,7 +512,7 @@ public sealed partial class MainWindow : Window
         if (link.Searching || link.Ipv4.Length == 0)
         {
             ShowError(new DaemonError(DaemonErrorKind.Refused,
-                "l'ordinateur n'est pas encore relié au réseau Livewire. Choisissez l'interface, puis réessayez."));
+                "the computer isn't connected to the Livewire network yet. Choose the interface, then try again."));
             return;
         }
         string group = s.Stream.Length == 0 ? Livewire.Group(s.Channel, s.PatchKind) : s.Stream;
@@ -550,7 +550,7 @@ public sealed partial class MainWindow : Window
         }
         if (row.Channel is not int ch)
         {
-            ShowError(new DaemonError(DaemonErrorKind.Refused, "canal invalide. Saisissez un nombre de 1 à 32766."));
+            ShowError(new DaemonError(DaemonErrorKind.Refused, "invalid channel. Enter a number from 1 to 32766."));
             row.Show(previous);
             return;
         }
@@ -649,13 +649,13 @@ public sealed class OutputRowView : StackPanel
     [
         ("standard", "Standard (5 ms)"),
         ("aes67", "AES67 (1 ms)"),
-        ("livestream", "Livestream (0,25 ms)"),
+        ("livestream", "Livestream (0.25 ms)"),
     ];
 
-    private readonly TextBox channelBox = new() { PlaceholderText = "canal", Width = 90 };
-    private readonly TextBox nameBox = new() { PlaceholderText = "nom annoncé", Width = 200 };
+    private readonly TextBox channelBox = new() { PlaceholderText = "channel", Width = 90 };
+    private readonly TextBox nameBox = new() { PlaceholderText = "advertised name", Width = 200 };
     private readonly ComboBox formatCombo = new() { MinWidth = 180 };
-    private readonly CheckBox emitCheck = new() { Content = "Diffuser" };
+    private readonly CheckBox emitCheck = new() { Content = "Transmit" };
     private bool showing;
 
     public List<int> Pair { get; }
@@ -667,7 +667,7 @@ public sealed class OutputRowView : StackPanel
         Pair = pair;
         Orientation = Orientation.Horizontal;
         Spacing = 10;
-        Children.Add(new TextBlock { Text = $"Sorties {pair[0]}-{pair[1]}", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+        Children.Add(new TextBlock { Text = $"Outputs {pair[0]}-{pair[1]}", Width = 90, VerticalAlignment = VerticalAlignment.Center });
         Children.Add(Meter);
         foreach (var f in Formats)
         {

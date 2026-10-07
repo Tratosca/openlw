@@ -9,7 +9,7 @@ if (Test-Path "sdk\ASIOSDK\common\iasiodrv.h") { exit 0 }
 New-Item -ItemType Directory -Force sdk | Out-Null
 Invoke-WebRequest $Url -OutFile sdk\asiosdk.zip
 $h = (Get-FileHash sdk\asiosdk.zip -Algorithm SHA256).Hash.ToLower()
-if ($h -ne $Sha256) { throw "empreinte du SDK ASIO inattendue : $h" }
+if ($h -ne $Sha256) { throw "unexpected ASIO SDK hash: $h" }
 Expand-Archive sdk\asiosdk.zip -DestinationPath sdk -Force
 Remove-Item sdk\asiosdk.zip
-Write-Host "SDK ASIO : $PSScriptRoot\sdk\ASIOSDK"
+Write-Host "ASIO SDK: $PSScriptRoot\sdk\ASIOSDK"

@@ -19,7 +19,7 @@ def interface_ipv4(name):
         out = subprocess.run(["ip", "-4", "-o", "addr", "show", "dev", name], capture_output=True, text=True, check=True).stdout
         m = re.search(r"inet (\d+\.\d+\.\d+\.\d+)", out)
     if not m:
-        raise SystemExit(f"aucune adresse IPv4 sur {name}")
+        raise SystemExit(f"no IPv4 address on {name}")
     return m.group(1)
 
 

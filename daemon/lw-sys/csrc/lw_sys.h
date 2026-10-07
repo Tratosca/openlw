@@ -15,7 +15,7 @@
 /* ---------- Common to all systems ---------- */
 
 /* Promote calling thread to real-time (period, compute budget, deadline in ns).
- * macOS : THREAD_TIME_CONSTRAINT_POLICY ; Linux : SCHED_FIFO ; Windows : MMCSS « Pro Audio ».
+ * macOS: THREAD_TIME_CONSTRAINT_POLICY; Linux: SCHED_FIFO; Windows: MMCSS “Pro Audio”.
  * Return zero on success, otherwise a system error code. */
 int lw_rt_promote(uint64_t period_ns, uint64_t computation_ns, uint64_t constraint_ns);
 

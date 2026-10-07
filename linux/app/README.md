@@ -4,19 +4,19 @@ GTK 4 and libadwaita configuration app (Rust, gtk4-rs and libadwaita-rs), x86_64
 
 | Section | Contents |
 |---|---|
-| Réseau Livewire | Connection state, interface (automatic or forced), source advertisement |
-| Périphérique audio | State of the PipeWire nodes “OpenLW Out” and “OpenLW In” published by the service |
-| Entrées | Patch matrix (discovered, manual and unadvertised sources × input pairs), per-pair meters and state, headphone preview |
-| Sorties | One row per output pair: meter, Livewire channel, advertised name, format, transmission |
-| Réglages avancés | Advertised name, receive latency, DSCP |
+| Livewire network | Connection state, interface (automatic or forced), source advertisement |
+| Audio device | State of the PipeWire nodes “OpenLW Out” and “OpenLW In” published by the service |
+| Inputs | Patch matrix (discovered, manual and unadvertised sources × input pairs), per-pair meters and state, headphone preview |
+| Outputs | One row per output pair: meter, Livewire channel, advertised name, format, transmission |
+| Advanced settings | Advertised name, receive latency, DSCP |
 
-User-facing strings are in French, like the other apps. Application ID: `fr.francois_brille.openlw` (GTK and D-Bus IDs do not accept the hyphen of `francois-brille`).
+User-facing strings are in English, like the other apps. Application ID: `fr.francois_brille.openlw` (GTK and D-Bus IDs do not accept the hyphen of `francois-brille`).
 
 Floor: GTK 4.12 and libadwaita 1.4 (Ubuntu 24.04, Debian 13, Fedora 39 and later). On Debian 12, only the service is supported (package `openlw-daemon`).
 
 ## Service connection
 
-Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock`, one JSON request per line ([ADR 0007](../../docs/adr/0007-canal-de-controle.md)). The app runs as the user who owns the service: no privilege escalation. When the service does not answer, a banner offers to start it (`systemctl --user enable --now openlw.service`).
+Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock`, one JSON request per line ([ADR 0007](../../docs/adr/0007-control-channel.md)). The app runs as the user who owns the service: no privilege escalation. When the service does not answer, a banner offers to start it (`systemctl --user enable --now openlw.service`).
 
 ## Preview
 

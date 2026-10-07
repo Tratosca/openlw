@@ -97,7 +97,7 @@ def frames(path):
         elif magic in (b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4", b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d"):
             yield from _read_pcap(f, magic)
         else:
-            raise ValueError(f"format de capture inconnu : {path}")
+            raise ValueError(f"unknown capture format: {path}")
 
 
 def parse_udp(ts, linktype, frame):

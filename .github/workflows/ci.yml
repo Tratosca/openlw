@@ -144,7 +144,8 @@ jobs:
       - name: Universal binaries and package
         run: |
           macos/scripts/build-all.sh
-          macos/installer/build-pkg.sh
+          macos/installer/build-pkg.sh arm64
+          macos/installer/build-pkg.sh x86_64
 
   tools:
     name: Python tools

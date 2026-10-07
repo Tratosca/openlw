@@ -94,7 +94,7 @@ static void handle_peer(lw_server *s, xpc_connection_t peer) {
       }
       const char *req = xpc_dictionary_get_string(ev, "json");
       char *resp = s->handler(req ? req : "", (uint32_t)xpc_connection_get_euid(peer), s->ctx);
-      xpc_dictionary_set_string(reply, "json", resp ? resp : "{\"ok\":false,\"error\":\"réponse vide\"}");
+      xpc_dictionary_set_string(reply, "json", resp ? resp : "{\"ok\":false,\"error\":\"empty response\"}");
       if (s->shmem != NULL && xpc_dictionary_get_bool(ev, "want_shmem")) {
           xpc_dictionary_set_value(reply, "shmem", s->shmem);
       }
@@ -219,14 +219,14 @@ char *lw_xpc_call_shmem(lw_client *c, const char *request, const char **error, v
                 *shmem = xpc_retain(obj);
             }
         } else {
-            *error = "réponse XPC sans clé json";
+            *error = "XPC response without a json key";
         }
     } else if (reply == XPC_ERROR_CONNECTION_INVALID) {
-        *error = "service XPC introuvable ou connexion refusée";
+        *error = "XPC service not found or connection refused";
     } else if (reply == XPC_ERROR_CONNECTION_INTERRUPTED) {
-        *error = "connexion XPC interrompue";
+        *error = "XPC connection interrupted";
     } else {
-        *error = "erreur XPC";
+        *error = "XPC error";
     }
     xpc_release(reply);
     return out;

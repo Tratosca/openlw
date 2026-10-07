@@ -53,7 +53,9 @@ const VIRTUAL_PREFIXES: &[&str] = &[
 const VIRTUAL_PREFIXES: &[&str] = &[];
 
 /// Lowercase fragments of Windows virtual-interface friendly names: Hyper-V and WSL,
-/// hypervisors, VPN, Wi-Fi Direct, Bluetooth.
+/// hypervisors, VPN, Wi-Fi Direct, Bluetooth. Windows localizes some adapter names: Wi-Fi Direct
+/// virtual adapters are “Local Area Connection* N” in English and “Connexion au réseau local* N”
+/// in French, so both forms are listed.
 #[cfg(windows)]
 const VIRTUAL_FRAGMENTS: &[&str] = &[
     "vethernet",
@@ -229,13 +231,13 @@ mod tests {
         assert_eq!(
             h.choose(Some("en7"), t).as_deref(),
             Some("en7"),
-            "interface en cours conservée"
+            "current interface kept"
         );
         let late = t0 + Duration::from_secs(80);
         assert_eq!(
             h.choose(Some("en7"), late).as_deref(),
             Some("en8"),
-            "en7 muette : bascule"
+            "en7 silent: switch"
         );
         assert_eq!(h.choose(None, t0 + Duration::from_secs(200)), None);
     }

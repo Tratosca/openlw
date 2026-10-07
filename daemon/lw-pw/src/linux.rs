@@ -76,7 +76,7 @@ pub fn start(region: Arc<Region>, cfg: BridgeConfig, report: Report) -> Result<B
     let thread = std::thread::Builder::new()
         .name("pipewire".into())
         .spawn(move || supervise(&region, &cfg, &ctl, report))
-        .map_err(|e| Error(format!("thread PipeWire : {e}")))?;
+        .map_err(|e| Error(format!("PipeWire thread: {e}")))?;
     Ok(Bridge {
         control,
         thread: Some(thread),
@@ -97,22 +97,19 @@ fn supervise(region: &Region, cfg: &BridgeConfig, control: &Control, report: Rep
         let result = run(region, cfg, rx, || {
             control.published.store(true, Ordering::Release);
             last_error.clear();
-            report(false, "nœuds PipeWire publiés (OpenLW In, OpenLW Out)");
+            report(false, "PipeWire nodes published (OpenLW In, OpenLW Out)");
         });
         control.published.store(false, Ordering::Release);
         if control.stop.load(Ordering::Acquire) {
             break;
         }
         let message = match result {
-            Ok(()) => "connexion à PipeWire perdue".to_string(),
+            Ok(()) => "connection to PipeWire lost".to_string(),
             Err(e) => e,
         };
         // Same failure repeated every 5 s: report it once.
         if message != last_error {
-            report(
-                true,
-                &format!("{message} ; nouvelle tentative toutes les 5 s"),
-            );
+            report(true, &format!("{message}; retrying every 5 s"));
             last_error = message;
         }
         let until = std::time::Instant::now() + RETRY;
@@ -145,7 +142,7 @@ fn format_pod(channels: u32) -> Result<Vec<u8>, String> {
     });
     pw::spa::pod::serialize::PodSerializer::serialize(std::io::Cursor::new(Vec::new()), &obj)
         .map(|(c, _)| c.into_inner())
-        .map_err(|e| format!("format PipeWire : {e:?}"))
+        .map_err(|e| format!("PipeWire format: {e:?}"))
 }
 
 struct SinkState {
@@ -168,13 +165,13 @@ fn run(
     quit: pw::channel::Receiver<()>,
     on_ready: impl FnOnce(),
 ) -> Result<(), String> {
-    let pwerr = |what: &str, e: pw::Error| format!("PipeWire, {what} : {e}");
+    let pwerr = |what: &str, e: pw::Error| format!("PipeWire, {what}: {e}");
     pw::init();
-    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(|e| pwerr("boucle", e))?;
-    let context = pw::context::ContextRc::new(&mainloop, None).map_err(|e| pwerr("contexte", e))?;
+    let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(|e| pwerr("main loop", e))?;
+    let context = pw::context::ContextRc::new(&mainloop, None).map_err(|e| pwerr("context", e))?;
     let core = context
         .connect_rc(None)
-        .map_err(|e| pwerr("connexion au serveur (session PipeWire absente ?)", e))?;
+        .map_err(|e| pwerr("connecting to the server (no PipeWire session?)", e))?;
     let _quit = quit.attach(mainloop.loop_(), {
         let ml = mainloop.clone();
         move |()| ml.quit()
@@ -212,7 +209,7 @@ fn run(
             "audio.position" => channel_positions(ch_out),
         },
     )
-    .map_err(|e| pwerr("puits", e))?;
+    .map_err(|e| pwerr("sink", e))?;
     let sink_state = SinkState {
         producer,
         scratch: vec![0.0; MAX_FRAMES * ch_out as usize],
@@ -241,11 +238,11 @@ fn run(
             }
         })
         .register()
-        .map_err(|e| pwerr("puits", e))?;
+        .map_err(|e| pwerr("sink", e))?;
     let sink_pod = format_pod(ch_out)?;
-    let mut sink_params = [Pod::from_bytes(&sink_pod).ok_or("format du puits invalide")?];
+    let mut sink_params = [Pod::from_bytes(&sink_pod).ok_or("invalid sink format")?];
     sink.connect(spa::utils::Direction::Input, None, flags, &mut sink_params)
-        .map_err(|e| pwerr("puits", e))?;
+        .map_err(|e| pwerr("sink", e))?;
 
     // Source: applications record network audio.
     let ch_in = consumer.channels();
@@ -317,7 +314,7 @@ fn run(
         .register()
         .map_err(|e| pwerr("source", e))?;
     let source_pod = format_pod(ch_in)?;
-    let mut source_params = [Pod::from_bytes(&source_pod).ok_or("format de la source invalide")?];
+    let mut source_params = [Pod::from_bytes(&source_pod).ok_or("invalid source format")?];
     source
         .connect(
             spa::utils::Direction::Output,

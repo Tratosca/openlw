@@ -3,7 +3,7 @@
 # Launched by OpenLW (Uninstall menu, administrator privileges) or:
 #   sudo "/Library/Application Support/OpenLW/uninstall.sh"
 set -u
-[ "$(id -u)" -eq 0 ] || { echo "à lancer avec sudo" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "run with sudo" >&2; exit 1; }
 launchctl bootout system/fr.francois-brille.openlw.daemon 2>/dev/null || true
 rm -f /Library/LaunchDaemons/fr.francois-brille.openlw.daemon.plist
 rm -rf /Library/Audio/Plug-Ins/HAL/OpenLW.driver
@@ -14,4 +14,4 @@ pkgutil --forget fr.francois-brille.openlw >/dev/null 2>&1 || true
 killall coreaudiod 2>/dev/null || true
 # Last: this directory contains this script.
 rm -rf "/Library/Application Support/OpenLW"
-echo "OpenLW désinstallé"
+echo "OpenLW uninstalled"

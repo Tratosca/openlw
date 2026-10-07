@@ -35,9 +35,9 @@ license-file = ["../../LICENSE", "0"]
 section = "sound"
 priority = "optional"
 extended-description = """\
-Service utilisateur OpenLW : relie l'ordinateur à un réseau audio compatible Livewire \
-ou AES67 et publie les périphériques PipeWire « OpenLW In » et « OpenLW Out ». \
-L'app de réglage est dans le paquet openlw."""
+OpenLW user service: connects the computer to a Livewire-compatible or AES67 audio \
+network and publishes the "OpenLW In" and "OpenLW Out" PipeWire devices. \
+The settings app is in the openlw package."""
 depends = "$auto, pipewire, systemd"
 recommends = "wireplumber"
 assets = [
@@ -49,7 +49,7 @@ maintainer-scripts = "../../linux/packaging/deb/openlw-daemon/"
 
 [package.metadata.generate-rpm]
 name = "openlw-daemon"
-summary = "Service OpenLW : audio Livewire et AES67 pour PipeWire"
+summary = "OpenLW service: Livewire and AES67 audio for PipeWire"
 license = "Apache-2.0"
 assets = [
     { source = "target/release/lw-daemon", dest = "/usr/bin/lw-daemon", mode = "755" },

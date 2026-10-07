@@ -20,7 +20,7 @@ fn vectors() -> PathBuf {
 
 fn load(name: &str) -> Value {
     let text =
-        std::fs::read_to_string(vectors().join(name)).unwrap_or_else(|e| panic!("{name} : {e}"));
+        std::fs::read_to_string(vectors().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
     serde_json::from_str(&text).unwrap()
 }
 
@@ -40,7 +40,7 @@ fn chan2mcast() {
             "stereo" => GroupKind::Stereo,
             "backfeed" => GroupKind::Backfeed,
             "surround" => GroupKind::Surround,
-            k => panic!("type {k}"),
+            k => panic!("unknown kind {k}"),
         };
         let group: Ipv4Addr = row["group"].as_str().unwrap().parse().unwrap();
         assert_eq!(ch.group(kind), group);
@@ -152,6 +152,6 @@ fn sdp_reference() {
     assert_eq!(
         s.to_text(),
         text,
-        "régénération identique au gabarit Python"
+        "regeneration identical to the Python template"
     );
 }

@@ -30,7 +30,7 @@ fn main() {
         "windows" => {
             b.file("csrc/windows/lw_sys_win.c");
         }
-        other => panic!("système non pris en charge : {other}"),
+        other => panic!("unsupported system: {other}"),
     }
     if env == "msvc" {
         b.flag("/std:c11")

@@ -1,7 +1,7 @@
 //! Names published by the device: device name and each channel's name.
 //!
-//! - Channels: currently “2 - Studio A G” / “… D” for an input patched to Livewire channel 2 (name
-//!   advertised on the network, falling back to the number); “4005 - STUDIO MAC G” for a transmitted output.
+//! - Channels: currently “2 - Studio A L” / “… R” for an input patched to Livewire channel 2 (name
+//!   advertised on the network, falling back to the number); “4005 - STUDIO MAC L” for a transmitted output.
 //!   Surround: suffixes 1–8. Unpatched channel: empty name (CoreAudio displays its default name).
 //! - Devices: `duplex` layout uses “OpenLW” (fixed name). With `split` layout,
 //!   “OpenLW In” and “OpenLW Out”, or, if `name_device_from_sources` is enabled, “OpenLW In
@@ -35,7 +35,7 @@ pub struct Labels {
 
 fn suffixes(n: usize) -> Vec<String> {
     if n == 2 {
-        vec!["G".into(), "D".into()]
+        vec!["L".into(), "R".into()]
     } else {
         (1..=n).map(|i| i.to_string()).collect()
     }
@@ -133,23 +133,23 @@ mod tests {
         assert_eq!(l.output_device_name, "OpenLW Out (4005 - STUDIO MAC)");
         assert_eq!(
             l.input_names,
-            ["2 - Studio A G", "2 - Studio A D", "21 G", "21 D"]
+            ["2 - Studio A L", "2 - Studio A R", "21 L", "21 R"]
         );
         assert_eq!(
             l.output_names,
-            ["4005 - STUDIO MAC G", "4005 - STUDIO MAC D"]
+            ["4005 - STUDIO MAC L", "4005 - STUDIO MAC R"]
         );
         assert_eq!(
             compute(&cfg(false), &announced).name,
             "OpenLW",
-            "option désactivée"
+            "option disabled"
         );
         let mut empty = cfg(true);
         empty.destinations.clear();
         assert_eq!(
             compute(&empty, &announced).name,
             "OpenLW",
-            "aucune entrée patchée"
+            "no input patched"
         );
     }
 }

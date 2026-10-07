@@ -83,10 +83,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--iface", required=True)
     parser.add_argument("--domain", type=int, default=0)
-    parser.add_argument("--sync-log", type=int, default=-3, help="log2 de l'intervalle Sync (-3 = 125 ms)")
-    parser.add_argument("--announce-log", type=int, default=0, help="log2 de l'intervalle Announce (0 = 1 s)")
+    parser.add_argument("--sync-log", type=int, default=-3, help="log2 of the Sync interval (-3 = 125 ms)")
+    parser.add_argument("--announce-log", type=int, default=0, help="log2 of the Announce interval (0 = 1 s)")
     parser.add_argument("--priority1", type=int, default=248)
-    parser.add_argument("--seconds", type=float, default=0, help="0 = sans fin")
+    parser.add_argument("--seconds", type=float, default=0, help="0 = run forever")
     args = parser.parse_args(argv)
 
     from netiface import join, udp_socket
@@ -95,7 +95,7 @@ def main(argv=None):
     join(event, PTP_GROUP, ip)
     join(general, PTP_GROUP, ip)
     clock_id = clock_identity(interface_mac(args.iface))
-    print(f"grandmaster {clock_id.hex('-').upper()} domaine {args.domain} sur {args.iface} ({ip})")
+    print(f"grandmaster {clock_id.hex('-').upper()} domain {args.domain} on {args.iface} ({ip})")
 
     sync_period, announce_period = 2.0 ** args.sync_log, 2.0 ** args.announce_log
     seq_sync = seq_ann = 0
@@ -126,6 +126,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except PermissionError:
-        sys.exit("ports 319/320 : relancer avec sudo")
+        sys.exit("ports 319/320: rerun with sudo")
     except KeyboardInterrupt:
         sys.exit(0)

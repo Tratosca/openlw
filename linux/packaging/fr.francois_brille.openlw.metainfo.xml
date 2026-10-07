@@ -4,23 +4,23 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>Apache-2.0</project_license>
   <name>OpenLW</name>
-  <summary>Audio Livewire et AES67 sur l'ordinateur</summary>
+  <summary>Livewire and AES67 audio on the computer</summary>
   <developer id="fr.francois-brille">
     <name>François Brille</name>
   </developer>
   <description>
     <p>
-      OpenLW relie l'ordinateur à un réseau audio compatible Livewire® ou AES67. Les applications
-      voient deux périphériques PipeWire : « OpenLW Out » diffuse sur le réseau, « OpenLW In »
-      reçoit les canaux choisis.
+      OpenLW connects the computer to a Livewire®- or AES67-compatible audio network. Applications
+      see two PipeWire devices: “OpenLW Out” transmits to the network, “OpenLW In” receives the
+      chosen channels.
     </p>
     <ul>
-      <li>Découverte des sources annoncées sur le réseau et grille de routage des entrées</li>
-      <li>Diffusion des sorties sur les canaux Livewire de votre choix, formats Standard, AES67 et Livestream</li>
-      <li>Pré-écoute d'une source sur la sortie audio de l'ordinateur</li>
-      <li>Service utilisateur systemd, sans privilège ni module noyau</li>
+      <li>Discovery of the sources advertised on the network, and an input routing grid</li>
+      <li>Outputs transmitted on the Livewire channels of your choice, in Standard, AES67 and Livestream formats</li>
+      <li>Preview of a source on the computer's audio output</li>
+      <li>systemd user service, with no privileges or kernel module</li>
     </ul>
-    <p>Livewire est une marque de TLS Corp. OpenLW n'est pas affilié à TLS Corp.</p>
+    <p>Livewire is a trademark of TLS Corp. OpenLW is not affiliated with TLS Corp.</p>
   </description>
   <launchable type="desktop-id">fr.francois_brille.openlw.desktop</launchable>
   <provides>
@@ -41,7 +41,7 @@
   <releases>
     <release version="0.5.0" date="2026-10-06">
       <description>
-        <p>Première version Linux : nœuds PipeWire et app GTK.</p>
+        <p>First Linux release: PipeWire nodes and GTK app.</p>
       </description>
     </release>
   </releases>

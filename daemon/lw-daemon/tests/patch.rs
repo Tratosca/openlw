@@ -188,6 +188,19 @@ fn patch_network_to_device_and_back() {
         stats.peak_dbfs
     );
 
+    // Channel 22 takes inputs 3–4: channel 21 stays received, unpatched, until remove_input.
+    let edit = |cmd: &str| -> Value {
+        let r: Value = serde_json::from_str(&shared.handle(cmd, &Caller::trusted("test"))).unwrap();
+        assert_eq!(r["ok"], true, "{r}");
+        r
+    };
+    let r = edit(r#"{"cmd":"patch_input","channel":22,"device_channels":[3,4]}"#);
+    assert_eq!(r["config"]["destinations"].as_array().unwrap().len(), 2);
+    let r = edit(r#"{"cmd":"remove_input","channel":21,"kind":"stereo"}"#);
+    let left = r["config"]["destinations"].as_array().unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0]["channel"], 22);
+
     omnia_stop.request();
     omnia.join().unwrap();
     session.stop();

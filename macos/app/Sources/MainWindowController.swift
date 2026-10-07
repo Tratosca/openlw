@@ -737,12 +737,10 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             stopListening()
         }
         manual.removeAll { $0.channel == s.channel && $0.patchKind == s.patchKind }
-        if let p = config.inputs.first(where: { $0.channel == s.channel && $0.kind == s.patchKind }) {
-            if p.deviceChannels.isEmpty {
-                updateGrid() // Unpatched received stream: disappears at next poll
-            } else {
-                mutate(["cmd": "unpatch_input", "device_channels": p.deviceChannels])
-            }
+        // A received stream stays in the configuration, even unpatched (displaced by another
+        // patch): without remove_input the row would come back as "non annoncé".
+        if config.inputs.contains(where: { $0.channel == s.channel && $0.kind == s.patchKind }) {
+            mutate(["cmd": "remove_input", "channel": s.channel, "kind": s.patchKind])
         } else {
             updateGrid()
         }

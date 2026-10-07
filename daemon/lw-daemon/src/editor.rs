@@ -3,6 +3,8 @@
 //! - Patch an input: first release target device inputs (the occupying stream
 //!   remains received for statistics, unpatched), then update or add the stream.
 //! - Unpatch an input: stop receiving the stream that fed these inputs.
+//! - Remove an input: stop receiving a stream, patched or not (a stream displaced by another
+//!   patch stays received, unpatched, until removed).
 //! - Patch an output: update or add the source transmitted on this channel.
 //! - Change device channel counts: remove patches targeting vanished channels
 //!   (stop transmitted streams, remove unpatched received streams).
@@ -25,6 +27,13 @@ pub enum Edit {
     /// Release device inputs.
     UnpatchInput {
         device_channels: Vec<u16>,
+    },
+    /// Stop receiving a stream, patched or not: Livewire channel or AES67 group.
+    RemoveInput {
+        channel: Option<u16>,
+        group: Option<Ipv4Addr>,
+        port: u16,
+        kind: Kind,
     },
     /// Device outputs to a Livewire channel.
     PatchOutput {
@@ -105,6 +114,25 @@ pub fn apply(cfg: &Config, edit: &Edit) -> Result<Config, ConfigError> {
                 return Err(ConfigError(format!(
                     "aucun flux patché sur les entrées {device_channels:?}"
                 )));
+            }
+        }
+        Edit::RemoveInput {
+            channel,
+            group,
+            port,
+            kind,
+        } => {
+            if channel.is_some() == group.is_some() {
+                return Err(ConfigError("indiquer soit un canal, soit un groupe".into()));
+            }
+            let before = c.destinations.len();
+            c.destinations.retain(|d| match (channel, group) {
+                (Some(ch), _) => !(d.channel == Some(*ch) && d.kind == *kind),
+                (None, Some(g)) => !(d.group == Some(*g) && d.port == *port),
+                _ => true,
+            });
+            if c.destinations.len() == before {
+                return Err(ConfigError("ce flux n'est pas reçu".into()));
             }
         }
         Edit::PatchOutput {
@@ -234,6 +262,37 @@ mod tests {
             }
         )
         .is_err());
+    }
+
+    #[test]
+    fn remove_input_drops_displaced_stream() {
+        let c = apply(&base(), &patch_in(1, [1, 2])).unwrap();
+        let c = apply(&c, &patch_in(7, [1, 2])).unwrap();
+        let remove = |ch| Edit::RemoveInput {
+            channel: Some(ch),
+            group: None,
+            port: 5004,
+            kind: Kind::Stereo,
+        };
+        // Channel 1 lost its inputs but is still received: only remove_input drops it.
+        let c = apply(&c, &remove(1)).unwrap();
+        assert_eq!(c.destinations.len(), 1);
+        assert_eq!(c.destinations[0].channel, Some(7));
+        // Patched stream: removed too, its inputs are released.
+        let c = apply(&c, &remove(7)).unwrap();
+        assert!(c.destinations.is_empty());
+        assert!(apply(&c, &remove(7)).is_err(), "flux absent");
+        let backfeed = Edit::RemoveInput {
+            channel: Some(7),
+            group: None,
+            port: 5004,
+            kind: Kind::Backfeed,
+        };
+        let c = apply(&base(), &patch_in(7, [1, 2])).unwrap();
+        assert!(
+            apply(&c, &backfeed).is_err(),
+            "autre type sur le même canal"
+        );
     }
 
     #[test]

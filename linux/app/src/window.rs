@@ -1015,18 +1015,20 @@ impl Window {
                 .retain(|m| !(m.channel == s.channel && patch_kind(&m.kind) == s.patch_kind()));
             set.save();
         }
-        let patched = self
+        // A received stream stays in the configuration, even unpatched (displaced by another
+        // patch): without remove_input the row would come back as "non annoncé".
+        let received = self
             .st
             .borrow()
             .config
             .inputs
             .iter()
-            .find(|i| i.channel == Some(s.channel) && i.kind == s.patch_kind())
-            .map(|i| i.device_channels.clone())
-            .filter(|d| !d.is_empty());
-        match patched {
-            Some(d) => self.mutate(json!({"cmd": "unpatch_input", "device_channels": d})),
-            None => self.update_grid(),
+            .any(|i| i.channel == Some(s.channel) && i.kind == s.patch_kind());
+        if received {
+            self.mutate(json!({"cmd": "remove_input", "channel": s.channel,
+                "kind": s.patch_kind()}));
+        } else {
+            self.update_grid();
         }
     }
 

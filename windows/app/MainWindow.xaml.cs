@@ -485,10 +485,11 @@ public sealed partial class MainWindow : Window
         }
         settings.Manual.RemoveAll(m => m.Channel == s.Channel && (m.Kind is "stereo" or "backfeed" or "surround" ? m.Kind : "stereo") == s.PatchKind);
         settings.Save();
-        InputPatch? p = config.Inputs.FirstOrDefault(i => i.Channel == s.Channel && i.Kind == s.PatchKind);
-        if (p is not null && p.DeviceChannels.Count > 0)
+        // A received stream stays in the configuration, even unpatched (displaced by another
+        // patch): without remove_input the row would come back as "non annoncé".
+        if (config.Inputs.Any(i => i.Channel == s.Channel && i.Kind == s.PatchKind))
         {
-            Mutate(Cmd("unpatch_input", ("device_channels", Ints(p.DeviceChannels))));
+            Mutate(Cmd("remove_input", ("channel", s.Channel), ("kind", s.PatchKind)));
         }
         else
         {

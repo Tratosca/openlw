@@ -21,7 +21,7 @@ The current app uses French labels; the descriptions below explain their functio
 | Area | Contents | XPC commands |
 |---|---|---|
 | Livewire network | Active interface or search status; automatic selection (interface receiving Livewire advertisements) or forced Ethernet interface; output advertisement | `status` (5 Hz), `ifaces`, `set_iface`, `set_advertise` |
-| Mac inputs | Received channel count (1–16 stereo); default Mac input and button to select OpenLW; matrix rows: discovered sources (ADV), configured unadvertised streams, and manually entered channels; columns: device input pairs. Click to patch or release. Meter and state per pair (free, waiting, receiving audio) | `sources`, `config` (2 s), `patch_input`, `unpatch_input` |
+| Mac inputs | Received channel count (1–16 stereo); default Mac input and button to select OpenLW; matrix rows: discovered sources (ADV), configured unadvertised streams, and manually entered channels; columns: device input pairs. Click to patch or release. Meter and state per pair (free, waiting, receiving audio) | `sources`, `config` (2 s), `patch_input`, `unpatch_input`, `remove_input` |
 | Mac outputs | Transmitted channel count (1–16 stereo); default Mac output and button to select OpenLW; one row per output pair: meter, channel, advertised name, format (Standard 5 ms, AES67 1 ms, Livestream 0.25 ms), transmission checkbox | `set_device_channels`, `patch_output`, `unpatch_output` |
 
 Reducing the channel count removes out-of-range patches after confirmation. The device is recreated, briefly interrupting audio in applications using it.

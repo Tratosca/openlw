@@ -356,9 +356,10 @@ impl Shared {
     }
 }
 
-const MUTATING: [&str; 10] = [
+const MUTATING: [&str; 11] = [
     "patch_input",
     "unpatch_input",
+    "remove_input",
     "patch_output",
     "unpatch_output",
     "set_iface",
@@ -424,6 +425,19 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
         }),
         "unpatch_input" => Ok(Edit::UnpatchInput {
             device_channels: channels_arg(v, "device_channels")?,
+        }),
+        "remove_input" => Ok(Edit::RemoveInput {
+            channel: opt_u16(v, "channel")?,
+            group: match v.get("group").and_then(Value::as_str) {
+                Some(g) => Some(
+                    g.parse()
+                        .map_err(|_| "`group` : adresse IPv4 invalide".to_string())?,
+                ),
+                None => None,
+            },
+            port: opt_u16(v, "port")?.unwrap_or(5004),
+            kind: serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
+                .map_err(|e| format!("`kind` : {e}"))?,
         }),
         "patch_output" => Ok(Edit::PatchOutput {
             channel: opt_u16(v, "channel")?.ok_or("`channel` absent")?,

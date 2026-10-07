@@ -57,7 +57,7 @@ Transmit threads enter real-time scheduling and wait for deadlines without busy-
 
 One C contract: [lw-sys/csrc/lw_shm.h](lw-sys/csrc/lw_shm.h) and `lw_shm.c`, compiled **unchanged** by the HAL plugin and Windows driver. Rust duplicates no memory layout: the daemon uses these C functions.
 
-- Region = 4 KiB header + `TO_NET` ring (applications → network; producer: plugin) + `FROM_NET` ring (network → applications; producer: daemon), interleaved float32, lock-free SPSC, 64-bit positions, overrun/underrun counters.
+- Region (v3) = 8 KiB header with a ring table + one ring per device and direction: `TO_NET` rings (applications → network; producer: plugin), then `FROM_NET` rings (network → applications; producer: daemon). Duplex layout: one of each; macOS multi layout: one per numbered device (ADR 0010). Interleaved float32, lock-free SPSC, 64-bit positions, overrun/underrun counters.
 - Seqlock clock: (host time, sample position, rate scalar); the header declares the host clock (`mach_absolute_time`, `QueryPerformanceCounter`, or `CLOCK_MONOTONIC`). The plugin uses it in `GetZeroTimeStamp` (ADR 0003).
 - Transfer: client sends `{"cmd":"attach"}` requesting the region; `xpc_shmem` object attached on macOS, section duplicated into the client process on Windows. On Linux, the region stays in the daemon.
 - A daemon real-time thread running every 1 ms publishes the clock, measures per-channel peaks, and, with `"device": {"loopback": true}`, returns application output to application input.
@@ -73,7 +73,11 @@ lw-daemon ctl set-iface en7                     # Livewire interface (BSD or fri
 lw-daemon ctl sources                           # Advertised sources (channel, name, terminal)
 lw-daemon ctl patch-in --channel 21 --to 1,2    # Livewire channel 21 → device inputs 1–2
 lw-daemon ctl patch-out --from 1,2 --channel 4001 --name "MAC 1"   # Outputs 1–2 → channel 4001
+lw-daemon ctl patch-in --channel 22 --mix sum --to 5   # Mono (L+R)/2 of channel 22 → input 5 (also left, right)
 lw-daemon ctl unpatch-in --to 1,2 ; lw-daemon ctl unpatch-out --channel 4001
+lw-daemon ctl set-layout multi                  # macOS: OpenLW In n / OpenLW Out n (ADR 0010)
+lw-daemon ctl patch-in --channel 21 --device 2 --to 1,2   # Multi layout: channel 21 → OpenLW In 2
+lw-daemon ctl set-naming false                  # Multi layout: generic names (OpenLW In 2)
 lw-daemon ctl status                            # Streams, routes (priming, slips), peaks
 lw-daemon discover --iface en7 --seconds 30     # Discovery without the daemon
 ```

@@ -1,20 +1,25 @@
 //! Daemon side of the virtual device: region shared with the audio client (HAL plugin on macOS,
 //! audio driver on Windows, daemon PipeWire nodes on Linux; ADR 0005).
 //!
+//! One ring per device and direction: one of each in duplex layout, one per numbered device
+//! in `multi` layout (output rings first, see `lw_shm.h`).
+//!
 //! A real-time thread running every 1 ms:
 //! - publishes the clock in the region (host clock, ratio 1.0 until network synchronization);
-//! - consumes the applications → network ring and measures per-channel peaks;
-//! - in `loopback` test mode, copies this audio to the network → applications ring.
-//!
-//! Routing to RTP streams (patch matrix) will follow.
+//! - consumes each applications → network ring, measures per-channel peaks and feeds
+//!   transmitted streams (routing table);
+//! - fills each network → applications ring from received streams (stereo, surround, or one
+//!   channel with a mono mix);
+//! - in `loopback` test mode, copies output ring n to input ring n instead.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lw_sys::shm::{Dir, Region};
+use lw_sys::shm::{Dir, Region, RingSpec};
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{BusCounters, BusWriter, JitterReader};
+use crate::config::Mix;
 use crate::Stop;
 
 /// Virtual-device parameters.
@@ -42,6 +47,16 @@ fn default_ring() -> u32 {
     8192
 }
 
+impl DeviceConfig {
+    /// Duplex-layout rings: one output ring, one input ring.
+    pub fn duplex_rings(&self) -> Vec<RingSpec> {
+        vec![
+            RingSpec::to_net(self.channels_to_net),
+            RingSpec::from_net(self.channels_from_net),
+        ]
+    }
+}
+
 impl Default for DeviceConfig {
     fn default() -> Self {
         Self {
@@ -58,8 +73,12 @@ impl Default for DeviceConfig {
 pub struct DeviceStatus {
     /// Shared-region number: changes on recreation (plugin must reattach).
     pub generation: u64,
+    /// Device channels per direction (all devices).
     pub channels_to_net: u32,
     pub channels_from_net: u32,
+    /// Channels of each output device and each input device (one entry each in duplex layout).
+    pub out_widths: Vec<u32>,
+    pub in_widths: Vec<u32>,
     pub ring_frames: u32,
     pub loopback: bool,
     /// Sample position published in the shared clock.
@@ -69,11 +88,11 @@ pub struct DeviceStatus {
     pub from_net_frames: u64,
     pub from_net_overruns: u64,
     pub from_net_underruns: u64,
-    /// Per-channel application audio peak over the last 100 ms (dBFS).
+    /// Per-channel application audio peak over the last 100 ms (dBFS), devices concatenated.
     pub to_net_peak_dbfs: Vec<f64>,
-    /// Per-device-input peak (network audio) over the last 100 ms (dBFS).
+    /// Per-device-input peak (network audio) over the last 100 ms (dBFS), devices concatenated.
     pub from_net_peak_dbfs: Vec<f64>,
-    /// Active routes: device channels (1-based) and bus counters.
+    /// Active routes: device channels (1-based, devices concatenated) and bus counters.
     pub outputs: Vec<RouteStatus>,
     pub inputs: Vec<RouteStatus>,
 }
@@ -92,7 +111,9 @@ pub struct RouteStatus {
 /// Device outputs to a transmitted stream.
 pub struct OutRoute {
     pub label: String,
-    /// Device channels (0-based), in stream channel order.
+    /// Output ring (0 in duplex layout, device number − 1 in `multi` layout).
+    pub ring: usize,
+    /// Ring channels (0-based), in stream channel order.
     pub device_channels: Vec<usize>,
     pub writer: BusWriter,
 }
@@ -100,8 +121,31 @@ pub struct OutRoute {
 /// Received stream to device inputs.
 pub struct InRoute {
     pub label: String,
+    /// Input ring (0 in duplex layout, device number − 1 in `multi` layout).
+    pub ring: usize,
+    /// Ring channels (0-based): one per stream channel, or one with `mix`.
     pub device_channels: Vec<usize>,
+    /// Mono patch of a stereo stream.
+    pub mix: Option<Mix>,
     pub reader: JitterReader,
+}
+
+impl InRoute {
+    /// Device samples of one stream frame: `(ring channel, value)`.
+    fn place(&self, frame: &[f32], mut put: impl FnMut(usize, f32)) {
+        match self.mix {
+            Some(m) => {
+                if let Some(&c) = self.device_channels.first() {
+                    put(c, m.apply(frame));
+                }
+            }
+            None => {
+                for (v, &c) in frame.iter().zip(&self.device_channels) {
+                    put(c, *v);
+                }
+            }
+        }
+    }
 }
 
 /// Routing table, replaced live.
@@ -125,23 +169,72 @@ const SAMPLE_RATE: u32 = 48_000;
 const OUT_CARRY_MAX: usize = 512;
 const TICK: Duration = Duration::from_millis(1);
 
-/// Create the region and start the device thread.
-pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Error> {
-    let region = Arc::new(Region::create(
-        SAMPLE_RATE,
-        cfg.ring_frames,
-        cfg.channels_to_net,
-        cfg.channels_from_net,
-    )?);
+fn dbfs(p: f32) -> f64 {
+    if p > 0.0 {
+        20.0 * f64::from(p).log10()
+    } else {
+        f64::NEG_INFINITY
+    }
+}
+
+/// Ring channel count and offset in the concatenated (metering) channel space.
+#[derive(Clone, Copy)]
+struct Lane {
+    ring: usize,
+    channels: usize,
+    offset: usize,
+}
+
+fn lanes(rings: &[RingSpec], dir: Dir) -> Vec<Lane> {
+    let mut offset = 0;
+    rings
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.dir == dir)
+        .map(|(ring, r)| {
+            let l = Lane {
+                ring,
+                channels: r.channels as usize,
+                offset,
+            };
+            offset += l.channels;
+            l
+        })
+        .collect()
+}
+
+/// Create the region and start the device thread. `rings`: output rings then input rings
+/// ([`crate::config::Config::rings`]); duplex layout: one of each.
+pub fn start(
+    cfg: &DeviceConfig,
+    rings: &[RingSpec],
+    stop: &Stop,
+) -> Result<Device, lw_sys::shm::Error> {
+    let region = Arc::new(Region::create(SAMPLE_RATE, cfg.ring_frames, rings)?);
     let mut clock = region.clock_writer()?;
-    let mut from_apps = region.consumer(Dir::ToNet)?;
-    let mut to_apps = region.producer(Dir::FromNet)?;
+    let (out_lanes, in_lanes) = (lanes(rings, Dir::ToNet), lanes(rings, Dir::FromNet));
+    let mut from_apps = Vec::with_capacity(out_lanes.len());
+    for l in &out_lanes {
+        from_apps.push(region.consumer(l.ring)?);
+    }
+    let mut to_apps = Vec::with_capacity(in_lanes.len());
+    for l in &in_lanes {
+        to_apps.push(region.producer(l.ring)?);
+    }
+    let out_widths: Vec<u32> = out_lanes.iter().map(|l| l.channels as u32).collect();
+    let in_widths: Vec<u32> = in_lanes.iter().map(|l| l.channels as u32).collect();
+    let (ch_in, ch_out) = (
+        out_widths.iter().sum::<u32>() as usize,
+        in_widths.iter().sum::<u32>() as usize,
+    );
     let status = Arc::new(Mutex::new(DeviceStatus {
-        channels_to_net: cfg.channels_to_net,
-        channels_from_net: cfg.channels_from_net,
+        channels_to_net: ch_in as u32,
+        channels_from_net: ch_out as u32,
+        out_widths,
+        in_widths,
         ring_frames: cfg.ring_frames,
         loopback: cfg.loopback,
-        to_net_peak_dbfs: vec![f64::NEG_INFINITY; cfg.channels_to_net as usize],
+        to_net_peak_dbfs: vec![f64::NEG_INFINITY; ch_in],
         ..DeviceStatus::default()
     }));
     let pending: Arc<Mutex<Option<Routes>>> = Arc::new(Mutex::new(None));
@@ -158,20 +251,22 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
             if let Err(kr) = lw_sys::rt::promote_for_packet_interval(TICK) {
                 crate::error!("device: real-time scheduling refused (code {kr})");
             }
-            let (ch_in, ch_out) = (from_apps.channels() as usize, to_apps.channels() as usize);
             let ring = reg.geometry().ring_frames as usize;
+            let widest = |l: &[Lane]| l.iter().map(|l| l.channels).max().unwrap_or(0);
+            let (w_in, w_out) = (widest(&out_lanes), widest(&in_lanes));
             let t0_host = lw_sys::rt::host_time();
             let t0_ns = lw_sys::rt::host_time_ns();
-            // Preallocated buffers: no allocations in the loop.
-            let mut buf = vec![0f32; ch_in * ring];
-            let mut out = vec![0f32; ch_out * ring];
+            // Preallocated buffers, sized for the widest ring: no allocations in the loop.
+            let mut buf = vec![0f32; w_in * ring];
+            let mut out = vec![0f32; w_out * ring];
             let mut scratch = vec![0f32; 8 * ring];
             let mut peaks = vec![0f32; ch_in];
             let mut in_peaks = vec![0f32; ch_out];
             let mut routes = Routes::default();
             let mut produced: u64 = 0;
             let mut out_clock: u64 = 0;
-            let mut owed: usize = 0;
+            // Unserved remainder per output ring.
+            let mut owed = vec![0usize; out_lanes.len()];
             let start = Instant::now();
             let mut k: u32 = 0;
             clock.publish(t0_host, 0, 1.0);
@@ -198,29 +293,37 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                 if k % 10 == 0 {
                     clock.publish(now_host, sample, 1.0);
                 }
-                // 1. Application audio: peaks, patched outputs, internal loopback.
+                // 1. Application audio, ring by ring: peaks, patched outputs, internal loopback.
                 // Read at the clock rate (due frames, backlog carried up to OUT_CARRY_MAX):
                 // the host writes blocks (4096 frames or more), smoothed by the shared ring;
                 // forwarding them at once would overflow then empty transmit buffers.
                 // The cap applies only to unserved remainder: a late wakeup of this thread
                 // (coarse VM timers) catches up all due frames.
-                let want = owed + sample.saturating_sub(out_clock) as usize;
+                let elapsed = sample.saturating_sub(out_clock) as usize;
                 out_clock = sample;
-                let n = want.min(from_apps.readable() as usize).min(ring);
-                owed = (want - n).min(OUT_CARRY_MAX);
-                if let (true, Some(block)) = (n > 0 && ch_in > 0, buf.get_mut(..n * ch_in)) {
-                    let _ = from_apps.read(block);
-                    for frame in block.chunks_exact(ch_in) {
-                        for (p, s) in peaks.iter_mut().zip(frame) {
-                            *p = p.max(s.abs());
+                for (j, (lane, ring_in)) in out_lanes.iter().zip(from_apps.iter_mut()).enumerate() {
+                    let Some(owe) = owed.get_mut(j) else {
+                        continue;
+                    };
+                    let w = lane.channels;
+                    let want = *owe + elapsed;
+                    let n = want.min(ring_in.readable() as usize).min(ring);
+                    *owe = (want - n).min(OUT_CARRY_MAX);
+                    let (true, Some(block)) = (n > 0 && w > 0, buf.get_mut(..n * w)) else {
+                        continue;
+                    };
+                    let _ = ring_in.read(block);
+                    if let Some(p) = peaks.get_mut(lane.offset..lane.offset + w) {
+                        for frame in block.chunks_exact(w) {
+                            for (p, s) in p.iter_mut().zip(frame) {
+                                *p = p.max(s.abs());
+                            }
                         }
                     }
-                    for route in &mut routes.outputs {
+                    for route in routes.outputs.iter_mut().filter(|r| r.ring == j) {
                         let sc = route.device_channels.len();
                         if let Some(dst) = scratch.get_mut(..n * sc) {
-                            for (frame, o) in
-                                block.chunks_exact(ch_in).zip(dst.chunks_exact_mut(sc))
-                            {
+                            for (frame, o) in block.chunks_exact(w).zip(dst.chunks_exact_mut(sc)) {
                                 for (v, &c) in o.iter_mut().zip(&route.device_channels) {
                                     *v = frame.get(c).copied().unwrap_or(0.0);
                                 }
@@ -228,138 +331,103 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
                             route.writer.push(dst);
                         }
                     }
-                    if loopback && ch_out > 0 {
-                        if let Some(dst) = out.get_mut(..n * ch_out) {
-                            for (frame, o) in
-                                block.chunks_exact(ch_in).zip(dst.chunks_exact_mut(ch_out))
-                            {
+                    // Loopback: output ring j to input ring j (same channel index).
+                    if let (true, Some(il), Some(ring_out)) =
+                        (loopback, in_lanes.get(j), to_apps.get_mut(j))
+                    {
+                        let wo = il.channels;
+                        if let (true, Some(dst)) = (wo > 0, out.get_mut(..n * wo)) {
+                            for (frame, o) in block.chunks_exact(w).zip(dst.chunks_exact_mut(wo)) {
                                 for (c, v) in o.iter_mut().enumerate() {
                                     *v = frame.get(c).copied().unwrap_or(0.0);
                                 }
                             }
-                            let _ = to_apps.write(dst);
+                            let _ = ring_out.write(dst);
                         }
                     }
                 }
-                // 2. Application inputs: frames due according to the clock. Fill the ring while
-                // space remains; latency is bounded by the plugin, which knows the host
-                // block size (it discards excess before reading).
+                // 2. Application inputs, ring by ring: frames due according to the clock. Fill
+                // each ring while space remains; latency is bounded by the plugin, which knows
+                // the host block size (it discards excess before reading).
                 let due = sample.saturating_sub(produced) as usize;
                 produced = sample;
-                if !loopback && !routes.inputs.is_empty() && ch_out > 0 && due > 0 {
-                    let frames = due.min(ring);
-                    let free = reg.writable(Dir::FromNet) as usize;
-                    if free >= frames {
-                        if let Some(dst) = out.get_mut(..frames * ch_out) {
+                if loopback || due == 0 {
+                    continue_status(
+                        k,
+                        sample,
+                        &reg,
+                        &out_lanes,
+                        &in_lanes,
+                        &st,
+                        &mut peaks,
+                        &mut in_peaks,
+                        &routes,
+                    );
+                    continue;
+                }
+                let frames = due.min(ring);
+                for (j, (lane, ring_out)) in in_lanes.iter().zip(to_apps.iter_mut()).enumerate() {
+                    let w = lane.channels;
+                    if w == 0 || !routes.inputs.iter().any(|r| r.ring == j) {
+                        continue;
+                    }
+                    let lp = in_peaks
+                        .get_mut(lane.offset..lane.offset + w)
+                        .unwrap_or_default();
+                    if reg.writable(lane.ring) as usize >= frames {
+                        if let Some(dst) = out.get_mut(..frames * w) {
                             dst.iter_mut().for_each(|v| *v = 0.0);
-                            for route in &mut routes.inputs {
+                            for route in routes.inputs.iter_mut().filter(|r| r.ring == j) {
                                 let sc = route.reader.channels();
                                 if let Some(src) = scratch.get_mut(..frames * sc) {
                                     route.reader.pull(src);
-                                    for (i, o) in
-                                        src.chunks_exact(sc).zip(dst.chunks_exact_mut(ch_out))
+                                    for (i, o) in src.chunks_exact(sc).zip(dst.chunks_exact_mut(w))
                                     {
-                                        for (v, &c) in i.iter().zip(&route.device_channels) {
+                                        route.place(i, |c, v| {
                                             if let Some(slot) = o.get_mut(c) {
-                                                *slot = *v;
+                                                *slot = v;
                                             }
-                                        }
+                                        });
                                     }
                                 }
                             }
-                            for frame in dst.chunks_exact(ch_out) {
-                                for (p, s) in in_peaks.iter_mut().zip(frame) {
+                            for frame in dst.chunks_exact(w) {
+                                for (p, s) in lp.iter_mut().zip(frame) {
                                     *p = p.max(s.abs());
                                 }
                             }
-                            let _ = to_apps.write(dst);
+                            let _ = ring_out.write(dst);
                         }
                     } else {
                         // Ring full: nobody is reading (plugin I/O stopped). Still consume
                         // jitter buffers to avoid accumulating delay. Peaks remain
                         // measured: the app displays received audio before any recording.
-                        for route in &mut routes.inputs {
+                        for route in routes.inputs.iter_mut().filter(|r| r.ring == j) {
                             let sc = route.reader.channels();
                             if let Some(src) = scratch.get_mut(..frames * sc) {
                                 route.reader.pull(src);
                                 for i in src.chunks_exact(sc) {
-                                    for (v, &c) in i.iter().zip(&route.device_channels) {
-                                        if let Some(p) = in_peaks.get_mut(c) {
+                                    route.place(i, |c, v| {
+                                        if let Some(p) = lp.get_mut(c) {
                                             *p = p.max(v.abs());
                                         }
-                                    }
+                                    });
                                 }
                             }
                         }
                     }
                 }
-                if k % 100 == 0 {
-                    let mut s = st.lock().unwrap_or_else(PoisonError::into_inner);
-                    s.clock_sample_time = sample;
-                    let a = reg.counters(Dir::ToNet);
-                    let b = reg.counters(Dir::FromNet);
-                    s.to_net_frames = a.write_pos;
-                    s.to_net_overruns = a.overruns;
-                    s.from_net_frames = b.write_pos;
-                    s.from_net_overruns = b.overruns;
-                    s.from_net_underruns = b.underruns;
-                    s.to_net_peak_dbfs = peaks
-                        .iter()
-                        .map(|&p| {
-                            if p > 0.0 {
-                                20.0 * f64::from(p).log10()
-                            } else {
-                                f64::NEG_INFINITY
-                            }
-                        })
-                        .collect();
-                    peaks.iter_mut().for_each(|p| *p = 0.0);
-                    s.from_net_peak_dbfs = in_peaks
-                        .iter()
-                        .map(|&p| {
-                            if p > 0.0 {
-                                20.0 * f64::from(p).log10()
-                            } else {
-                                f64::NEG_INFINITY
-                            }
-                        })
-                        .collect();
-                    in_peaks.iter_mut().for_each(|p| *p = 0.0);
-                    // Refresh route state (reuse vectors: no allocation
-                    // unless the route count changes).
-                    s.outputs.truncate(routes.outputs.len());
-                    s.inputs.truncate(routes.inputs.len());
-                    for (i, r) in routes.outputs.iter().enumerate() {
-                        let st = RouteStatus {
-                            label: String::new(),
-                            device_channels: Vec::new(),
-                            primed: true,
-                            bus: r.writer.counters(),
-                        };
-                        match s.outputs.get_mut(i) {
-                            Some(e) => e.bus = st.bus,
-                            None => s.outputs.push(RouteStatus {
-                                label: r.label.clone(),
-                                device_channels: r.device_channels.iter().map(|c| c + 1).collect(),
-                                ..st
-                            }),
-                        }
-                    }
-                    for (i, r) in routes.inputs.iter().enumerate() {
-                        match s.inputs.get_mut(i) {
-                            Some(e) => {
-                                e.bus = r.reader.counters();
-                                e.primed = r.reader.primed();
-                            }
-                            None => s.inputs.push(RouteStatus {
-                                label: r.label.clone(),
-                                device_channels: r.device_channels.iter().map(|c| c + 1).collect(),
-                                primed: r.reader.primed(),
-                                bus: r.reader.counters(),
-                            }),
-                        }
-                    }
-                }
+                continue_status(
+                    k,
+                    sample,
+                    &reg,
+                    &out_lanes,
+                    &in_lanes,
+                    &st,
+                    &mut peaks,
+                    &mut in_peaks,
+                    &routes,
+                );
             }
         });
     let thread = thread.map_err(|_| lw_sys::shm::Error("cannot create the device thread"))?;
@@ -369,6 +437,78 @@ pub fn start(cfg: &DeviceConfig, stop: &Stop) -> Result<Device, lw_sys::shm::Err
         thread,
         pending,
     })
+}
+
+/// Every 100 ticks: ring counters (summed per direction), peaks, route state.
+#[allow(clippy::too_many_arguments)]
+fn continue_status(
+    k: u32,
+    sample: u64,
+    reg: &Region,
+    out_lanes: &[Lane],
+    in_lanes: &[Lane],
+    st: &Mutex<DeviceStatus>,
+    peaks: &mut [f32],
+    in_peaks: &mut [f32],
+    routes: &Routes,
+) {
+    if k % 100 != 0 {
+        return;
+    }
+    let mut s = st.lock().unwrap_or_else(PoisonError::into_inner);
+    s.clock_sample_time = sample;
+    let sum = |lanes: &[Lane]| {
+        lanes.iter().fold((0u64, 0u64, 0u64), |acc, l| {
+            let c = reg.counters(l.ring);
+            (acc.0 + c.write_pos, acc.1 + c.overruns, acc.2 + c.underruns)
+        })
+    };
+    let (a, b) = (sum(out_lanes), sum(in_lanes));
+    s.to_net_frames = a.0;
+    s.to_net_overruns = a.1;
+    s.from_net_frames = b.0;
+    s.from_net_overruns = b.1;
+    s.from_net_underruns = b.2;
+    // Reuse vectors: no allocation unless sizes change.
+    s.to_net_peak_dbfs.clear();
+    s.to_net_peak_dbfs.extend(peaks.iter().map(|&p| dbfs(p)));
+    peaks.iter_mut().for_each(|p| *p = 0.0);
+    s.from_net_peak_dbfs.clear();
+    s.from_net_peak_dbfs
+        .extend(in_peaks.iter().map(|&p| dbfs(p)));
+    in_peaks.iter_mut().for_each(|p| *p = 0.0);
+    // Route state: device channels reported in the concatenated space (1-based).
+    let flat = |lanes: &[Lane], ring: usize, chs: &[usize]| -> Vec<usize> {
+        let off = lanes.get(ring).map_or(0, |l| l.offset);
+        chs.iter().map(|c| off + c + 1).collect()
+    };
+    s.outputs.truncate(routes.outputs.len());
+    s.inputs.truncate(routes.inputs.len());
+    for (i, r) in routes.outputs.iter().enumerate() {
+        match s.outputs.get_mut(i) {
+            Some(e) => e.bus = r.writer.counters(),
+            None => s.outputs.push(RouteStatus {
+                label: r.label.clone(),
+                device_channels: flat(out_lanes, r.ring, &r.device_channels),
+                primed: true,
+                bus: r.writer.counters(),
+            }),
+        }
+    }
+    for (i, r) in routes.inputs.iter().enumerate() {
+        match s.inputs.get_mut(i) {
+            Some(e) => {
+                e.bus = r.reader.counters();
+                e.primed = r.reader.primed();
+            }
+            None => s.inputs.push(RouteStatus {
+                label: r.label.clone(),
+                device_channels: flat(in_lanes, r.ring, &r.device_channels),
+                primed: r.reader.primed(),
+                bus: r.reader.counters(),
+            }),
+        }
+    }
 }
 
 impl Device {

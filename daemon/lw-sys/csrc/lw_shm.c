@@ -39,21 +39,34 @@
 #define FENCE_ACQ() __atomic_thread_fence(__ATOMIC_ACQUIRE)
 #endif
 
-static int valid_params(uint32_t ring_frames, uint32_t c0, uint32_t c1) {
-    return ring_frames >= 64 && ring_frames <= LW_SHM_MAX_RING_FRAMES && (ring_frames & (ring_frames - 1)) == 0 &&
-           c0 <= LW_SHM_MAX_CHANNELS && c1 <= LW_SHM_MAX_CHANNELS;
-}
-
-size_t lw_shm_size(uint32_t ring_frames, uint32_t c0, uint32_t c1) {
-    if (!valid_params(ring_frames, c0, c1)) {
+static int geometry_ok(uint32_t ring_frames, uint32_t n, const lw_ring_spec *specs) {
+    if (ring_frames < 64 || ring_frames > LW_SHM_MAX_RING_FRAMES || (ring_frames & (ring_frames - 1)) != 0 ||
+        n == 0 || n > LW_SHM_MAX_RINGS || specs == NULL) {
         return 0;
     }
-    return LW_SHM_HEADER_BYTES + (size_t)ring_frames * ((size_t)c0 + c1) * sizeof(float);
+    for (uint32_t i = 0; i < n; i++) {
+        if (specs[i].dir > LW_FROM_NET || specs[i].channels > LW_SHM_MAX_CHANNELS ||
+            (i > 0 && specs[i].dir < specs[i - 1].dir)) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
-int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_frames, uint32_t c0, uint32_t c1,
-                const lw_host_clock *clock) {
-    size_t need = lw_shm_size(ring_frames, c0, c1);
+size_t lw_shm_size(uint32_t ring_frames, uint32_t n, const lw_ring_spec *specs) {
+    if (!geometry_ok(ring_frames, n, specs)) {
+        return 0;
+    }
+    size_t total = LW_SHM_HEADER_BYTES;
+    for (uint32_t i = 0; i < n; i++) {
+        total += (size_t)ring_frames * specs[i].channels * sizeof(float);
+    }
+    return total;
+}
+
+int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_frames, uint32_t n,
+                const lw_ring_spec *specs, const lw_host_clock *clock) {
+    size_t need = lw_shm_size(ring_frames, n, specs);
     if (base == NULL || need == 0 || size < need) {
         return -1;
     }
@@ -63,8 +76,13 @@ int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_fra
     h->header_bytes = LW_SHM_HEADER_BYTES;
     h->sample_rate = sample_rate;
     h->ring_frames = ring_frames;
-    h->channels[LW_TO_NET] = c0;
-    h->channels[LW_FROM_NET] = c1;
+    h->ring_count = n;
+    uint64_t off = LW_SHM_HEADER_BYTES;
+    for (uint32_t i = 0; i < n; i++) {
+        h->spec[i] = specs[i];
+        h->offset[i] = off;
+        off += (uint64_t)ring_frames * specs[i].channels * sizeof(float);
+    }
     h->total_bytes = need;
     h->clock_rate_scalar = 1.0;
     if (clock != NULL) {
@@ -89,109 +107,130 @@ int lw_shm_validate(const void *base, size_t size) {
         return -1;
     }
     const lw_shm_header *h = CHDR(base);
-    if (LOAD_ACQ32(&h->magic) != LW_SHM_MAGIC || h->version != LW_SHM_VERSION || h->header_bytes != LW_SHM_HEADER_BYTES) {
+    if (LOAD_ACQ32(&h->magic) != LW_SHM_MAGIC || h->version != LW_SHM_VERSION || h->header_bytes != LW_SHM_HEADER_BYTES ||
+        h->ring_count == 0 || h->ring_count > LW_SHM_MAX_RINGS) {
         return -1;
     }
-    size_t need = lw_shm_size(h->ring_frames, h->channels[0], h->channels[1]);
-    return (need != 0 && need == h->total_bytes && need <= size) ? 0 : -1;
-}
-
-static float *ring_data(void *base, int dir) {
-    lw_shm_header *h = HDR(base);
-    size_t off = LW_SHM_HEADER_BYTES;
-    if (dir == LW_FROM_NET) {
-        off += (size_t)h->ring_frames * h->channels[LW_TO_NET] * sizeof(float);
+    size_t need = lw_shm_size(h->ring_frames, h->ring_count, h->spec);
+    if (need == 0 || need != h->total_bytes || need > size) {
+        return -1;
     }
-    return (float *)((char *)base + off);
+    /* Offsets must follow the canonical layout: a forged table cannot point outside the region. */
+    uint64_t off = LW_SHM_HEADER_BYTES;
+    for (uint32_t i = 0; i < h->ring_count; i++) {
+        if (h->offset[i] != off) {
+            return -1;
+        }
+        off += (uint64_t)h->ring_frames * h->spec[i].channels * sizeof(float);
+    }
+    return 0;
 }
 
-uint32_t lw_ring_writable(const void *base, int dir) {
+uint32_t lw_shm_sample_rate(const void *base) { return CHDR(base)->sample_rate; }
+uint32_t lw_shm_ring_frames(const void *base) { return CHDR(base)->ring_frames; }
+uint32_t lw_shm_ring_count(const void *base) { return CHDR(base)->ring_count; }
+
+static int ring_ok(const lw_shm_header *h, uint32_t ring) { return ring < h->ring_count && ring < LW_SHM_MAX_RINGS; }
+
+uint32_t lw_ring_dir(const void *base, uint32_t ring) {
     const lw_shm_header *h = CHDR(base);
-    if (dir != LW_TO_NET && dir != LW_FROM_NET) {
+    return ring_ok(h, ring) ? h->spec[ring].dir : 0;
+}
+
+uint32_t lw_ring_channels(const void *base, uint32_t ring) {
+    const lw_shm_header *h = CHDR(base);
+    return ring_ok(h, ring) ? h->spec[ring].channels : 0;
+}
+
+static float *ring_data(void *base, uint32_t ring) { return (float *)((char *)base + HDR(base)->offset[ring]); }
+
+uint32_t lw_ring_writable(const void *base, uint32_t ring) {
+    const lw_shm_header *h = CHDR(base);
+    if (!ring_ok(h, ring)) {
         return 0;
     }
-    uint64_t w = LOAD_RLX64(&h->ring[dir].write_pos);
-    uint64_t r = LOAD_ACQ64(&h->ring[dir].read_pos);
+    uint64_t w = LOAD_RLX64(&h->ring[ring].write_pos);
+    uint64_t r = LOAD_ACQ64(&h->ring[ring].read_pos);
     uint64_t used = w - r;
     return used >= h->ring_frames ? 0 : (uint32_t)(h->ring_frames - used);
 }
 
-uint32_t lw_ring_readable(const void *base, int dir) {
+uint32_t lw_ring_readable(const void *base, uint32_t ring) {
     const lw_shm_header *h = CHDR(base);
-    if (dir != LW_TO_NET && dir != LW_FROM_NET) {
+    if (!ring_ok(h, ring)) {
         return 0;
     }
-    uint64_t w = LOAD_ACQ64(&h->ring[dir].write_pos);
-    uint64_t r = LOAD_RLX64(&h->ring[dir].read_pos);
+    uint64_t w = LOAD_ACQ64(&h->ring[ring].write_pos);
+    uint64_t r = LOAD_RLX64(&h->ring[ring].read_pos);
     uint64_t used = w - r;
     return used > h->ring_frames ? h->ring_frames : (uint32_t)used;
 }
 
-uint32_t lw_ring_write(void *base, int dir, const float *src, uint32_t frames) {
+uint32_t lw_ring_write(void *base, uint32_t ring, const float *src, uint32_t frames) {
     lw_shm_header *h = HDR(base);
-    if ((dir != LW_TO_NET && dir != LW_FROM_NET) || src == NULL) {
+    if (!ring_ok(h, ring) || src == NULL) {
         return 0;
     }
-    uint32_t ch = h->channels[dir];
-    uint32_t n = lw_ring_writable(base, dir);
+    uint32_t ch = h->spec[ring].channels;
+    uint32_t n = lw_ring_writable(base, ring);
     if (n > frames) {
         n = frames;
     }
     if (n < frames) {
-        ADD_RLX64(&h->ring[dir].overruns, (uint64_t)(frames - n));
+        ADD_RLX64(&h->ring[ring].overruns, (uint64_t)(frames - n));
     }
     if (ch == 0 || n == 0) {
         return n;
     }
-    uint64_t w = LOAD_RLX64(&h->ring[dir].write_pos);
+    uint64_t w = LOAD_RLX64(&h->ring[ring].write_pos);
     uint32_t mask = h->ring_frames - 1;
     uint32_t idx = (uint32_t)(w & mask);
     uint32_t first = h->ring_frames - idx < n ? h->ring_frames - idx : n;
-    float *data = ring_data(base, dir);
+    float *data = ring_data(base, ring);
     memcpy(data + (size_t)idx * ch, src, (size_t)first * ch * sizeof(float));
     memcpy(data, src + (size_t)first * ch, (size_t)(n - first) * ch * sizeof(float));
-    STORE_REL64(&h->ring[dir].write_pos, w + n);
+    STORE_REL64(&h->ring[ring].write_pos, w + n);
     return n;
 }
 
-uint32_t lw_ring_read(void *base, int dir, float *dst, uint32_t frames) {
+uint32_t lw_ring_read(void *base, uint32_t ring, float *dst, uint32_t frames) {
     lw_shm_header *h = HDR(base);
-    if ((dir != LW_TO_NET && dir != LW_FROM_NET) || dst == NULL) {
+    if (!ring_ok(h, ring) || dst == NULL) {
         return 0;
     }
-    uint32_t ch = h->channels[dir];
-    uint32_t n = lw_ring_readable(base, dir);
+    uint32_t ch = h->spec[ring].channels;
+    uint32_t n = lw_ring_readable(base, ring);
     if (n > frames) {
         n = frames;
     }
     if (n < frames) {
-        ADD_RLX64(&h->ring[dir].underruns, (uint64_t)(frames - n));
+        ADD_RLX64(&h->ring[ring].underruns, (uint64_t)(frames - n));
         memset(dst + (size_t)n * ch, 0, (size_t)(frames - n) * ch * sizeof(float));
     }
     if (ch == 0 || n == 0) {
         return n;
     }
-    uint64_t r = LOAD_RLX64(&h->ring[dir].read_pos);
+    uint64_t r = LOAD_RLX64(&h->ring[ring].read_pos);
     uint32_t mask = h->ring_frames - 1;
     uint32_t idx = (uint32_t)(r & mask);
     uint32_t first = h->ring_frames - idx < n ? h->ring_frames - idx : n;
-    const float *data = ring_data(base, dir);
+    const float *data = ring_data(base, ring);
     memcpy(dst, data + (size_t)idx * ch, (size_t)first * ch * sizeof(float));
     memcpy(dst + (size_t)first * ch, data, (size_t)(n - first) * ch * sizeof(float));
-    STORE_REL64(&h->ring[dir].read_pos, r + n);
+    STORE_REL64(&h->ring[ring].read_pos, r + n);
     return n;
 }
 
-void lw_ring_counters(const void *base, int dir, uint64_t *w, uint64_t *r, uint64_t *over, uint64_t *under) {
+void lw_ring_counters(const void *base, uint32_t ring, uint64_t *w, uint64_t *r, uint64_t *over, uint64_t *under) {
     const lw_shm_header *h = CHDR(base);
-    if (dir != LW_TO_NET && dir != LW_FROM_NET) {
+    if (!ring_ok(h, ring)) {
         *w = *r = *over = *under = 0;
         return;
     }
-    *w = LOAD_ACQ64(&h->ring[dir].write_pos);
-    *r = LOAD_ACQ64(&h->ring[dir].read_pos);
-    *over = LOAD_RLX64(&h->ring[dir].overruns);
-    *under = LOAD_RLX64(&h->ring[dir].underruns);
+    *w = LOAD_ACQ64(&h->ring[ring].write_pos);
+    *r = LOAD_ACQ64(&h->ring[ring].read_pos);
+    *over = LOAD_RLX64(&h->ring[ring].overruns);
+    *under = LOAD_RLX64(&h->ring[ring].underruns);
 }
 
 void lw_clock_publish(void *base, uint64_t host_time, uint64_t sample_time, double rate_scalar) {
@@ -233,16 +272,16 @@ int lw_clock_read(const void *base, uint64_t *host_time, uint64_t *sample_time, 
     return -1;
 }
 
-uint32_t lw_ring_skip(void *base, int dir, uint32_t frames) {
+uint32_t lw_ring_skip(void *base, uint32_t ring, uint32_t frames) {
     lw_shm_header *h = HDR(base);
-    if (dir != LW_TO_NET && dir != LW_FROM_NET) {
+    if (!ring_ok(h, ring)) {
         return 0;
     }
-    uint32_t n = lw_ring_readable(base, dir);
+    uint32_t n = lw_ring_readable(base, ring);
     if (frames < n) {
         n = frames;
     }
-    uint64_t r = LOAD_RLX64(&h->ring[dir].read_pos);
-    STORE_REL64(&h->ring[dir].read_pos, r + n);
+    uint64_t r = LOAD_RLX64(&h->ring[ring].read_pos);
+    STORE_REL64(&h->ring[ring].read_pos, r + n);
     return n;
 }

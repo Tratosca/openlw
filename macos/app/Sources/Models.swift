@@ -62,7 +62,15 @@ struct InputPatch: Equatable {
     let channel: Int?
     let group: String?
     let kind: String
+    /// Duplex layout: channels of the OpenLW device; multi layout: channels within `device`.
     let deviceChannels: [Int]
+    /// Multi layout: input device number (“OpenLW In n”).
+    let device: Int?
+    /// Mono patch: "left", "right", or "sum".
+    let mix: String?
+
+    /// Device width this patch needs (multi layout).
+    var width: Int { mix != nil ? 1 : (kind == "surround" ? 8 : 2) }
 }
 
 /// Configured transmitted stream (source).
@@ -71,6 +79,8 @@ struct OutputPatch: Equatable {
     let name: String
     let format: String
     let deviceChannels: [Int]?
+    /// Multi layout: output device number (“OpenLW Out n”).
+    let device: Int?
 }
 
 struct DaemonConfig {
@@ -80,9 +90,9 @@ struct DaemonConfig {
     var outputs: [OutputPatch] = []
     var channelsToNet = 2
     var channelsFromNet = 2
-    /// Device name based on received sources.
-    var nameFromSources = false
-    /// macOS layout: "duplex" (one device) or "split" (In and Out).
+    /// Multi layout: devices named after their source (default), otherwise “OpenLW In n”.
+    var customNames = true
+    /// macOS layout: "duplex" (one OpenLW device) or "multi" (OpenLW In n / OpenLW Out n).
     var layout = "duplex"
     /// Advertised name (empty: computer name), latency preset, TOS byte.
     var terminalName = ""
@@ -92,12 +102,26 @@ struct DaemonConfig {
     /// Automatically selected interface.
     var autoIface: Bool { iface.isEmpty || iface == "auto" }
 
+    var multi: Bool { layout == "multi" }
+
+    /// Multi layout: device count per direction (one per configured pair).
+    var inDevices: Int { (channelsFromNet + 1) / 2 }
+    var outDevices: Int { (channelsToNet + 1) / 2 }
+
+    /// Multi layout: width of each input device after `inputs` (2 when empty), as computed by
+    /// the daemon (daemon/lw-daemon/src/config.rs, `in_widths`).
+    static func inWidths(_ inputs: [InputPatch], devices: Int) -> [Int] {
+        (1...max(1, devices)).map { n in
+            inputs.first { $0.device == n && !$0.deviceChannels.isEmpty }?.width ?? 2
+        }
+    }
+
     init() {}
 
     init(_ d: [String: Any]) {
         iface = d["iface"] as? String ?? ""
         advertise = d["advertise"] as? Bool ?? true
-        nameFromSources = d["name_device_from_sources"] as? Bool ?? false
+        customNames = d["custom_device_names"] as? Bool ?? true
         layout = d["device_layout"] as? String ?? "duplex"
         terminalName = d["terminal_name"] as? String ?? ""
         latency = d["latency"] as? String ?? "normal"
@@ -108,19 +132,25 @@ struct DaemonConfig {
         }
         inputs = (d["destinations"] as? [[String: Any]] ?? []).map {
             InputPatch(channel: $0["channel"] as? Int, group: $0["group"] as? String,
-                       kind: $0["kind"] as? String ?? "stereo", deviceChannels: $0["device_channels"] as? [Int] ?? [])
+                       kind: $0["kind"] as? String ?? "stereo", deviceChannels: $0["device_channels"] as? [Int] ?? [],
+                       device: $0["device"] as? Int, mix: $0["mix"] as? String)
         }
         outputs = (d["sources"] as? [[String: Any]] ?? []).compactMap {
             guard let ch = $0["channel"] as? Int else { return nil }
             return OutputPatch(channel: ch, name: $0["name"] as? String ?? "", format: $0["format"] as? String ?? "standard",
-                               deviceChannels: $0["device_channels"] as? [Int])
+                               deviceChannels: $0["device_channels"] as? [Int], device: $0["device"] as? Int)
         }
     }
 }
 
 struct DeviceMeters {
+    /// Peaks per channel, devices concatenated in order (one device in duplex layout).
     var toNet: [Double?] = []
     var fromNet: [Double?] = []
+    /// Channels of each output / input device of the running region.
+    var outWidths: [Int] = []
+    var inWidths: [Int] = []
+    /// Route state keyed by device channels (1-based, devices concatenated).
     var inputsPrimed: [[Int]: Bool] = [:]
     var inputSlips: [[Int]: Int] = [:]
 
@@ -130,11 +160,20 @@ struct DeviceMeters {
         guard let dev = status["device"] as? [String: Any] else { return }
         toNet = (dev["to_net_peak_dbfs"] as? [Any] ?? []).map { $0 as? Double }
         fromNet = (dev["from_net_peak_dbfs"] as? [Any] ?? []).map { $0 as? Double }
+        outWidths = dev["out_widths"] as? [Int] ?? []
+        inWidths = dev["in_widths"] as? [Int] ?? []
         for r in dev["inputs"] as? [[String: Any]] ?? [] {
             let chs = r["device_channels"] as? [Int] ?? []
             inputsPrimed[chs] = r["primed"] as? Bool ?? false
             inputSlips[chs] = (r["bus"] as? [String: Any])?["slips"] as? Int ?? 0
         }
+    }
+
+    /// Concatenated 1-based channels of device `n` (1-based) given device widths.
+    static func channels(device n: Int, widths: [Int]) -> [Int] {
+        guard n >= 1, n <= widths.count else { return [] }
+        let start = widths.prefix(n - 1).reduce(0, +)
+        return Array((start + 1)...(start + widths[n - 1]))
     }
 
     /// Maximum peak (dBFS) across 1-based channels, or nil for silence.

@@ -2,26 +2,32 @@
  * HAL plugin (AudioServerPlugIn) for macOS Livewire / AES67 driver.
  *
  * Objects according to app-selected layout ("geometry" response, "layout"):
- * - one duplex “OpenLW” device (2), with “from network” input stream (3) and
- * “to network” output stream (4);
- * - or two devices: “OpenLW In” (5, input stream 6) and “OpenLW Out” (7, output
- * stream 8). Each device has its own I/O clock; they share the daemon region.
- * Layout changes modify plugin device list (PropertiesChanged).
- * Single format: interleaved float32, 48 kHz (Livewire).
+ * - duplex: one multichannel “OpenLW” device (2), with “from network” input stream (3) and
+ *   “to network” output stream (4);
+ * - multi: numbered devices “OpenLW In n” (100 + 2(n−1), input stream +1) and “OpenLW Out n”
+ *   (200 + 2(n−1), output stream +1), n = 1..16, each as wide as its source (1, 2, or 8
+ *   channels: "in_widths" / "out_widths"). UIDs are stable per slot
+ *   (fr.francois-brille.openlw.device.in.n / .out.n).
+ * Each device has its own I/O clock; they share the daemon region, one ring per device
+ * (lw_shm.h: TO_NET rings, then FROM_NET rings). Layout and device-count changes modify the
+ * plugin device list (PropertiesChanged). Single format: interleaved float32, 48 kHz (Livewire).
  *
  * Audio: exchanged with lw-daemon through daemon/lw-sys/csrc/lw_shm.h shared region,
  * obtained at first StartIO through XPC ("attach", Mach service fr.francois-brille.openlw.daemon,
- * declared in AudioServerPlugIn_MachServices). Without daemon, device remains present and silent.
+ * declared in AudioServerPlugIn_MachServices). Without daemon, devices remain present and silent.
  *
- * Channel count: set by daemon (app setting). Monitoring queue polls
- * "geometry" every 2 s; if channel count or region generation changes, requests
- * host configuration change. PerformDeviceConfigurationChange detaches region and
- * applies new counts; host rereads properties, next StartIO reattaches.
+ * Geometry: set by daemon (app settings). Monitoring queue polls "geometry" every 2 s:
+ * - a device whose width changes gets a host configuration change request;
+ *   PerformDeviceConfigurationChange applies the new width, host rereads properties;
+ * - a new region generation (daemon recreated the region) detaches the region and reattaches
+ *   at once if I/O runs: devices whose width is unchanged resume without reconfiguration.
+ * Each I/O operation checks that its ring has the device's width (silence otherwise): a
+ * device awaiting reconfiguration never reads or writes a ring of another width.
  * Same queue attaches region if I/O runs without it (daemon started after application).
  *
- * Names: "geometry" also contains device names (“OpenLW”, or “OpenLW In
- * (2 - Studio A)” if enabled in app) and channel names (currently “2 - Studio A L”).
- * Changes notify host (PropertiesChanged) without configuration change.
+ * Names: "geometry" also contains device names ("name", "in_device_names",
+ * "out_device_names") and channel names ("input_names" / "output_names", devices
+ * concatenated in order). Changes notify host (PropertiesChanged) without configuration change.
  *
  * Input latency: bounded here on reader side, because only plugin knows host-requested
  * block size (512–4096 frames and beyond). Daemon fills ring while space remains. Before each
@@ -52,8 +58,6 @@
 #define LW_BUNDLE_ID "fr.francois-brille.openlw.driver"
 #define LW_SERVICE "fr.francois-brille.openlw.daemon"
 #define LW_DEVICE_UID "fr.francois-brille.openlw.device"
-#define LW_DEVICE_IN_UID "fr.francois-brille.openlw.device.in"
-#define LW_DEVICE_OUT_UID "fr.francois-brille.openlw.device.out"
 #define LW_MODEL_UID "fr.francois-brille.openlw.model"
 #define LW_SAMPLE_RATE 48000.0
 #define LW_ZERO_TS_PERIOD 16384u
@@ -65,34 +69,63 @@
 static _Atomic uint32_t gInMargin = LW_IN_MARGIN;
 #define LW_ELEMENT_MAIN 0u /* kAudioObjectPropertyElementMain (12.0+) == Master */
 
+/* Numbered devices per direction (multi layout). */
+#define LW_MAX_NUMBERED 16
+/* Device slots: 0 duplex, 1..16 “OpenLW In n”, 17..32 “OpenLW Out n”. */
+#define LW_SLOTS (1 + 2 * LW_MAX_NUMBERED)
+#define LW_FIRST_OUT (1 + LW_MAX_NUMBERED)
+/* Channel names per direction, all devices concatenated (16 devices × 8 channels). */
+#define LW_MAX_NAMES 128
+
 enum {
     kObj_PlugIn = kAudioObjectPlugInObject,
     kObj_Device = 2,     /* duplex */
     kObj_StreamIn = 3,   /* Network → applications (input) */
     kObj_StreamOut = 4,  /* Applications → network (output) */
-    kObj_DevIn = 5,      /* “OpenLW In” */
-    kObj_StreamIn2 = 6,
-    kObj_DevOut = 7,     /* “OpenLW Out” */
-    kObj_StreamOut2 = 8,
+    kObj_InBase = 100,   /* “OpenLW In n”: 100 + 2(n−1), stream + 1 */
+    kObj_OutBase = 200,  /* “OpenLW Out n”: 200 + 2(n−1), stream + 1 */
 };
 
-/* Device index (0 duplex, 1 input, 2 output), or -1. */
+/* Device slot of a device object, or -1. */
 static int dev_index(AudioObjectID id) {
-    return id == kObj_Device ? 0 : id == kObj_DevIn ? 1 : id == kObj_DevOut ? 2 : -1;
+    if (id == kObj_Device) {
+        return 0;
+    }
+    if (id >= kObj_InBase && id < kObj_InBase + 2 * LW_MAX_NUMBERED && (id - kObj_InBase) % 2 == 0) {
+        return 1 + (int)(id - kObj_InBase) / 2;
+    }
+    if (id >= kObj_OutBase && id < kObj_OutBase + 2 * LW_MAX_NUMBERED && (id - kObj_OutBase) % 2 == 0) {
+        return LW_FIRST_OUT + (int)(id - kObj_OutBase) / 2;
+    }
+    return -1;
 }
-static const AudioObjectID kDevIds[3] = {kObj_Device, kObj_DevIn, kObj_DevOut};
-static Boolean dev_has_in(AudioObjectID id) { return id == kObj_Device || id == kObj_DevIn; }
-static Boolean dev_has_out(AudioObjectID id) { return id == kObj_Device || id == kObj_DevOut; }
-static AudioObjectID dev_stream_in(AudioObjectID id) {
-    return id == kObj_Device ? kObj_StreamIn : id == kObj_DevIn ? kObj_StreamIn2 : 0;
+static AudioObjectID dev_id(int idx) {
+    return idx == 0 ? kObj_Device
+           : idx < LW_FIRST_OUT ? (AudioObjectID)(kObj_InBase + 2 * (idx - 1))
+                                : (AudioObjectID)(kObj_OutBase + 2 * (idx - LW_FIRST_OUT));
 }
-static AudioObjectID dev_stream_out(AudioObjectID id) {
-    return id == kObj_Device ? kObj_StreamOut : id == kObj_DevOut ? kObj_StreamOut2 : 0;
+static Boolean idx_has_in(int idx) { return idx >= 0 && idx < LW_FIRST_OUT; }
+static Boolean idx_has_out(int idx) { return idx == 0 || (idx >= LW_FIRST_OUT && idx < LW_SLOTS); }
+static AudioObjectID dev_stream_in(int idx) {
+    return idx == 0 ? kObj_StreamIn : idx_has_in(idx) ? dev_id(idx) + 1 : 0;
 }
-static Boolean is_stream_in(AudioObjectID id) { return id == kObj_StreamIn || id == kObj_StreamIn2; }
-static Boolean is_stream_out(AudioObjectID id) { return id == kObj_StreamOut || id == kObj_StreamOut2; }
-static AudioObjectID stream_owner(AudioObjectID id) {
-    return id == kObj_StreamIn2 ? kObj_DevIn : id == kObj_StreamOut2 ? kObj_DevOut : kObj_Device;
+static AudioObjectID dev_stream_out(int idx) {
+    return idx == 0 ? kObj_StreamOut : idx_has_out(idx) ? dev_id(idx) + 1 : 0;
+}
+/* Owning device slot of a stream object, or -1. */
+static int stream_owner(AudioObjectID id) {
+    if (id == kObj_StreamIn || id == kObj_StreamOut) {
+        return 0;
+    }
+    return (id % 2 == 1) ? dev_index(id - 1) : -1;
+}
+static Boolean is_stream_in(AudioObjectID id) {
+    int o = stream_owner(id);
+    return o >= 0 && dev_stream_in(o) == id;
+}
+static Boolean is_stream_out(AudioObjectID id) {
+    int o = stream_owner(id);
+    return o >= 0 && dev_stream_out(o) == id;
 }
 
 /* ---------- State ---------- */
@@ -100,22 +133,38 @@ static AudioObjectID stream_owner(AudioObjectID id) {
 static AudioServerPlugInHostRef gHost = NULL;
 static pthread_mutex_t gLock = PTHREAD_MUTEX_INITIALIZER;
 static UInt32 gRefCount = 0;
-static UInt32 gChannelsIn = LW_DEFAULT_CHANNELS;  /* From network */
-static UInt32 gChannelsOut = LW_DEFAULT_CHANNELS; /* To network */
 static Float64 gHostTicksPerFrame = 0;
 
-/* Each device's clock and I/O (dev_index index). */
+/* Each device's clock, I/O, and channel counts (slot index). Counts change only in
+ * PerformDeviceConfigurationChange (host I/O stopped) or when a device is published. */
 typedef struct {
     UInt32 io;
     UInt64 anchor;
     UInt64 count;
+    UInt32 ch_in, ch_out;     /* Current format (0: direction absent) */
+    UInt32 pend_in, pend_out; /* Width awaiting configuration change */
 } lw_dev_state;
-static lw_dev_state gDev[3];
-/* Layout: 0 one duplex device, 1 two devices (protected by gLock). */
-static int gSplit = 0;
+static lw_dev_state gDev[LW_SLOTS];
+/* Layout (protected by gLock): multi, numbered device counts. */
+static int gMulti = 0;
+static int gNumIn = 0, gNumOut = 0;
+
+static Boolean dev_published_locked(int idx) {
+    if (idx == 0) {
+        return !gMulti;
+    }
+    if (!gMulti || idx < 0) {
+        return false;
+    }
+    return idx < LW_FIRST_OUT ? idx <= gNumIn : idx - LW_FIRST_OUT < gNumOut;
+}
 
 static UInt32 io_running_locked(void) {
-    return gDev[0].io + gDev[1].io + gDev[2].io;
+    UInt32 n = 0;
+    for (int i = 0; i < LW_SLOTS; i++) {
+        n += gDev[i].io;
+    }
+    return n;
 }
 
 /* Active shared region (or NULL): read lock-free by I/O thread. */
@@ -135,18 +184,14 @@ static lw_client *gMonClient = NULL;
 static uint64_t gAttachedGeneration = 0;
 /* Published names (protected by gLock; NULL = default name). */
 #define LW_NAME_BYTES 512
-static CFStringRef gDeviceName = NULL;
-static CFStringRef gInDevName = NULL;
-static CFStringRef gOutDevName = NULL;
-static CFStringRef gInNames[LW_SHM_MAX_CHANNELS];
-static CFStringRef gOutNames[LW_SHM_MAX_CHANNELS];
+static CFStringRef gDevName[LW_SLOTS];
+/* Channel names per device and direction (0 input, 1 output). */
+static CFStringRef gChName[LW_SLOTS][2][LW_SHM_MAX_CHANNELS];
 
-/* Input primed (I/O thread; reset at I/O start and attachment). */
-static _Atomic int gInPrimed = 0;
-/* Requested configuration change per device (bit = dev_index). */
-static int gChangeRequested = 0;
-static UInt32 gPendingIn = LW_DEFAULT_CHANNELS;
-static UInt32 gPendingOut = LW_DEFAULT_CHANNELS;
+/* Input primed per device (I/O thread; reset at I/O start and attachment). */
+static _Atomic int gInPrimed[LW_SLOTS];
+/* Requested configuration change per device (bit = slot index). */
+static uint64_t gChangeRequested = 0;
 
 static void plog(int level, const char *msg) {
     lw_log(level, "plugin", msg);
@@ -290,30 +335,119 @@ static void replace_name(CFStringRef *slot, CFStringRef v) {
     }
 }
 
-/* Replace published names; return mask: 1 duplex name, 2 input channels, 4 output
- * channels, 8 “OpenLW In” name, 16 “OpenLW Out” name. */
-static int set_names_locked(CFStringRef name, CFStringRef in_dev, CFStringRef out_dev, CFStringRef *in,
-                            CFStringRef *out) {
-    int changed = 0;
-    changed |= same_name(name, gDeviceName) ? 0 : 1;
-    changed |= same_name(in_dev, gInDevName) ? 0 : 8;
-    changed |= same_name(out_dev, gOutDevName) ? 0 : 16;
-    for (size_t i = 0; i < LW_SHM_MAX_CHANNELS; i++) {
-        changed |= same_name(in[i], gInNames[i]) ? 0 : 2;
-        changed |= same_name(out[i], gOutNames[i]) ? 0 : 4;
+/* Integer array for "key" into dst[max]; return count read (0 if absent). */
+static int json_u32s(const char *json, const char *key, UInt32 *dst, int max) {
+    char pat[64];
+    snprintf(pat, sizeof pat, "\"%s\":[", key);
+    const char *p = strstr(json, pat);
+    if (p == NULL) {
+        return 0;
     }
-    replace_name(&gDeviceName, name);
-    replace_name(&gInDevName, in_dev);
-    replace_name(&gOutDevName, out_dev);
-    for (size_t i = 0; i < LW_SHM_MAX_CHANNELS; i++) {
-        replace_name(&gInNames[i], in[i]);
-        replace_name(&gOutNames[i], out[i]);
+    p += strlen(pat);
+    int n = 0;
+    while (n < max) {
+        while (*p == ' ' || *p == ',') {
+            p++;
+        }
+        char *end = NULL;
+        unsigned long v = strtoul(p, &end, 10);
+        if (end == p) {
+            break;
+        }
+        dst[n++] = (UInt32)v;
+        p = end;
     }
-    return changed;
+    return n;
 }
 
-/* Detached region, unmapped only on next detach: with two devices, one device's I/O
- * may still read the region when the other detaches it (configuration change). */
+/* Default device name (retained). */
+static CFStringRef default_name(int idx) {
+    if (idx == 0) {
+        return CFRetain(CFSTR("OpenLW"));
+    }
+    return idx < LW_FIRST_OUT ? CFStringCreateWithFormat(NULL, NULL, CFSTR("OpenLW In %d"), idx)
+                              : CFStringCreateWithFormat(NULL, NULL, CFSTR("OpenLW Out %d"), idx - LW_FIRST_OUT + 1);
+}
+
+/* Device UID (retained). */
+static CFStringRef dev_uid(int idx) {
+    if (idx == 0) {
+        return CFRetain(CFSTR(LW_DEVICE_UID));
+    }
+    return idx < LW_FIRST_OUT
+               ? CFStringCreateWithFormat(NULL, NULL, CFSTR(LW_DEVICE_UID ".in.%d"), idx)
+               : CFStringCreateWithFormat(NULL, NULL, CFSTR(LW_DEVICE_UID ".out.%d"), idx - LW_FIRST_OUT + 1);
+}
+
+/* Names from one geometry response (owned, NULL = default). */
+typedef struct {
+    CFStringRef dev[LW_SLOTS];
+    CFStringRef ch[LW_SLOTS][2][LW_SHM_MAX_CHANNELS];
+} lw_names;
+
+static void names_free(lw_names *n) {
+    for (int i = 0; i < LW_SLOTS; i++) {
+        if (n->dev[i]) {
+            CFRelease(n->dev[i]);
+        }
+        for (int d = 0; d < 2; d++) {
+            for (int c = 0; c < (int)LW_SHM_MAX_CHANNELS; c++) {
+                if (n->ch[i][d][c]) {
+                    CFRelease(n->ch[i][d][c]);
+                }
+            }
+        }
+    }
+}
+
+/* Spread concatenated channel names over devices `first`..`first + count − 1` (widths w). */
+static void spread(CFStringRef *flat, int nflat, lw_names *n, int dir, int first, const UInt32 *w, int count) {
+    int k = 0;
+    for (int i = 0; i < count; i++) {
+        for (UInt32 c = 0; c < w[i]; c++, k++) {
+            if (k < nflat && c < LW_SHM_MAX_CHANNELS) {
+                n->ch[first + i][dir][c] = flat[k];
+                flat[k] = NULL;
+            }
+        }
+    }
+    for (int j = 0; j < nflat; j++) {
+        if (flat[j]) {
+            CFRelease(flat[j]);
+        }
+    }
+}
+
+/* Replace published names (takes ownership). Return the mask of renamed devices (bit =
+ * slot); *ch_in / *ch_out: devices whose input / output channel names changed. */
+static uint64_t set_names_locked(lw_names *n, uint64_t *ch_in, uint64_t *ch_out) {
+    uint64_t renamed = 0;
+    *ch_in = *ch_out = 0;
+    for (int i = 0; i < LW_SLOTS; i++) {
+        if (!same_name(n->dev[i], gDevName[i])) {
+            renamed |= 1ull << i;
+        }
+        replace_name(&gDevName[i], n->dev[i]);
+        n->dev[i] = NULL;
+        for (int d = 0; d < 2; d++) {
+            for (int c = 0; c < (int)LW_SHM_MAX_CHANNELS; c++) {
+                if (!same_name(n->ch[i][d][c], gChName[i][d][c])) {
+                    if (d == 0) {
+                        *ch_in |= 1ull << i;
+                    } else {
+                        *ch_out |= 1ull << i;
+                    }
+                }
+                replace_name(&gChName[i][d][c], n->ch[i][d][c]);
+                n->ch[i][d][c] = NULL;
+            }
+        }
+    }
+    return renamed;
+}
+
+/* Detached region, unmapped only on next detach: one device's I/O may still read the
+ * region when it is detached (monitoring, configuration change of another device). */
 static void *gStaleRegion = NULL;
 static size_t gStaleSize = 0;
 static void *gStaleObject = NULL;
@@ -372,19 +506,10 @@ static void attach_locked(void) {
     if (base != NULL && lw_shm_validate(base, size) == 0) {
         lw_shm_host_clock(base, &clock);
     }
-    /* Published clock must use mach_absolute_time ticks, GetZeroTimeStamp's timebase. */
-    if (base == NULL || clock.id != LW_CLOCK_MACH) {
-        plog(3, "invalid shared region (magic, version, size, or host clock)");
-        lw_shm_unmap(base, size);
-        lw_xpc_release(obj);
-        detach_locked();
-        return;
-    }
-    const lw_shm_header *h = (const lw_shm_header *)base;
-    if (h->channels[LW_TO_NET] != gChannelsOut || h->channels[LW_FROM_NET] != gChannelsIn ||
-        h->sample_rate != (uint32_t)LW_SAMPLE_RATE) {
-        /* Daemon channel count changed: monitor will request configuration change. */
-        plog(3, "region geometry differs from the device (channels or sample rate)");
+    /* Published clock must use mach_absolute_time ticks, GetZeroTimeStamp's timebase.
+     * Ring widths are checked per device at each I/O operation. */
+    if (base == NULL || clock.id != LW_CLOCK_MACH || lw_shm_sample_rate(base) != (uint32_t)LW_SAMPLE_RATE) {
+        plog(3, "invalid shared region (magic, version, size, sample rate, or host clock)");
         lw_shm_unmap(base, size);
         lw_xpc_release(obj);
         detach_locked();
@@ -393,9 +518,33 @@ static void attach_locked(void) {
     gShmemObject = obj;
     gRegionSize = size;
     gAttachedGeneration = generation;
-    atomic_store(&gInPrimed, 0);
+    for (int i = 0; i < LW_SLOTS; i++) {
+        atomic_store(&gInPrimed[i], 0);
+    }
     atomic_store(&gRegion, base);
     plog(2, "daemon shared region attached");
+}
+
+/* Ring of a device in `region` for a direction, or -1 if absent or of another width.
+ * Order (lw_shm.h): TO_NET rings (Out 1..M, or the duplex output), then FROM_NET rings. */
+static int device_ring(const void *region, int idx, int in, UInt32 channels) {
+    uint32_t count = lw_shm_ring_count(region), outs = 0;
+    while (outs < count && lw_ring_dir(region, outs) == LW_TO_NET) {
+        outs++;
+    }
+    uint32_t ring;
+    if (in) {
+        ring = outs + (uint32_t)(idx == 0 ? 0 : idx - 1);
+        if (ring >= count) {
+            return -1;
+        }
+    } else {
+        ring = (uint32_t)(idx == 0 ? 0 : idx - LW_FIRST_OUT);
+        if (ring >= outs) {
+            return -1;
+        }
+    }
+    return lw_ring_channels(region, ring) == channels && channels > 0 ? (int)ring : -1;
 }
 
 /* One geometry query; request configuration change if needed. */
@@ -421,44 +570,105 @@ static void monitor_tick(void) {
         pthread_mutex_unlock(&gLock);
         return;
     }
-    uint64_t gen = 0, to = 0, from = 0;
+    uint64_t gen = 0, to = 0, from = 0, margin = 0;
     int ok = strstr(reply, "\"ok\":true") != NULL && json_u64(reply, "generation", &gen) == 0 &&
-             json_u64(reply, "channels_to_net", &to) == 0 && json_u64(reply, "channels_from_net", &from) == 0 &&
-             to >= 1 && to <= LW_SHM_MAX_CHANNELS && from >= 1 && from <= LW_SHM_MAX_CHANNELS;
-    CFStringRef name = NULL, in_dev = NULL, out_dev = NULL, in[LW_SHM_MAX_CHANNELS], out[LW_SHM_MAX_CHANNELS];
-    uint64_t margin = 0;
+             json_u64(reply, "channels_to_net", &to) == 0 && json_u64(reply, "channels_from_net", &from) == 0;
+    int multi = ok && strstr(reply, "\"layout\":\"multi\"") != NULL;
+    /* Wanted width per slot (0: not published). */
+    UInt32 want_in[LW_SLOTS] = {0}, want_out[LW_SLOTS] = {0};
+    UInt32 in_w[LW_MAX_NUMBERED], out_w[LW_MAX_NUMBERED];
+    int nin = 0, nout = 0;
+    if (multi) {
+        nin = json_u32s(reply, "in_widths", in_w, LW_MAX_NUMBERED);
+        nout = json_u32s(reply, "out_widths", out_w, LW_MAX_NUMBERED);
+        for (int i = 0; i < nin; i++) {
+            ok &= in_w[i] >= 1 && in_w[i] <= LW_SHM_MAX_CHANNELS;
+            want_in[1 + i] = in_w[i];
+        }
+        for (int i = 0; i < nout; i++) {
+            ok &= out_w[i] >= 1 && out_w[i] <= LW_SHM_MAX_CHANNELS;
+            want_out[LW_FIRST_OUT + i] = out_w[i];
+        }
+    } else {
+        ok &= to >= 1 && to <= LW_SHM_MAX_CHANNELS && from >= 1 && from <= LW_SHM_MAX_CHANNELS;
+        want_in[0] = (UInt32)from;
+        want_out[0] = (UInt32)to;
+    }
     if (ok && json_u64(reply, "input_margin", &margin) == 0 && margin >= 64 && margin <= 2048) {
         atomic_store_explicit(&gInMargin, (uint32_t)margin, memory_order_relaxed);
     }
-    int split = 0;
+    static lw_names names; /* Monitoring queue only (serial) */
+    memset(&names, 0, sizeof names);
     if (ok) {
-        split = strstr(reply, "\"layout\":\"split\"") != NULL;
-        name = json_name(reply, "name");
-        in_dev = json_name(reply, "input_device_name");
-        out_dev = json_name(reply, "output_device_name");
-        json_names(reply, "input_names", in, LW_SHM_MAX_CHANNELS);
-        json_names(reply, "output_names", out, LW_SHM_MAX_CHANNELS);
+        static CFStringRef flat[LW_MAX_NAMES];
+        CFStringRef devs[LW_MAX_NUMBERED];
+        if (multi) {
+            json_names(reply, "in_device_names", devs, LW_MAX_NUMBERED);
+            for (int i = 0; i < LW_MAX_NUMBERED; i++) {
+                names.dev[1 + i] = devs[i];
+            }
+            json_names(reply, "out_device_names", devs, LW_MAX_NUMBERED);
+            for (int i = 0; i < LW_MAX_NUMBERED; i++) {
+                names.dev[LW_FIRST_OUT + i] = devs[i];
+            }
+            json_names(reply, "input_names", flat, LW_MAX_NAMES);
+            spread(flat, LW_MAX_NAMES, &names, 0, 1, in_w, nin);
+            json_names(reply, "output_names", flat, LW_MAX_NAMES);
+            spread(flat, LW_MAX_NAMES, &names, 1, LW_FIRST_OUT, out_w, nout);
+        } else {
+            names.dev[0] = json_name(reply, "name");
+            UInt32 w_in = (UInt32)from, w_out = (UInt32)to;
+            json_names(reply, "input_names", flat, LW_MAX_NAMES);
+            spread(flat, LW_MAX_NAMES, &names, 0, 0, &w_in, 1);
+            json_names(reply, "output_names", flat, LW_MAX_NAMES);
+            spread(flat, LW_MAX_NAMES, &names, 1, 0, &w_out, 1);
+        }
     }
     lw_free(reply);
     if (!ok) {
+        names_free(&names);
         return;
     }
-    int request = 0; /* Devices requiring configuration-change requests */
+    uint64_t request = 0; /* Devices requiring configuration-change requests */
     pthread_mutex_lock(&gLock);
     AudioServerPlugInHostRef host = gHost;
-    int relayout = split != gSplit;
-    gSplit = split;
-    int renamed = set_names_locked(name, in_dev, out_dev, in, out);
-    int attached = atomic_load(&gRegion) != NULL;
-    int change = (UInt32)to != gChannelsOut || (UInt32)from != gChannelsIn || (attached && gen != gAttachedGeneration);
-    int published = gSplit ? (2 | 4) : 1;
-    if (change) {
-        /* Most recent geometry wins, even with a pending request. */
-        gPendingOut = (UInt32)to;
-        gPendingIn = (UInt32)from;
-        request = published & ~gChangeRequested;
-        gChangeRequested |= published;
-    } else if (!attached && io_running_locked() > 0) {
+    Boolean was[LW_SLOTS];
+    for (int i = 0; i < LW_SLOTS; i++) {
+        was[i] = dev_published_locked(i);
+    }
+    int relayout = multi != gMulti || nin != gNumIn || nout != gNumOut;
+    gMulti = multi;
+    gNumIn = nin;
+    gNumOut = nout;
+    uint64_t ch_in = 0, ch_out = 0;
+    uint64_t renamed = set_names_locked(&names, &ch_in, &ch_out);
+    /* Region recreated by the daemon: reattach (below); unchanged devices resume. */
+    if (atomic_load(&gRegion) != NULL && gen != gAttachedGeneration) {
+        detach_locked();
+    }
+    for (int i = 0; i < LW_SLOTS; i++) {
+        lw_dev_state *dv = &gDev[i];
+        if (!dev_published_locked(i)) {
+            continue;
+        }
+        if (!was[i]) {
+            /* Newly published: the host has not read its format yet. */
+            dv->ch_in = dv->pend_in = want_in[i];
+            dv->ch_out = dv->pend_out = want_out[i];
+            gChangeRequested &= ~(1ull << i);
+            continue;
+        }
+        if (want_in[i] != dv->ch_in || want_out[i] != dv->ch_out) {
+            /* Most recent geometry wins, even with a pending request. */
+            dv->pend_in = want_in[i];
+            dv->pend_out = want_out[i];
+            if (!(gChangeRequested & (1ull << i))) {
+                request |= 1ull << i;
+                gChangeRequested |= 1ull << i;
+            }
+        }
+    }
+    if (atomic_load(&gRegion) == NULL && io_running_locked() > 0) {
         attach_locked();
     }
     pthread_mutex_unlock(&gLock);
@@ -466,39 +676,39 @@ static void monitor_tick(void) {
         return;
     }
     if (relayout) {
-        plog(2, split ? "layout: two devices" : "layout: one device");
+        plog(2, multi ? "layout: numbered devices" : "layout: one device");
         AudioObjectPropertyAddress pa[2] = {
             {kAudioPlugInPropertyDeviceList, kAudioObjectPropertyScopeGlobal, LW_ELEMENT_MAIN},
             {kAudioObjectPropertyOwnedObjects, kAudioObjectPropertyScopeGlobal, LW_ELEMENT_MAIN},
         };
         host->PropertiesChanged(host, kObj_PlugIn, 2, pa);
     }
-    for (int i = 0; i < 3 && renamed; i++) {
-        if (!(published & (1 << i))) {
-            continue;
+    for (int i = 0; i < LW_SLOTS; i++) {
+        uint64_t bit = 1ull << i;
+        if (!((renamed | ch_in | ch_out) & bit) || !was[i]) {
+            continue; /* Newly published devices are read afresh by the host */
         }
-        AudioObjectID dev = kDevIds[i];
         AudioObjectPropertyAddress addrs[3];
         UInt32 n = 0;
-        if ((i == 0 && (renamed & 1)) || (i == 1 && (renamed & 8)) || (i == 2 && (renamed & 16))) {
+        if (renamed & bit) {
             addrs[n++] = (AudioObjectPropertyAddress){kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, LW_ELEMENT_MAIN};
         }
-        if ((renamed & 2) && dev_has_in(dev)) {
+        if ((ch_in & bit) && idx_has_in(i)) {
             addrs[n++] = (AudioObjectPropertyAddress){kAudioObjectPropertyElementName, kAudioObjectPropertyScopeInput,
                                                       kAudioObjectPropertyElementWildcard};
         }
-        if ((renamed & 4) && dev_has_out(dev)) {
+        if ((ch_out & bit) && idx_has_out(i)) {
             addrs[n++] = (AudioObjectPropertyAddress){kAudioObjectPropertyElementName, kAudioObjectPropertyScopeOutput,
                                                       kAudioObjectPropertyElementWildcard};
         }
         if (n) {
-            host->PropertiesChanged(host, dev, n, addrs);
+            host->PropertiesChanged(host, dev_id(i), n, addrs);
         }
     }
-    for (int i = 0; i < 3; i++) {
-        if (request & (1 << i)) {
-            plog(2, "daemon geometry changed: configuration change requested");
-            host->RequestDeviceConfigurationChange(host, kDevIds[i], 0, NULL);
+    for (int i = 0; i < LW_SLOTS; i++) {
+        if (request & (1ull << i)) {
+            plog(2, "device width changed: configuration change requested");
+            host->RequestDeviceConfigurationChange(host, dev_id(i), 0, NULL);
         }
     }
 }
@@ -566,48 +776,63 @@ static AudioStreamBasicDescription format_for(UInt32 channels) {
     return f;
 }
 
-static Boolean is_stream(AudioObjectID id) {
-    return is_stream_in(id) || is_stream_out(id);
-}
-
+/* Device channel count for a stream (current format). */
 static UInt32 stream_channels(AudioObjectID id) {
-    return is_stream_in(id) ? gChannelsIn : gChannelsOut;
+    int o = stream_owner(id);
+    if (o < 0) {
+        return 0;
+    }
+    return is_stream_in(id) ? gDev[o].ch_in : gDev[o].ch_out;
 }
 
-/* Device published in current layout (caller holds lock or read is tolerated). */
-static Boolean dev_published(AudioObjectID id) {
-    return gSplit ? (id == kObj_DevIn || id == kObj_DevOut) : id == kObj_Device;
+/* Device published in current layout. */
+static Boolean dev_published(int idx) {
+    pthread_mutex_lock(&gLock);
+    Boolean p = dev_published_locked(idx);
+    pthread_mutex_unlock(&gLock);
+    return p;
+}
+
+/* Published device object, or -1. */
+static int published_index(AudioObjectID id) {
+    int idx = dev_index(id);
+    return idx >= 0 && dev_published(idx) ? idx : -1;
+}
+
+/* Stream of a published device. */
+static Boolean stream_published(AudioObjectID id) {
+    int o = stream_owner(id);
+    return o >= 0 && dev_published(o) && (dev_stream_in(o) == id || dev_stream_out(o) == id);
 }
 
 /* Device channel name: owned scope, element 1..channel count. */
-static Boolean element_name_valid(AudioObjectID dev, const AudioObjectPropertyAddress *a) {
-    UInt32 n = a->mScope == kAudioObjectPropertyScopeInput && dev_has_in(dev)     ? gChannelsIn
-               : a->mScope == kAudioObjectPropertyScopeOutput && dev_has_out(dev) ? gChannelsOut
+static Boolean element_name_valid(int idx, const AudioObjectPropertyAddress *a) {
+    UInt32 n = a->mScope == kAudioObjectPropertyScopeInput && idx_has_in(idx)     ? gDev[idx].ch_in
+               : a->mScope == kAudioObjectPropertyScopeOutput && idx_has_out(idx) ? gDev[idx].ch_out
                                                                                   : 0;
     return a->mElement >= 1 && a->mElement <= n && a->mElement <= LW_SHM_MAX_CHANNELS;
 }
 
 /* Device streams for scope (global: all). */
-static UInt32 dev_streams(AudioObjectID dev, AudioObjectPropertyScope scope, AudioObjectID ids[2]) {
+static UInt32 dev_streams(int idx, AudioObjectPropertyScope scope, AudioObjectID ids[2]) {
     UInt32 n = 0;
-    if (dev_stream_in(dev) && (scope == kAudioObjectPropertyScopeGlobal || scope == kAudioObjectPropertyScopeInput)) {
-        ids[n++] = dev_stream_in(dev);
+    if (dev_stream_in(idx) && (scope == kAudioObjectPropertyScopeGlobal || scope == kAudioObjectPropertyScopeInput)) {
+        ids[n++] = dev_stream_in(idx);
     }
-    if (dev_stream_out(dev) && (scope == kAudioObjectPropertyScopeGlobal || scope == kAudioObjectPropertyScopeOutput)) {
-        ids[n++] = dev_stream_out(dev);
+    if (dev_stream_out(idx) && (scope == kAudioObjectPropertyScopeGlobal || scope == kAudioObjectPropertyScopeOutput)) {
+        ids[n++] = dev_stream_out(idx);
     }
     return n;
 }
 
 /* Devices published by plugin. */
-static UInt32 published_devices(AudioObjectID ids[2]) {
+static UInt32 published_devices(AudioObjectID ids[LW_SLOTS]) {
     pthread_mutex_lock(&gLock);
     UInt32 n = 0;
-    if (gSplit) {
-        ids[n++] = kObj_DevIn;
-        ids[n++] = kObj_DevOut;
-    } else {
-        ids[n++] = kObj_Device;
+    for (int i = 0; i < LW_SLOTS; i++) {
+        if (dev_published_locked(i)) {
+            ids[n++] = dev_id(i);
+        }
     }
     pthread_mutex_unlock(&gLock);
     return n;
@@ -688,15 +913,15 @@ static UInt32 plist_channels(CFBundleRef bundle, CFStringRef key) {
     return LW_DEFAULT_CHANNELS;
 }
 
-/* Factory declared in CFPlugInFactories. */
+/* Factory declared in CFPlugInFactories. Duplex layout until the daemon says otherwise. */
 __attribute__((visibility("default"))) void *LW_Create(CFAllocatorRef allocator, CFUUIDRef requestedType) {
     (void)allocator;
     if (!CFEqual(requestedType, kAudioServerPlugInTypeUUID)) {
         return NULL;
     }
     CFBundleRef bundle = CFBundleGetBundleWithIdentifier(CFSTR(LW_BUNDLE_ID));
-    gChannelsIn = plist_channels(bundle, CFSTR("LWChannelsFromNet"));
-    gChannelsOut = plist_channels(bundle, CFSTR("LWChannelsToNet"));
+    gDev[0].ch_in = gDev[0].pend_in = plist_channels(bundle, CFSTR("LWChannelsFromNet"));
+    gDev[0].ch_out = gDev[0].pend_out = plist_channels(bundle, CFSTR("LWChannelsToNet"));
     return gDriverRef;
 }
 
@@ -776,9 +1001,8 @@ static OSStatus LW_RemoveDeviceClient(AudioServerPlugInDriverRef d, AudioObjectI
     return (d == gDriverRef && dev_index(id) >= 0) ? kAudioHardwareNoError : kAudioHardwareBadObjectError;
 }
 
-/* Host calls with this device's I/O stopped: apply new geometry for its directions
- * (both for duplex), detach region (reattach at next StartIO). Other device
- * (two-device layout) may still run: detached region is unmapped later. */
+/* Host calls with this device's I/O stopped: apply its new width. The region is not
+ * detached (other devices may run); attach it if missing while I/O runs. */
 static OSStatus LW_PerformConfigChange(AudioServerPlugInDriverRef d, AudioObjectID id, UInt64 a, void *i) {
     (void)a, (void)i;
     int idx = dev_index(id);
@@ -786,16 +1010,12 @@ static OSStatus LW_PerformConfigChange(AudioServerPlugInDriverRef d, AudioObject
         return kAudioHardwareBadObjectError;
     }
     pthread_mutex_lock(&gLock);
-    if (gChangeRequested & (1 << idx)) {
-        gChangeRequested &= ~(1 << idx);
-        detach_locked();
-        if (dev_has_out(id)) {
-            gChannelsOut = gPendingOut;
-        }
-        if (dev_has_in(id)) {
-            gChannelsIn = gPendingIn;
-        }
-        if (io_running_locked() > 0) {
+    if (gChangeRequested & (1ull << idx)) {
+        gChangeRequested &= ~(1ull << idx);
+        gDev[idx].ch_in = gDev[idx].pend_in;
+        gDev[idx].ch_out = gDev[idx].pend_out;
+        atomic_store(&gInPrimed[idx], 0);
+        if (atomic_load(&gRegion) == NULL && io_running_locked() > 0) {
             attach_locked(); /* Host that does not stop I/O, or other running device */
         }
     }
@@ -811,7 +1031,7 @@ static OSStatus LW_AbortConfigChange(AudioServerPlugInDriverRef d, AudioObjectID
         return kAudioHardwareBadObjectError;
     }
     pthread_mutex_lock(&gLock);
-    gChangeRequested &= ~(1 << idx); /* New request on next monitoring poll */
+    gChangeRequested &= ~(1ull << idx); /* New request on next monitoring poll */
     pthread_mutex_unlock(&gLock);
     return kAudioHardwareNoError;
 }
@@ -842,6 +1062,7 @@ static OSStatus LW_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObject
     if (d != gDriverRef || a == NULL || out == NULL) {
         return kAudioHardwareBadObjectError;
     }
+    int idx = -1;
     if (id == kObj_PlugIn) {
         switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass:
@@ -857,7 +1078,7 @@ static OSStatus LW_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObject
             return kAudioHardwareNoError;
         case kAudioObjectPropertyOwnedObjects:
         case kAudioPlugInPropertyDeviceList: {
-            AudioObjectID ids[2];
+            AudioObjectID ids[LW_SLOTS];
             *out = published_devices(ids) * sizeof(AudioObjectID);
             return kAudioHardwareNoError;
         }
@@ -865,7 +1086,7 @@ static OSStatus LW_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObject
             *out = 0;
             return kAudioHardwareNoError;
         }
-    } else if (dev_index(id) >= 0) {
+    } else if ((idx = published_index(id)) >= 0) {
         switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass:
         case kAudioObjectPropertyClass:
@@ -895,7 +1116,7 @@ static OSStatus LW_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObject
         case kAudioObjectPropertyOwnedObjects:
         case kAudioDevicePropertyStreams: {
             AudioObjectID ids[2];
-            *out = dev_streams(id, a->mScope, ids) * sizeof(AudioObjectID);
+            *out = dev_streams(idx, a->mScope, ids) * sizeof(AudioObjectID);
             return kAudioHardwareNoError;
         }
         case kAudioObjectPropertyControlList:
@@ -911,13 +1132,13 @@ static OSStatus LW_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObject
             *out = 2 * sizeof(UInt32);
             return kAudioHardwareNoError;
         case kAudioObjectPropertyElementName:
-            if (element_name_valid(id, a)) {
+            if (element_name_valid(idx, a)) {
                 *out = sizeof(CFStringRef);
                 return kAudioHardwareNoError;
             }
             break;
         }
-    } else if (is_stream(id)) {
+    } else if (stream_published(id)) {
         switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass:
         case kAudioObjectPropertyClass:
@@ -975,8 +1196,14 @@ static OSStatus put_ids(const AudioObjectID *ids, UInt32 n, UInt32 inDataSize, U
     return kAudioHardwareNoError;
 }
 
-static CFStringRef dev_uid(AudioObjectID dev) {
-    return dev == kObj_DevIn ? CFSTR(LW_DEVICE_IN_UID) : dev == kObj_DevOut ? CFSTR(LW_DEVICE_OUT_UID) : CFSTR(LW_DEVICE_UID);
+/* Return a freshly created (retained) string and release it: caller owns its own retain. */
+static OSStatus put_owned(CFStringRef s, UInt32 inDataSize, UInt32 *outDataSize, void *outData) {
+    if (s == NULL) {
+        return kAudioHardwareUnspecifiedError;
+    }
+    OSStatus st = put_str(s, inDataSize, outDataSize, outData);
+    CFRelease(s);
+    return st;
 }
 
 static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID id, pid_t pid, const AudioObjectPropertyAddress *a,
@@ -985,6 +1212,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
     if (d != gDriverRef || a == NULL || outDataSize == NULL || (outData == NULL && inDataSize > 0)) {
         return kAudioHardwareBadObjectError;
     }
+    int idx = -1;
     if (id == kObj_PlugIn) {
         switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass:
@@ -999,7 +1227,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
             return put_str(CFSTR(""), inDataSize, outDataSize, outData);
         case kAudioObjectPropertyOwnedObjects:
         case kAudioPlugInPropertyDeviceList: {
-            AudioObjectID ids[2];
+            AudioObjectID ids[LW_SLOTS];
             UInt32 n = published_devices(ids);
             return put_ids(ids, n, inDataSize, outDataSize, outData);
         }
@@ -1013,13 +1241,18 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
             }
             CFStringRef uid = *(const CFStringRef *)q;
             AudioObjectID found = kAudioObjectUnknown;
-            pthread_mutex_lock(&gLock);
-            for (int i = 0; i < 3; i++) {
-                if (dev_published(kDevIds[i]) && CFEqual(uid, dev_uid(kDevIds[i]))) {
-                    found = kDevIds[i];
+            for (int i = 0; i < LW_SLOTS && found == kAudioObjectUnknown; i++) {
+                if (!dev_published(i)) {
+                    continue;
+                }
+                CFStringRef u = dev_uid(i);
+                if (u && CFEqual(uid, u)) {
+                    found = dev_id(i);
+                }
+                if (u) {
+                    CFRelease(u);
                 }
             }
-            pthread_mutex_unlock(&gLock);
             *(AudioObjectID *)outData = found;
             *outDataSize = sizeof(AudioObjectID);
             return kAudioHardwareNoError;
@@ -1027,8 +1260,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         case kAudioPlugInPropertyTranslateUIDToBox:
             return put_u32(kAudioObjectUnknown, inDataSize, outDataSize, outData);
         }
-    } else if (dev_index(id) >= 0) {
-        int idx = dev_index(id);
+    } else if ((idx = published_index(id)) >= 0) {
         switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass:
             return put_u32(kAudioObjectClassID, inDataSize, outDataSize, outData);
@@ -1038,20 +1270,16 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
             return put_u32(kObj_PlugIn, inDataSize, outDataSize, outData);
         case kAudioObjectPropertyName: {
             pthread_mutex_lock(&gLock);
-            CFStringRef n = idx == 1 ? (gInDevName ? gInDevName : CFSTR("OpenLW In"))
-                            : idx == 2 ? (gOutDevName ? gOutDevName : CFSTR("OpenLW Out"))
-                                       : (gDeviceName ? gDeviceName : CFSTR("OpenLW"));
-            OSStatus st = put_str(n, inDataSize, outDataSize, outData);
+            CFStringRef n = gDevName[idx] ? CFRetain(gDevName[idx]) : default_name(idx);
             pthread_mutex_unlock(&gLock);
-            return st;
+            return put_owned(n, inDataSize, outDataSize, outData);
         }
         case kAudioObjectPropertyElementName: {
-            if (!element_name_valid(id, a)) {
+            if (!element_name_valid(idx, a)) {
                 break;
             }
             pthread_mutex_lock(&gLock);
-            CFStringRef *names = a->mScope == kAudioObjectPropertyScopeInput ? gInNames : gOutNames;
-            CFStringRef s = names[a->mElement - 1];
+            CFStringRef s = gChName[idx][a->mScope == kAudioObjectPropertyScopeInput ? 0 : 1][a->mElement - 1];
             OSStatus st = put_str(s ? s : CFSTR(""), inDataSize, outDataSize, outData);
             pthread_mutex_unlock(&gLock);
             return st;
@@ -1059,7 +1287,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         case kAudioObjectPropertyManufacturer:
             return put_str(CFSTR("François Brille"), inDataSize, outDataSize, outData);
         case kAudioDevicePropertyDeviceUID:
-            return put_str(dev_uid(id), inDataSize, outDataSize, outData);
+            return put_owned(dev_uid(idx), inDataSize, outDataSize, outData);
         case kAudioDevicePropertyModelUID:
             return put_str(CFSTR(LW_MODEL_UID), inDataSize, outDataSize, outData);
         case kAudioDevicePropertyTransportType:
@@ -1092,7 +1320,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         case kAudioObjectPropertyOwnedObjects:
         case kAudioDevicePropertyStreams: {
             AudioObjectID ids[2];
-            UInt32 n = dev_streams(id, a->mScope, ids);
+            UInt32 n = dev_streams(idx, a->mScope, ids);
             return put_ids(ids, n, inDataSize, outDataSize, outData);
         }
         case kAudioObjectPropertyControlList:
@@ -1115,13 +1343,15 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         }
         case kAudioDevicePropertyPreferredChannelsForStereo: {
             REQUIRE_SIZE(2 * sizeof(UInt32));
-            UInt32 pair[2] = {1, 2};
+            /* Mono device: both sides of a stereo pair on its single channel. */
+            UInt32 one = (idx_has_in(idx) ? gDev[idx].ch_in : gDev[idx].ch_out) < 2;
+            UInt32 pair[2] = {1, one ? 1 : 2};
             memcpy(outData, pair, sizeof pair);
             *outDataSize = sizeof pair;
             return kAudioHardwareNoError;
         }
         }
-    } else if (is_stream(id)) {
+    } else if (stream_published(id)) {
         Boolean in = is_stream_in(id);
         switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass:
@@ -1129,7 +1359,7 @@ static OSStatus LW_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         case kAudioObjectPropertyClass:
             return put_u32(kAudioStreamClassID, inDataSize, outDataSize, outData);
         case kAudioObjectPropertyOwner:
-            return put_u32(stream_owner(id), inDataSize, outDataSize, outData);
+            return put_u32(dev_id(stream_owner(id)), inDataSize, outDataSize, outData);
         case kAudioObjectPropertyName:
             return put_str(in ? CFSTR("From Livewire") : CFSTR("To Livewire"), inDataSize, outDataSize, outData);
         case kAudioObjectPropertyOwnedObjects:
@@ -1179,11 +1409,11 @@ static OSStatus LW_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID i
         return kAudioHardwareBadObjectError;
     }
     /* Accept “setting” only supported values (some hosts do this systematically). */
-    if (dev_index(id) >= 0 && a->mSelector == kAudioDevicePropertyNominalSampleRate && inDataSize == sizeof(Float64) &&
-        *(const Float64 *)inData == LW_SAMPLE_RATE) {
+    if (published_index(id) >= 0 && a->mSelector == kAudioDevicePropertyNominalSampleRate &&
+        inDataSize == sizeof(Float64) && *(const Float64 *)inData == LW_SAMPLE_RATE) {
         return kAudioHardwareNoError;
     }
-    if (is_stream(id) &&
+    if (stream_published(id) &&
         (a->mSelector == kAudioStreamPropertyVirtualFormat || a->mSelector == kAudioStreamPropertyPhysicalFormat) &&
         inDataSize == sizeof(AudioStreamBasicDescription)) {
         AudioStreamBasicDescription want = format_for(stream_channels(id));
@@ -1206,13 +1436,14 @@ static OSStatus LW_StartIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt3
         gDev[idx].count = 0;
         gDev[idx].anchor = mach_absolute_time();
         attach_locked();
-        if (dev_has_in(id)) {
+        if (idx_has_in(idx)) {
             /* Input I/O previously stopped: input ring contains stale audio (daemon
              * filled it then stopped writing). Drain it; priming waits for fresh audio. */
-            atomic_store(&gInPrimed, 0);
+            atomic_store(&gInPrimed[idx], 0);
             void *region = atomic_load(&gRegion);
-            if (region) {
-                lw_ring_skip(region, LW_FROM_NET, lw_ring_readable(region, LW_FROM_NET));
+            int ring = region ? device_ring(region, idx, 1, gDev[idx].ch_in) : -1;
+            if (ring >= 0) {
+                lw_ring_skip(region, (uint32_t)ring, lw_ring_readable(region, (uint32_t)ring));
             }
         }
     }
@@ -1260,11 +1491,12 @@ static OSStatus LW_GetZeroTimeStamp(AudioServerPlugInDriverRef d, AudioObjectID 
 static OSStatus LW_WillDoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client, UInt32 op,
                                      Boolean *willDo, Boolean *inPlace) {
     (void)client;
-    if (d != gDriverRef || dev_index(id) < 0) {
+    int idx = dev_index(id);
+    if (d != gDriverRef || idx < 0) {
         return kAudioHardwareBadObjectError;
     }
-    *willDo = (op == kAudioServerPlugInIOOperationReadInput && dev_has_in(id)) ||
-              (op == kAudioServerPlugInIOOperationWriteMix && dev_has_out(id));
+    *willDo = (op == kAudioServerPlugInIOOperationReadInput && idx_has_in(idx)) ||
+              (op == kAudioServerPlugInIOOperationWriteMix && idx_has_out(idx));
     *inPlace = true;
     return kAudioHardwareNoError;
 }
@@ -1279,31 +1511,37 @@ static OSStatus LW_DoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id,
                                  UInt32 op, UInt32 frames, const AudioServerPlugInIOCycleInfo *info, void *main,
                                  void *secondary) {
     (void)client, (void)info, (void)secondary;
-    if (d != gDriverRef || dev_index(id) < 0 || !is_stream(stream) || stream_owner(stream) != id) {
+    int idx = dev_index(id);
+    if (d != gDriverRef || idx < 0 || stream_owner(stream) != idx) {
         return kAudioHardwareBadObjectError;
     }
     void *region = atomic_load_explicit(&gRegion, memory_order_acquire);
     if (op == kAudioServerPlugInIOOperationReadInput && is_stream_in(stream) && main) {
+        UInt32 ch = gDev[idx].ch_in;
+        int ring = region ? device_ring(region, idx, 1, ch) : -1;
         uint32_t margin = atomic_load_explicit(&gInMargin, memory_order_relaxed);
         uint32_t keep = frames + margin;
-        uint32_t avail = region ? lw_ring_readable(region, LW_FROM_NET) : 0;
-        int primed = atomic_load_explicit(&gInPrimed, memory_order_relaxed);
-        if (region && !primed && avail >= keep) {
+        uint32_t avail = ring >= 0 ? lw_ring_readable(region, (uint32_t)ring) : 0;
+        int primed = atomic_load_explicit(&gInPrimed[idx], memory_order_relaxed);
+        if (ring >= 0 && !primed && avail >= keep) {
             primed = 1;
-            atomic_store_explicit(&gInPrimed, 1, memory_order_relaxed);
+            atomic_store_explicit(&gInPrimed[idx], 1, memory_order_relaxed);
         }
-        if (region && primed) {
+        if (ring >= 0 && primed) {
             if (avail > keep + margin) {
-                lw_ring_skip(region, LW_FROM_NET, avail - keep); /* Late audio: catch up */
+                lw_ring_skip(region, (uint32_t)ring, avail - keep); /* Late audio: catch up */
             }
-            if (lw_ring_read(region, LW_FROM_NET, (float *)main, frames) < frames) {
-                atomic_store_explicit(&gInPrimed, 0, memory_order_relaxed); /* Underrun: reprime */
+            if (lw_ring_read(region, (uint32_t)ring, (float *)main, frames) < frames) {
+                atomic_store_explicit(&gInPrimed[idx], 0, memory_order_relaxed); /* Underrun: reprime */
             }
         } else {
-            memset(main, 0, (size_t)frames * gChannelsIn * sizeof(float));
+            memset(main, 0, (size_t)frames * ch * sizeof(float));
         }
     } else if (op == kAudioServerPlugInIOOperationWriteMix && is_stream_out(stream) && main && region) {
-        lw_ring_write(region, LW_TO_NET, (const float *)main, frames);
+        int ring = device_ring(region, idx, 0, gDev[idx].ch_out);
+        if (ring >= 0) {
+            lw_ring_write(region, (uint32_t)ring, (const float *)main, frames);
+        }
     }
     return kAudioHardwareNoError;
 }

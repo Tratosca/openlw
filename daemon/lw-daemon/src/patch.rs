@@ -59,6 +59,7 @@ pub fn build(cfg: &Config) -> Plan {
             let target = 2 * spp + cfg.latency.tx_cushion();
             routes.outputs.push(OutRoute {
                 label: format!("{} → channel {}", src.name, src.channel),
+                ring: crate::config::ring_of(src.device),
                 device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
                 writer,
             });
@@ -72,7 +73,9 @@ pub fn build(cfg: &Config) -> Plan {
             let (writer, reader) = bus(d.stream_channels(), BUS_FRAMES);
             routes.inputs.push(InRoute {
                 label: format!("{} → inputs {:?}", d.label(), chs),
+                ring: crate::config::ring_of(d.device),
                 device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
+                mix: d.mix,
                 reader: JitterReader::new(
                     reader,
                     cfg.latency.rx_target(),

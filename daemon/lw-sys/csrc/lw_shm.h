@@ -3,9 +3,14 @@
  * Windows driver, and daemon (Rust through FFI) compile this file and lw_shm.c. No other
  * layout definition.
  *
- * Layout: [4096-byte header][TO_NET ring][FROM_NET ring], interleaved float32 samples.
+ * Layout: [8192-byte header][ring 0][ring 1]…, interleaved float32 samples. The header
+ * holds a ring table: each ring has a direction and its own channel count; all rings share
+ * ring_frames and the clock.
  *   TO_NET: application audio → network. Producer: audio client; consumer: daemon.
  *   FROM_NET: network audio → applications. Producer: daemon; consumer: audio client.
+ * Order: TO_NET rings first, then FROM_NET rings. A duplex region (one device) has two
+ * rings, so ring indices LW_TO_NET (0) and LW_FROM_NET (1). A multi-device region (macOS)
+ * has one ring per device: Out 1..M, then In 1..N.
  * Each ring is SPSC (one producer, one consumer), with 64-bit frame positions,
  * never reset; index = position & (ring_frames - 1).
  *
@@ -25,12 +30,20 @@ extern "C" {
 #endif
 
 #define LW_SHM_MAGIC 0x4C57534Du /* "LWSM" */
-#define LW_SHM_VERSION 2u
-#define LW_SHM_HEADER_BYTES 4096u
-#define LW_SHM_MAX_CHANNELS 64u
+#define LW_SHM_VERSION 3u
+#define LW_SHM_HEADER_BYTES 8192u
+#define LW_SHM_MAX_CHANNELS 64u /* Per ring */
+#define LW_SHM_MAX_RINGS 32u
 #define LW_SHM_MAX_RING_FRAMES 65536u
 
+/* Ring direction; also the ring index in a duplex region. */
 enum lw_dir { LW_TO_NET = 0, LW_FROM_NET = 1 };
+
+/* Ring description: direction (enum lw_dir) and channel count (interleaved frame width). */
+typedef struct {
+    uint32_t dir;
+    uint32_t channels;
+} lw_ring_spec;
 
 /* Host clock in which clock_host_time is expressed. */
 enum lw_host_clock_id {
@@ -75,8 +88,9 @@ typedef struct {
     uint32_t header_bytes;
     uint32_t sample_rate;
     uint32_t ring_frames;
-    uint32_t channels[2]; /* [LW_TO_NET], [LW_FROM_NET] */
+    uint32_t ring_count;
     uint32_t host_clock_id;
+    uint32_t reserved;
     uint64_t total_bytes;
     uint64_t host_ns_numer;
     uint64_t host_ns_denom;
@@ -88,7 +102,9 @@ typedef struct {
     uint64_t clock_host_time;
     uint64_t clock_sample_time;
     double clock_rate_scalar;
-    lw_ring_pos ring[2];
+    lw_ring_spec spec[LW_SHM_MAX_RINGS];
+    uint64_t offset[LW_SHM_MAX_RINGS]; /* Ring data offset from region start */
+    lw_ring_pos ring[LW_SHM_MAX_RINGS];
 } lw_shm_header;
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -101,14 +117,15 @@ static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "header too large");
 _Static_assert(sizeof(lw_shm_header) <= LW_SHM_HEADER_BYTES, "header too large");
 #endif
 
-/* Total region size; zero if parameters are invalid
- * (ring_frames power of two in [64, LW_SHM_MAX_RING_FRAMES], channels in [0, LW_SHM_MAX_CHANNELS]). */
-size_t lw_shm_size(uint32_t ring_frames, uint32_t channels_to_net, uint32_t channels_from_net);
+/* Total region size; zero if parameters are invalid (ring_frames power of two in
+ * [64, LW_SHM_MAX_RING_FRAMES], 1 to LW_SHM_MAX_RINGS rings, TO_NET rings before FROM_NET
+ * rings, channels in [0, LW_SHM_MAX_CHANNELS]). */
+size_t lw_shm_size(uint32_t ring_frames, uint32_t ring_count, const lw_ring_spec *specs);
 
 /* Initialize lw_shm_size(...) bytes including zeroing. `clock` describes the clock
  * for clock_host_time (NULL: unknown). Return zero on success. */
-int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_frames, uint32_t channels_to_net,
-                uint32_t channels_from_net, const lw_host_clock *clock);
+int lw_shm_init(void *base, size_t size, uint32_t sample_rate, uint32_t ring_frames, uint32_t ring_count,
+                const lw_ring_spec *specs, const lw_host_clock *clock);
 
 /* Validate a received region (magic, version, sizes consistent with `size`). Return zero if valid. */
 int lw_shm_validate(const void *base, size_t size);
@@ -116,24 +133,33 @@ int lw_shm_validate(const void *base, size_t size);
 /* Host clock declared by the region creator. */
 void lw_shm_host_clock(const void *base, lw_host_clock *clock);
 
-/* Write up to `frames` interleaved frames (ring channel count). Return count written;
+/* Geometry of a validated region. lw_ring_dir and lw_ring_channels return zero for an
+ * out-of-range ring (lw_ring_dir: also check ring < lw_shm_ring_count). */
+uint32_t lw_shm_sample_rate(const void *base);
+uint32_t lw_shm_ring_frames(const void *base);
+uint32_t lw_shm_ring_count(const void *base);
+uint32_t lw_ring_dir(const void *base, uint32_t ring);
+uint32_t lw_ring_channels(const void *base, uint32_t ring);
+
+/* Ring functions take a ring index; out-of-range rings are inert (zero, nothing written).
+ * Write up to `frames` interleaved frames (ring channel count). Return count written;
  * count remainder as overruns. Reserved for ring producer. */
-uint32_t lw_ring_write(void *base, int dir, const float *src, uint32_t frames);
+uint32_t lw_ring_write(void *base, uint32_t ring, const float *src, uint32_t frames);
 
 /* Read exactly `frames` frames into dst; pad missing frames with silence and count
  * underruns. Return actual frame count read. Reserved for consumer. */
-uint32_t lw_ring_read(void *base, int dir, float *dst, uint32_t frames);
+uint32_t lw_ring_read(void *base, uint32_t ring, float *dst, uint32_t frames);
 
 /* Discard up to `frames` oldest frames (latency catch-up). Return discarded
  * count. Reserved for consumer. */
-uint32_t lw_ring_skip(void *base, int dir, uint32_t frames);
+uint32_t lw_ring_skip(void *base, uint32_t ring, uint32_t frames);
 
 /* Readable frames (consumer side) and free space (producer side). */
-uint32_t lw_ring_readable(const void *base, int dir);
-uint32_t lw_ring_writable(const void *base, int dir);
+uint32_t lw_ring_readable(const void *base, uint32_t ring);
+uint32_t lw_ring_writable(const void *base, uint32_t ring);
 
 /* Ring counters. */
-void lw_ring_counters(const void *base, int dir, uint64_t *write_pos, uint64_t *read_pos, uint64_t *overruns,
+void lw_ring_counters(const void *base, uint32_t ring, uint64_t *write_pos, uint64_t *read_pos, uint64_t *overruns,
                       uint64_t *underruns);
 
 /* Clock: publication (daemon, single writer) and coherent reading (client). lw_clock_read

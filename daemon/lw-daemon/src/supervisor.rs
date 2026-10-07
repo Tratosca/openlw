@@ -25,6 +25,7 @@ use crate::iface::{self, Iface};
 use crate::net::TxOptions;
 use crate::patch;
 use crate::{bus, discovery, error, info, rx, tx, Stop};
+use lw_sys::shm::{Dir, RingSpec};
 
 /// Independently stoppable session thread (transmission, reception, advertisements, discovery).
 struct Worker {
@@ -193,6 +194,7 @@ impl Session {
             if let (Some(chs), Some(port)) = (&src.device_channels, &entry.port) {
                 table.outputs.push(device::OutRoute {
                     label: format!("{} → channel {}", src.name, src.channel),
+                    ring: crate::config::ring_of(src.device),
                     device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
                     writer: port.writer(),
                 });
@@ -249,7 +251,9 @@ impl Session {
                 let t = key.target;
                 table.inputs.push(device::InRoute {
                     label: format!("{} → inputs {:?}", d.label(), chs),
+                    ring: crate::config::ring_of(d.device),
                     device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
+                    mix: d.mix,
                     reader: bus::JitterReader::new(port.reader(), t, 4 * t),
                 });
             }
@@ -388,7 +392,7 @@ pub fn supervise(
     shared.set_config(cfg.clone(), path, reload_tx);
 
     let mut current = cfg;
-    let mut dev: Option<(DeviceConfig, Stop, device::Device)> = None;
+    let mut dev: Option<((DeviceConfig, Vec<RingSpec>), Stop, device::Device)> = None;
     // Linux: PipeWire nodes connected to device region (ADR 0009).
     #[cfg(all(target_os = "linux", feature = "pipewire"))]
     let mut nodes: Option<lw_pw::Bridge> = None;
@@ -399,8 +403,9 @@ pub fn supervise(
     let mut last_check: Option<Instant> = None;
     let mut last_error = String::new();
     while !stop.requested() {
-        // 1. Device.
-        let dc = current.device_config();
+        // 1. Device: recreated when its parameters or ring geometry change (layout, device
+        // count, or width of a `multi` device).
+        let dc = (current.device_config(), current.rings());
         if want_device && dev.as_ref().is_none_or(|(c, _, _)| *c != dc) {
             if let Some(s) = session.take() {
                 s.stop();
@@ -412,7 +417,7 @@ pub fn supervise(
                 let _ = d.thread.join();
             }
             let ds = Stop::new();
-            match device::start(&dc, &ds) {
+            match device::start(&dc.0, &dc.1, &ds) {
                 Ok(d) => {
                     generation += 1;
                     d.status
@@ -425,10 +430,9 @@ pub fn supervise(
                     shared.set_device(d.status.clone());
                     #[cfg(all(target_os = "linux", feature = "pipewire"))]
                     {
-                        let labels = shared.labels();
                         let cfg = lw_pw::BridgeConfig {
-                            sink_description: labels.output_device_name,
-                            source_description: labels.input_device_name,
+                            sink_description: crate::labels::OUTPUT_DEVICE_NAME.into(),
+                            source_description: crate::labels::INPUT_DEVICE_NAME.into(),
                             input_margin: current.latency.input_margin(),
                         };
                         let report: lw_pw::Report = |is_error, message| {
@@ -443,11 +447,17 @@ pub fn supervise(
                             Err(e) => error!("PipeWire nodes: {e}"),
                         }
                     }
+                    let widths = |dir| -> Vec<u32> {
+                        dc.1.iter()
+                            .filter(|r| r.dir == dir)
+                            .map(|r| r.channels)
+                            .collect()
+                    };
                     info!(
-                        "virtual device #{generation}: {} outputs to the network, {} inputs from the network{}",
-                        dc.channels_to_net,
-                        dc.channels_from_net,
-                        if dc.loopback { ", internal loopback" } else { "" }
+                        "virtual device #{generation}: outputs to the network {:?}, inputs from the network {:?} (channels per device){}",
+                        widths(Dir::ToNet),
+                        widths(Dir::FromNet),
+                        if dc.0.loopback { ", internal loopback" } else { "" }
                     );
                     dev = Some((dc, ds, d));
                 }

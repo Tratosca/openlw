@@ -85,7 +85,7 @@ fn fake_plugin_loopback_roundtrip() {
         ring_frames: 4096,
         loopback: true,
     };
-    let dev = device::start(&cfg, &stop).unwrap();
+    let dev = device::start(&cfg, &cfg.duplex_rings(), &stop).unwrap();
     let lo = Iface {
         name: "lo0".into(),
         friendly: "lo0".into(),
@@ -177,7 +177,7 @@ fn meters_follow_signal_level() {
         ring_frames: 4096,
         loopback: false,
     };
-    let dev = device::start(&cfg, &stop).unwrap();
+    let dev = device::start(&cfg, &cfg.duplex_rings(), &stop).unwrap();
     let mut to_net = dev.region.producer(Dir::ToNet).unwrap();
     // 200 ms: channel 0 at −12 dBFS, channel 2 at −3 dBFS, channels 1 and 3 silent.
     let (a, b) = (10f32.powf(-12.0 / 20.0), 10f32.powf(-3.0 / 20.0));
@@ -216,11 +216,12 @@ fn large_host_blocks_reach_the_stream_smoothly() {
         ring_frames: 8192,
         loopback: false,
     };
-    let dev = device::start(&cfg, &stop).unwrap();
+    let dev = device::start(&cfg, &cfg.duplex_rings(), &stop).unwrap();
     let (writer, reader) = bus(2, lw_daemon::patch::BUS_FRAMES);
     dev.routes_handle().set(Routes {
         outputs: vec![OutRoute {
             label: "test".into(),
+            ring: 0,
             device_channels: vec![0, 1],
             writer,
         }],
@@ -260,6 +261,76 @@ fn large_host_blocks_reach_the_stream_smoothly() {
         silent_after_prime, 0,
         "no silent packet after priming: {c:?}"
     );
+    stop.request();
+    dev.thread.join().unwrap();
+}
+
+/// Multi-device layout in loopback: output ring n comes back on input ring n, at its own
+/// width, without crosstalk between devices.
+#[test]
+fn multi_device_rings_loop_back_independently() {
+    use lw_sys::shm::RingSpec;
+    let stop = Stop::new();
+    let cfg = DeviceConfig {
+        channels_to_net: 4,
+        channels_from_net: 4,
+        ring_frames: 4096,
+        loopback: true,
+    };
+    // Out 1 (2 ch), Out 2 (1 ch), In 1 (2 ch), In 2 (1 ch).
+    let rings = [
+        RingSpec::to_net(2),
+        RingSpec::to_net(1),
+        RingSpec::from_net(2),
+        RingSpec::from_net(1),
+    ];
+    let dev = device::start(&cfg, &rings, &stop).unwrap();
+    let s = dev.snapshot();
+    assert_eq!(
+        (s.out_widths.clone(), s.in_widths.clone()),
+        (vec![2, 1], vec![2, 1])
+    );
+    assert_eq!((s.channels_to_net, s.channels_from_net), (3, 3));
+    let (mut out1, mut out2) = (
+        dev.region.producer(0usize).unwrap(),
+        dev.region.producer(1usize).unwrap(),
+    );
+    let (mut in1, mut in2) = (
+        dev.region.consumer(2usize).unwrap(),
+        dev.region.consumer(3usize).unwrap(),
+    );
+    let (mut got1, mut got2) = (Vec::new(), Vec::new());
+    let mut buf = vec![0f32; 2 * 4096];
+    let t0 = Instant::now();
+    let mut written = 0;
+    while (got1.len() < 2 * 4800 || got2.len() < 4800) && t0.elapsed() < Duration::from_secs(3) {
+        if written < 4800 {
+            out1.write(&[0.25, -0.25].repeat(48)).unwrap();
+            out2.write(&[0.5; 48]).unwrap();
+            written += 48;
+        }
+        let n = in1.readable() as usize;
+        in1.read(&mut buf[..2 * n]).unwrap();
+        got1.extend_from_slice(&buf[..2 * n]);
+        let n = in2.readable() as usize;
+        in2.read(&mut buf[..n]).unwrap();
+        got2.extend_from_slice(&buf[..n]);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        got1.len(),
+        2 * 4800,
+        "every frame of Out 1 comes back on In 1"
+    );
+    assert_eq!(got2.len(), 4800, "every frame of Out 2 comes back on In 2");
+    assert!(
+        got1.chunks_exact(2).all(|f| f == [0.25, -0.25]),
+        "In 1: Out 1 only"
+    );
+    assert!(got2.iter().all(|&v| v == 0.5), "In 2: Out 2 only");
+    std::thread::sleep(Duration::from_millis(150));
+    let s = dev.snapshot();
+    assert_eq!(s.to_net_peak_dbfs.len(), 3, "peaks: devices concatenated");
     stop.request();
     dev.thread.join().unwrap();
 }

@@ -47,11 +47,17 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     private let useOutput = NSButton(title: "Use OpenLW", target: nil, action: nil)
 
     // Inputs.
-    private let namingCheck = NSButton(checkboxWithTitle: "Name devices after patched channels, for example “OpenLW In (2 - Studio A)”",
+    private let namingCheck = NSButton(checkboxWithTitle: "Name devices after their source, for example “OpenLW In - Studio A@Omnia One (ch. 2)”",
                                        target: nil, action: nil)
     private let layoutPopup = NSPopUpButton()
-    static let layouts = [("duplex", "One “OpenLW” device (input and output)"),
-                          ("split", "Two devices, “OpenLW In” and “OpenLW Out”")]
+    static let layouts = [("duplex", "One multichannel “OpenLW” device (input and output)"),
+                          ("multi", "Several devices, “OpenLW In n” and “OpenLW Out n”")]
+    private let inputsHint = NSTextField(wrappingLabelWithString: "")
+    private let inCountTitle = NSTextField(labelWithString: "")
+    private let outCountTitle = NSTextField(labelWithString: "")
+    private let outputsHint = NSTextField(wrappingLabelWithString: "")
+    /// Width-change warning not to be shown again (UserDefaults).
+    private static let widthWarningKey = "skipWidthWarning"
     private let grid = InputGridView()
     private let manualChannel = NSTextField()
     private let manualKind = NSPopUpButton()
@@ -140,6 +146,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             stack.addArrangedSubview(panel)
             panel.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -36).isActive = true
         }
+        updateLayoutTexts(multi: false)
     }
 
     private func buildHeader() -> GlassPanel {
@@ -187,12 +194,12 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     private func buildInputs() -> GlassPanel {
         let panel = GlassPanel(title: "Mac Inputs (Network to Mac)")
-        let hint = NSTextField(wrappingLabelWithString: "Click a cell to send the source to that input pair of the OpenLW device. Click again to release it. Applications record from “OpenLW” (or “OpenLW In”). The headphone button plays the source on the Mac's output without patching it.")
+        let hint = inputsHint
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
 
         grid.translatesAutoresizingMaskIntoConstraints = false
-        grid.onToggle = { [weak self] row, col in self?.toggleInput(row: row, column: col) }
+        grid.onToggle = { [weak self] row, col, point in self?.toggleInput(row: row, column: col, at: point) }
         grid.onListen = { [weak self] row in self?.toggleListen(row: row) }
         grid.onRemove = { [weak self] row in self?.removeRow(row) }
 
@@ -209,7 +216,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         let addRow = NSStackView(views: [addLabel, manualChannel, manualKind, add])
         addRow.spacing = 8
 
-        let countRow = countControls(inCount, label: "Received Livewire channels:", unit: "inputs",
+        let countRow = countControls(inCount, title: inCountTitle, unit: "inputs",
                                      macLabel: macInputLabel, use: useInput, useAction: #selector(useOpenLWInput(_:)))
         let v = NSStackView(views: [countRow, hint, grid, addRow])
         v.orientation = .vertical
@@ -232,7 +239,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         row.spacing = 8
         namingCheck.target = self
         namingCheck.action = #selector(namingToggled(_:))
-        let hint = NSTextField(wrappingLabelWithString: "With two devices, the input and the output each have their own name in applications. Channels always carry the name of their source (Audio MIDI Setup, Logic…). After changing the layout or the names, select the device again in applications that find it by name, such as Audacity.")
+        let hint = NSTextField(wrappingLabelWithString: "One device: every source goes to channels of “OpenLW”, as with a multichannel sound card; suits applications that use one device for input and output. Several devices: each source gets its own device, as wide as the source (1 channel for a mono patch, 8 for surround); suits applications that pick one input, such as video calls. Channels always carry the name of their source (Audio MIDI Setup, Logic…). After changing the layout or the names, select the device again in applications that find it by name, such as Audacity.")
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
         let v = NSStackView(views: [row, namingCheck, hint])
@@ -246,19 +253,31 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     @objc private func layoutChosen(_ sender: NSPopUpButton) {
         let value = Self.layouts[max(0, sender.indexOfSelectedItem)].0
-        guard value != config.layout else { return }
-        mutate(["cmd": "set_device_layout", "layout": value])
+        guard value != config.layout, let window = window else { return }
+        let alert = NSAlert()
+        alert.messageText = value == "multi" ? "Switch to several devices?" : "Switch to one “OpenLW” device?"
+        alert.informativeText = "Patches move between input pair n and device n (a mono patch on input c goes to device ⌈c/2⌉); those that no longer fit are released. Audio on OpenLW devices stops for a moment while macOS reloads them."
+        alert.addButton(withTitle: "Switch")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self = self else { return }
+            if response == .alertFirstButtonReturn {
+                self.mutate(["cmd": "set_device_layout", "layout": value])
+            } else {
+                self.applyConfig(self.config)
+            }
+        }
     }
 
     private func buildOutputs() -> GlassPanel {
         let panel = GlassPanel(title: "Mac Outputs (Mac to Network)")
-        let hint = NSTextField(wrappingLabelWithString: "Choose “OpenLW” (or “OpenLW Out”) as the output of the Mac or of your application. Each output pair is transmitted on the Livewire channel of your choice, under the name entered. Changes apply while Transmit is checked.")
+        let hint = outputsHint
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
         outputStack.orientation = .vertical
         outputStack.alignment = .leading
         outputStack.spacing = 6
-        let countRow = countControls(outCount, label: "Transmitted Livewire channels:", unit: "outputs",
+        let countRow = countControls(outCount, title: outCountTitle, unit: "outputs",
                                      macLabel: macOutputLabel, use: useOutput, useAction: #selector(useOpenLWOutput(_:)))
         let v = NSStackView(views: [countRow, hint, outputStack])
         v.orientation = .vertical
@@ -267,7 +286,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         embed(v, in: panel.content)
         hint.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
         countRow.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
-        rebuildOutputRows(pairs: 1)
+        rebuildOutputRows(count: 1, multi: false)
         return panel
     }
 
@@ -362,13 +381,11 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     /// Panel channel-count row with Mac's default device for that direction.
-    private func countControls(_ popup: NSPopUpButton, label: String, unit: String, macLabel: NSTextField,
+    private func countControls(_ popup: NSPopUpButton, title: NSTextField, unit: String, macLabel: NSTextField,
                                use: NSButton, useAction: Selector) -> NSStackView {
-        let title = NSTextField(labelWithString: label)
         title.font = Theme.body
-        popup.addItems(withTitles: (1...Self.maxPairs).map { n in
-            "\(n) \(n == 1 ? "channel" : "channels") (\(2 * n) \(unit))"
-        })
+        popup.addItems(withTitles: (1...Self.maxPairs).map { "\($0)" })
+        popup.identifier = NSUserInterfaceItemIdentifier(unit)
         popup.target = self
         popup.action = #selector(channelCountChosen(_:))
         macLabel.font = Theme.small
@@ -394,14 +411,34 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         ])
     }
 
-    private func rebuildOutputRows(pairs: Int) {
+    /// Output rows: one per pair (duplex layout) or per output device (multi layout).
+    private func rebuildOutputRows(count: Int, multi: Bool) {
         outputRows.forEach { $0.removeFromSuperview() }
-        outputRows = (0..<pairs).map { i in
-            let row = OutputRow(pair: [2 * i + 1, 2 * i + 2])
+        outputRows = (0..<count).map { i in
+            let row = OutputRow(pair: multi ? [1, 2] : [2 * i + 1, 2 * i + 2], device: multi ? i + 1 : nil)
             row.onApply = { [weak self] r in self?.applyOutput(r) }
             return row
         }
         outputRows.forEach(outputStack.addArrangedSubview)
+    }
+
+    /// Count-menu titles and panel hints for the layout.
+    private func updateLayoutTexts(multi: Bool) {
+        inCountTitle.stringValue = multi ? "Input devices:" : "Received Livewire channels:"
+        outCountTitle.stringValue = multi ? "Output devices:" : "Transmitted Livewire channels:"
+        for (popup, unit) in [(inCount, "inputs"), (outCount, "outputs")] {
+            for (i, item) in popup.itemArray.enumerated() {
+                let n = i + 1
+                item.title = multi ? "\(n) \(n == 1 ? "device" : "devices")"
+                                   : "\(n) \(n == 1 ? "channel" : "channels") (\(2 * n) \(unit))"
+            }
+        }
+        inputsHint.stringValue = multi
+            ? "Click a cell to send the source to that device: stereo, left, right, or L+R in mono. Click again to release it. Applications record from “OpenLW In n”. The headphone button plays the source on the Mac's output without patching it."
+            : "Click a cell to send the source to the OpenLW device: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. Applications record from “OpenLW”. The headphone button plays the source on the Mac's output without patching it."
+        outputsHint.stringValue = multi
+            ? "Choose “OpenLW Out n” as the output of the Mac or of your application. Each device is transmitted on the Livewire channel of your choice, under the name entered. Changes apply while Transmit is checked."
+            : "Choose “OpenLW” as the output of the Mac or of your application. Each output pair is transmitted on the Livewire channel of your choice, under the name entered. Changes apply while Transmit is checked."
     }
 
     // MARK: - Polling
@@ -519,12 +556,13 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     // MARK: - Display updates
 
     private func applyConfig(_ c: DaemonConfig) {
-        let pairsChanged = !configLoaded || c.channelsToNet != config.channelsToNet
+        let rowsChanged = !configLoaded || c.channelsToNet != config.channelsToNet || c.layout != config.layout
         config = c
         configLoaded = true
         advertiseCheck.state = c.advertise ? .on : .off
-        namingCheck.state = c.nameFromSources ? .on : .off
-        namingCheck.isEnabled = c.layout == "split"
+        namingCheck.state = c.customNames ? .on : .off
+        namingCheck.isEnabled = c.multi
+        updateLayoutTexts(multi: c.multi)
         if let i = Self.layouts.firstIndex(where: { $0.0 == c.layout }) { layoutPopup.selectItem(at: i) }
         let editingName = (window?.firstResponder as? NSTextView)?.delegate === terminalField
         if !editingName { terminalField.stringValue = c.terminalName }
@@ -534,14 +572,15 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         } else {
             dscpPopup.select(nil) // Value outside list (manually edited configuration)
         }
-        if pairsChanged {
-            rebuildOutputRows(pairs: max(1, c.channelsToNet / 2))
+        if rowsChanged {
+            rebuildOutputRows(count: max(1, c.multi ? c.outDevices : c.channelsToNet / 2), multi: c.multi)
         }
-        grid.pairs = stride(from: 1, through: c.channelsFromNet - 1, by: 2).map { [$0, $0 + 1] }
+        grid.columns = c.multi ? c.inDevices : c.channelsFromNet
+        grid.columnWidth = c.multi ? 92 : 46
         inCount.selectItem(at: min(Self.maxPairs, max(1, c.channelsFromNet / 2)) - 1)
         outCount.selectItem(at: min(Self.maxPairs, max(1, c.channelsToNet / 2)) - 1)
         for row in outputRows {
-            row.show(c.outputs.first { $0.deviceChannels == row.pair })
+            row.show(outputPatch(row))
         }
         updateIfacePopup()
         updateGrid()
@@ -583,10 +622,34 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     /// Matrix rows: discovered sources, configured unadvertised streams, then manual entries.
     private var gridRows: [GridRow] = []
 
-    private func patchedColumn(channel: Int, kind: String) -> Int? {
-        guard let p = config.inputs.first(where: { $0.channel == channel && $0.kind == kind && !$0.deviceChannels.isEmpty }),
-              let first = p.deviceChannels.first else { return nil }
-        return (first - 1) / 2
+    /// Configured patch of a source, if any.
+    private func inputPatch(channel: Int, kind: String) -> InputPatch? {
+        config.inputs.first { $0.channel == channel && $0.kind == kind && !$0.deviceChannels.isEmpty }
+    }
+
+    private static func mixTag(_ mix: String?) -> String? {
+        switch mix {
+        case "left": return "L"
+        case "right": return "R"
+        case "sum": return "L+R"
+        default: return nil
+        }
+    }
+
+    /// Grid patch: device column (multi layout) or channel span (duplex layout).
+    private func gridPatch(channel: Int, kind: String) -> GridPatch? {
+        guard let p = inputPatch(channel: channel, kind: kind), let first = p.deviceChannels.min() else { return nil }
+        let tag = Self.mixTag(p.mix) ?? (p.kind == "surround" ? "8" : "")
+        if config.multi {
+            guard let d = p.device else { return nil }
+            return GridPatch(column: d - 1, span: 1, tag: tag)
+        }
+        return GridPatch(column: first - 1, span: p.deviceChannels.count, tag: p.mix == nil && p.kind != "surround" ? "" : tag)
+    }
+
+    /// Configured transmitted stream of an output row.
+    private func outputPatch(_ row: OutputRow) -> OutputPatch? {
+        config.outputs.first { row.device != nil ? $0.device == row.device : ($0.device == nil && $0.deviceChannels == row.pair) }
     }
 
     private func updateGrid() {
@@ -596,7 +659,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             let key = "\(s.channel)/\(s.patchKind)"
             guard !seen.contains(key) else { return }
             seen.insert(key)
-            rows.append(GridRow(source: s, patchedColumn: patchedColumn(channel: s.channel, kind: s.patchKind),
+            rows.append(GridRow(source: s, patch: gridPatch(channel: s.channel, kind: s.patchKind),
                                 origin: origin, removable: removable))
         }
         for s in discovered { add(s, origin: s.terminal, removable: false) }
@@ -613,13 +676,30 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     private func updateMeters() {
         grid.listenLevel = listening == nil ? nil : listener.takePeak()
-        grid.columnLevels = grid.pairs.map { pair in pair.map { DeviceMeters.peak(meters.fromNet, channels: [$0]) } }
-        grid.columnStatus = grid.pairs.map { pair in
-            guard let primed = meters.inputsPrimed.first(where: { $0.key.contains(pair[0]) })?.value else { return "free" }
-            return primed ? "receiving audio" : "waiting"
+        // Concatenated channels (meters, route state) of each header group.
+        let groups: [(Range<Int>, String, [Int])]
+        if config.multi {
+            let widths = meters.inWidths.count == config.inDevices ? meters.inWidths
+                : DaemonConfig.inWidths(config.inputs, devices: config.inDevices)
+            groups = (1...max(1, config.inDevices)).map { n in
+                (n - 1..<n, "In \(n)", DeviceMeters.channels(device: n, widths: widths))
+            }
+        } else {
+            groups = stride(from: 1, through: config.channelsFromNet, by: 2).map { a in
+                let b = min(a + 1, config.channelsFromNet)
+                return (a - 1..<b, a == b ? "Input \(a)" : "Inputs \(a)-\(b)", Array(a...b))
+            }
         }
+        grid.headers = groups.map { range, title, chs in
+            let primed = meters.inputsPrimed.first { !Set($0.key).isDisjoint(with: chs) }?.value
+            return GridHeader(columns: range, title: title,
+                              levels: chs.map { DeviceMeters.peak(meters.fromNet, channels: [$0]) },
+                              status: primed.map { $0 ? "receiving audio" : "waiting" } ?? "free")
+        }
+        let outWidths = meters.outWidths.count == outputRows.count ? meters.outWidths : Array(repeating: 2, count: outputRows.count)
         for row in outputRows {
-            row.meter.levels = row.pair.map { DeviceMeters.peak(meters.toNet, channels: [$0]) }
+            let chs = row.device.map { DeviceMeters.channels(device: $0, widths: outWidths) } ?? row.pair
+            row.meter.levels = chs.prefix(2).map { DeviceMeters.peak(meters.toNet, channels: [$0]) }
         }
     }
 
@@ -655,15 +735,16 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         let toNet = 2 * (outCount.indexOfSelectedItem + 1)
         let fromNet = 2 * (inCount.indexOfSelectedItem + 1)
         guard toNet != config.channelsToNet || fromNet != config.channelsFromNet else { return }
-        let lostOut = config.outputs.filter { ($0.deviceChannels?.max() ?? 0) > toNet }.count
-        let lostIn = config.inputs.filter { ($0.deviceChannels.max() ?? 0) > fromNet }.count
+        let multi = config.multi
+        let lostOut = config.outputs.filter { multi ? ($0.device ?? 0) > (toNet + 1) / 2 : ($0.deviceChannels?.max() ?? 0) > toNet }.count
+        let lostIn = config.inputs.filter { multi ? ($0.device ?? 0) > (fromNet + 1) / 2 : ($0.deviceChannels.max() ?? 0) > fromNet }.count
         if lostOut + lostIn > 0, let window = window {
             let alert = NSAlert()
-            alert.messageText = "Reduce the number of channels?"
+            alert.messageText = multi ? "Reduce the number of devices?" : "Reduce the number of channels?"
             var lost: [String] = []
             if lostOut > 0 { lost.append(lostOut == 1 ? "1 transmission stopped" : "\(lostOut) transmissions stopped") }
             if lostIn > 0 { lost.append(lostIn == 1 ? "1 source removed from the inputs" : "\(lostIn) sources removed from the inputs") }
-            alert.informativeText = lost.joined(separator: ", ") + ". Audio on the “OpenLW” device stops for a moment."
+            alert.informativeText = lost.joined(separator: ", ") + ". Audio on OpenLW devices stops for a moment."
             alert.addButton(withTitle: "Reduce")
             alert.addButton(withTitle: "Cancel")
             alert.beginSheetModal(for: window) { [weak self] response in
@@ -676,7 +757,35 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             }
             return
         }
-        mutate(["cmd": "set_device_channels", "to_net": toNet, "from_net": fromNet])
+        confirmCut(message: multi ? "Change the number of devices?" : "Change the number of channels?",
+                   onCancel: { [weak self] in self.map { $0.applyConfig($0.config) } }) { [weak self] in
+            self?.mutate(["cmd": "set_device_channels", "to_net": toNet, "from_net": fromNet])
+        }
+    }
+
+    /// Changes that recreate the shared region cut OpenLW audio briefly: ask first while an
+    /// application uses an OpenLW device (or always, for `always`), unless the user opted out.
+    private func confirmCut(message: String, detail: String? = nil, always: Bool = false,
+                            onCancel: @escaping () -> Void = {}, _ proceed: @escaping () -> Void) {
+        let skip = UserDefaults.standard.bool(forKey: Self.widthWarningKey)
+        guard let window = window, !skip, always || MacAudio.livewireRunning() else {
+            proceed()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = (detail.map { $0 + " " } ?? "")
+            + "Audio on all OpenLW devices stops for a moment while macOS reloads them."
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Do not ask again"
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { response in
+            if alert.suppressionButton?.state == .on {
+                UserDefaults.standard.set(true, forKey: Self.widthWarningKey)
+            }
+            if response == .alertFirstButtonReturn { proceed() } else { onCancel() }
+        }
     }
 
     @objc private func useOpenLWInput(_ sender: Any) { useOpenLW(input: true) }
@@ -711,22 +820,94 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         updateGrid()
     }
 
-    private func toggleInput(row: Int, column: Int) {
-        guard row < gridRows.count, column < grid.pairs.count else { return }
+    private func toggleInput(row: Int, column: Int, at point: NSPoint) {
+        guard row < gridRows.count, column < grid.columns else { return }
         let r = gridRows[row]
-        let pair = grid.pairs[column]
-        if r.patchedColumn == column {
-            mutate(["cmd": "unpatch_input", "device_channels": pair])
+        let s = r.source
+        if let p = r.patch, p.covers(column), let cur = inputPatch(channel: s.channel, kind: s.patchKind) {
+            var req: [String: Any] = ["cmd": "unpatch_input", "device_channels": cur.deviceChannels]
+            if let d = cur.device { req["device"] = d }
+            patchInput(req, source: s, device: cur.device, width: nil)
             return
         }
-        let width = r.source.patchKind == "surround" ? 8 : 2
-        let first = pair[0]
-        guard first + width - 1 <= config.channelsFromNet else {
-            show(.refused("a surround source occupies 8 inputs. Choose a pair from 1-2 to \(config.channelsFromNet - 7)-\(config.channelsFromNet - 6)."))
+        let surround = s.patchKind == "surround"
+        if config.multi {
+            let n = column + 1
+            if surround {
+                patchInput(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind, "device": n,
+                            "device_channels": Array(1...8)], source: s, device: n, width: 8)
+                return
+            }
+            let menu = NSMenu()
+            for (title, mix) in [("Stereo on In \(n)", nil), ("Left only (mono)", "left"),
+                                 ("Right only (mono)", "right"), ("L+R (mono)", "sum")] as [(String, String?)] {
+                menu.addItem(ClosureItem(title) { [weak self] in
+                    var req: [String: Any] = ["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind, "device": n,
+                                              "device_channels": mix == nil ? [1, 2] : [1]]
+                    if let m = mix { req["mix"] = m }
+                    self?.patchInput(req, source: s, device: n, width: mix == nil ? 2 : 1)
+                })
+            }
+            menu.popUp(positioning: nil, at: point, in: grid)
             return
         }
-        mutate(["cmd": "patch_input", "channel": r.source.channel, "kind": r.source.patchKind,
-                "device_channels": Array(first..<(first + width))])
+        let ch = column + 1
+        let pairFirst = ch % 2 == 0 ? ch - 1 : ch
+        if surround {
+            guard pairFirst + 7 <= config.channelsFromNet else {
+                show(.refused("a surround source occupies 8 inputs. Choose a pair from 1-2 to \(config.channelsFromNet - 7)-\(config.channelsFromNet - 6)."))
+                return
+            }
+            mutate(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind,
+                    "device_channels": Array(pairFirst..<(pairFirst + 8))])
+            return
+        }
+        let menu = NSMenu()
+        if pairFirst + 1 <= config.channelsFromNet {
+            menu.addItem(ClosureItem("Stereo on inputs \(pairFirst)-\(pairFirst + 1)") { [weak self] in
+                self?.mutate(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind,
+                              "device_channels": [pairFirst, pairFirst + 1]])
+            })
+        }
+        for (title, mix) in [("Left only on input \(ch)", "left"), ("Right only on input \(ch)", "right"),
+                             ("L+R (mono) on input \(ch)", "sum")] {
+            menu.addItem(ClosureItem(title) { [weak self] in
+                self?.mutate(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind, "mix": mix,
+                              "device_channels": [ch]])
+            })
+        }
+        menu.popUp(positioning: nil, at: point, in: grid)
+    }
+
+    /// Multi layout: send an input patch (`width` nil: unpatch), warning first if it changes
+    /// a device's width (the daemon then recreates the region).
+    private func patchInput(_ request: [String: Any], source s: DiscoveredSource, device: Int?, width: Int?) {
+        guard config.multi, let n = device else {
+            mutate(request)
+            return
+        }
+        let before = DaemonConfig.inWidths(config.inputs, devices: config.inDevices)
+        // After: the source leaves its device, the target device takes the new width (or empties).
+        var after = config.inputs.filter {
+            !($0.channel == s.channel && $0.kind == s.patchKind) && $0.device != n
+        }
+        if let w = width {
+            after.append(InputPatch(channel: s.channel, group: nil, kind: s.patchKind,
+                                    deviceChannels: Array(1...w), device: n, mix: w == 1 ? "sum" : nil))
+        }
+        let widths = DaemonConfig.inWidths(after, devices: config.inDevices)
+        let changed = zip(before, widths).enumerated().filter { $0.element.0 != $0.element.1 }
+        guard let first = changed.first else {
+            mutate(request)
+            return
+        }
+        let (from, to) = first.element
+        let what = changed.count == 1
+            ? "“OpenLW In \(first.offset + 1)” changes from \(from) to \(to) \(to == 1 ? "channel" : "channels")."
+            : "\(changed.count) OpenLW input devices change width."
+        confirmCut(message: width == nil ? "Release this input?" : "Patch this source?", detail: what, always: true) { [weak self] in
+            self?.mutate(request)
+        }
     }
 
     /// Remove manual/unadvertised row; release inputs if patched.
@@ -807,7 +988,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     }
 
     private func applyOutput(_ row: OutputRow) {
-        let previous = config.outputs.first { $0.deviceChannels == row.pair }
+        let previous = outputPatch(row)
         guard row.enabled else {
             if let p = previous { mutate(["cmd": "unpatch_output", "channel": p.channel]) }
             return
@@ -818,10 +999,12 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             return
         }
         let send: () -> Void = { [weak self] in
-            self?.mutate(["cmd": "patch_output", "channel": ch, "name": row.name, "format": row.format,
-                          "device_channels": row.pair])
+            var req: [String: Any] = ["cmd": "patch_output", "channel": ch, "name": row.name, "format": row.format,
+                                      "device_channels": row.pair]
+            if let d = row.device { req["device"] = d }
+            self?.mutate(req)
         }
-        // Channel change: stop this pair's old stream first.
+        // Channel change: stop this row's old stream first.
         if let p = previous, p.channel != ch {
             client.call(["cmd": "unpatch_output", "channel": p.channel]) { [weak self] result in
                 if case .failure(let e) = result { self?.show(e) } else { send() }
@@ -837,9 +1020,13 @@ final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// Output row: Mac pair, meter, channel, name, format, transmission.
+/// Output row: Mac pair (duplex layout) or output device (multi layout), meter, channel, name,
+/// format, transmission.
 final class OutputRow: NSStackView, NSTextFieldDelegate {
+    /// Device channels sent in the patch: the pair, or 1-2 of `device`.
     let pair: [Int]
+    /// Multi layout: output device number.
+    let device: Int?
     let meter = MeterView()
     private let channelField = NSTextField()
     private let nameField = NSTextField()
@@ -849,12 +1036,13 @@ final class OutputRow: NSStackView, NSTextFieldDelegate {
 
     static let formats = [("standard", "Standard (5 ms)"), ("aes67", "AES67 (1 ms)"), ("livestream", "Livestream (0.25 ms)")]
 
-    init(pair: [Int]) {
+    init(pair: [Int], device: Int? = nil) {
         self.pair = pair
+        self.device = device
         super.init(frame: .zero)
         orientation = .horizontal
         spacing = 10
-        let label = NSTextField(labelWithString: "Outputs \(pair[0])-\(pair[1])")
+        let label = NSTextField(labelWithString: device.map { "Out \($0)" } ?? "Outputs \(pair[0])-\(pair[1])")
         label.font = Theme.body
         label.widthAnchor.constraint(equalToConstant: 80).isActive = true
         meter.translatesAutoresizingMaskIntoConstraints = false
@@ -888,7 +1076,7 @@ final class OutputRow: NSStackView, NSTextFieldDelegate {
     }
     var name: String {
         let n = nameField.stringValue.trimmingCharacters(in: .whitespaces)
-        return n.isEmpty ? "MAC \(pair[0])-\(pair[1])" : n
+        return n.isEmpty ? (device.map { "MAC \($0)" } ?? "MAC \(pair[0])-\(pair[1])") : n
     }
     var format: String { Self.formats[max(0, formatPopup.indexOfSelectedItem)].0 }
 

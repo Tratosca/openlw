@@ -13,6 +13,14 @@ pub mod shm;
 mod ffi {
     use std::ffi::{c_char, c_int, c_void};
 
+    /// Ring description (`lw_ring_spec`).
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    pub struct RingSpec {
+        pub dir: u32,
+        pub channels: u32,
+    }
+
     /// Host clock description (`lw_host_clock`).
     #[repr(C)]
     #[derive(Debug, Clone, Copy, Default)]
@@ -35,26 +43,31 @@ mod ffi {
         pub fn lw_shm_release(handle: *mut c_void);
         #[cfg(any(target_os = "macos", windows))]
         pub fn lw_free(p: *mut c_char);
-        pub fn lw_shm_size(ring_frames: u32, c0: u32, c1: u32) -> usize;
+        pub fn lw_shm_size(ring_frames: u32, n: u32, specs: *const RingSpec) -> usize;
         pub fn lw_shm_init(
             base: *mut c_void,
             size: usize,
             rate: u32,
             ring_frames: u32,
-            c0: u32,
-            c1: u32,
+            n: u32,
+            specs: *const RingSpec,
             clock: *const HostClock,
         ) -> c_int;
         pub fn lw_shm_validate(base: *const c_void, size: usize) -> c_int;
         pub fn lw_shm_host_clock(base: *const c_void, clock: *mut HostClock);
-        pub fn lw_ring_write(base: *mut c_void, dir: c_int, src: *const f32, frames: u32) -> u32;
-        pub fn lw_ring_read(base: *mut c_void, dir: c_int, dst: *mut f32, frames: u32) -> u32;
-        pub fn lw_ring_skip(base: *mut c_void, dir: c_int, frames: u32) -> u32;
-        pub fn lw_ring_readable(base: *const c_void, dir: c_int) -> u32;
-        pub fn lw_ring_writable(base: *const c_void, dir: c_int) -> u32;
+        pub fn lw_shm_sample_rate(base: *const c_void) -> u32;
+        pub fn lw_shm_ring_frames(base: *const c_void) -> u32;
+        pub fn lw_shm_ring_count(base: *const c_void) -> u32;
+        pub fn lw_ring_dir(base: *const c_void, ring: u32) -> u32;
+        pub fn lw_ring_channels(base: *const c_void, ring: u32) -> u32;
+        pub fn lw_ring_write(base: *mut c_void, ring: u32, src: *const f32, frames: u32) -> u32;
+        pub fn lw_ring_read(base: *mut c_void, ring: u32, dst: *mut f32, frames: u32) -> u32;
+        pub fn lw_ring_skip(base: *mut c_void, ring: u32, frames: u32) -> u32;
+        pub fn lw_ring_readable(base: *const c_void, ring: u32) -> u32;
+        pub fn lw_ring_writable(base: *const c_void, ring: u32) -> u32;
         pub fn lw_ring_counters(
             base: *const c_void,
-            dir: c_int,
+            ring: u32,
             w: *mut u64,
             r: *mut u64,
             over: *mut u64,

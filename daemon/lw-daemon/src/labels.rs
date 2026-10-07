@@ -1,36 +1,64 @@
-//! Names published by the device: device name and each channel's name.
+//! Names published by the device: device names and each channel's name.
 //!
-//! - Channels: currently “2 - Studio A L” / “… R” for an input patched to Livewire channel 2 (name
-//!   advertised on the network, falling back to the number); “4005 - STUDIO MAC L” for a transmitted output.
-//!   Surround: suffixes 1–8. Unpatched channel: empty name (CoreAudio displays its default name).
-//! - Devices: `duplex` layout uses “OpenLW” (fixed name). With `split` layout,
-//!   “OpenLW In” and “OpenLW Out”, or, if `name_device_from_sources` is enabled, “OpenLW In
-//!   (2 - Studio A, 21 - STUDIO A)” and “OpenLW Out (31 - Mac 1-2)” (device channel order).
+//! - Channels: “2 - Studio A L” / “… R” for an input patched to Livewire channel 2 (name
+//!   advertised on the network, falling back to the number); “2 - Studio A (L+R)” for a mono
+//!   patch (also “(L)”, “(R)”); “4005 - STUDIO MAC L” for a transmitted output. Surround:
+//!   suffixes 1–8. Unpatched channel: empty name (CoreAudio displays its default name).
+//! - Devices, `duplex` layout: “OpenLW” (fixed name).
+//! - Devices, `multi` layout: “OpenLW In n” / “OpenLW Out n”, or with `custom_device_names`
+//!   (default) “OpenLW In - Studio A@Omnia One (ch. 2)” (advertised source name @ advertising
+//!   terminal), “OpenLW In - Studio A@Omnia One (ch. 2, L+R)” for a mono patch, “OpenLW In
+//!   (ch. 2)” when the source is not advertised, “OpenLW Out - MAC 1-2 (ch. 4005)”. An empty
+//!   device keeps its number.
+//! - Linux PipeWire nodes: always “OpenLW In” and “OpenLW Out”.
 
 use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::config::{Config, Layout};
+use crate::config::{Config, Mix};
 
-/// Base device names (macos/plugin/src/OpenLWPlugIn.c).
+/// Base device names (macos/plugin/src/OpenLWPlugIn.c, daemon/lw-pw).
 pub const DEVICE_NAME: &str = "OpenLW";
 pub const INPUT_DEVICE_NAME: &str = "OpenLW In";
 pub const OUTPUT_DEVICE_NAME: &str = "OpenLW Out";
 
+/// Discovered source: advertised name and advertising terminal.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Announced {
+    pub name: String,
+    pub terminal: String,
+}
+
 /// Names computed for the plugin.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Labels {
-    /// Two-device layout.
-    pub split: bool,
+    /// Numbered-device layout.
+    pub multi: bool,
     /// Duplex device name.
     pub name: String,
-    pub input_device_name: String,
-    pub output_device_name: String,
-    /// One name per device input (index 0 = input 1).
+    /// Input and output device names, `multi` layout (index 0 = device 1); empty in duplex.
+    pub input_device_names: Vec<String>,
+    pub output_device_names: Vec<String>,
+    /// One name per device input, devices concatenated in order (index 0 = input 1 of the
+    /// first device).
     pub input_names: Vec<String>,
     /// One name per device output.
     pub output_names: Vec<String>,
+}
+
+impl Labels {
+    /// Names without configuration.
+    pub fn fallback() -> Self {
+        Self {
+            multi: false,
+            name: DEVICE_NAME.into(),
+            input_device_names: Vec::new(),
+            output_device_names: Vec::new(),
+            input_names: Vec::new(),
+            output_names: Vec::new(),
+        }
+    }
 }
 
 fn suffixes(n: usize) -> Vec<String> {
@@ -41,6 +69,14 @@ fn suffixes(n: usize) -> Vec<String> {
     }
 }
 
+fn mix_tag(m: Mix) -> &'static str {
+    match m {
+        Mix::Left => "L",
+        Mix::Right => "R",
+        Mix::Sum => "L+R",
+    }
+}
+
 fn label(channel: u16, name: Option<&str>) -> String {
     match name.map(str::trim).filter(|s| !s.is_empty()) {
         Some(n) => format!("{channel} - {n}"),
@@ -48,25 +84,80 @@ fn label(channel: u16, name: Option<&str>) -> String {
     }
 }
 
-/// Compute names from `cfg`; `announced`: advertised name of each discovered Livewire channel.
-pub fn compute(cfg: &Config, announced: &BTreeMap<u32, String>) -> Labels {
-    let dev = cfg.device_config();
-    let mut input_names = vec![String::new(); dev.channels_from_net as usize];
-    let mut output_names = vec![String::new(); dev.channels_to_net as usize];
-    let mut patched: Vec<(u16, String)> = Vec::new();
-    let mut emitted: Vec<(u16, String)> = Vec::new();
+fn clean(s: &str) -> Option<&str> {
+    Some(s.trim()).filter(|s| !s.is_empty())
+}
+
+/// Custom device name: “<base> - name@terminal (ch. N[, tag])” or “<base> (ch. N)”.
+fn custom(base: &str, channel: u16, a: Option<&Announced>, tag: Option<&str>) -> String {
+    let ch = match tag {
+        Some(t) => format!("ch. {channel}, {t}"),
+        None => format!("ch. {channel}"),
+    };
+    let name = a.and_then(|a| clean(&a.name));
+    let terminal = a.and_then(|a| clean(&a.terminal));
+    match (name, terminal) {
+        (Some(n), Some(t)) => format!("{base} - {n}@{t} ({ch})"),
+        (Some(n), None) => format!("{base} - {n} ({ch})"),
+        _ => format!("{base} ({ch})"),
+    }
+}
+
+/// Compute names from `cfg`; `announced`: discovered Livewire channels.
+pub fn compute(cfg: &Config, announced: &BTreeMap<u32, Announced>) -> Labels {
+    let multi = cfg.multi();
+    let (in_w, out_w) = (cfg.in_widths(), cfg.out_widths());
+    // Start of each device in the concatenated channel space (one device in duplex).
+    let starts = |w: &[u32]| -> Vec<usize> {
+        w.iter()
+            .scan(0usize, |acc, &n| {
+                let s = *acc;
+                *acc += n as usize;
+                Some(s)
+            })
+            .collect()
+    };
+    let (in_start, out_start) = (starts(&in_w), starts(&out_w));
+    let mut input_names = vec![String::new(); in_w.iter().sum::<u32>() as usize];
+    let mut output_names = vec![String::new(); out_w.iter().sum::<u32>() as usize];
+    let mut input_device_names: Vec<String> = (1..=in_w.len())
+        .map(|n| format!("{INPUT_DEVICE_NAME} {n}"))
+        .collect();
+    let mut output_device_names: Vec<String> = (1..=out_w.len())
+        .map(|n| format!("{OUTPUT_DEVICE_NAME} {n}"))
+        .collect();
+    // Flat index (0-based) of `dc` (1-based) on device `dev` (None in duplex).
+    let flat = |start: &[usize], dev: Option<u16>, dc: u16| -> Option<usize> {
+        let d = usize::from(dev.unwrap_or(1)).checked_sub(1)?;
+        Some(start.get(d)? + usize::from(dc).checked_sub(1)?)
+    };
     for d in &cfg.destinations {
         let (Some(ch), Some(chs)) = (d.channel, &d.device_channels) else {
             continue;
         };
-        let base = label(ch, announced.get(&u32::from(ch)).map(String::as_str));
-        for (dc, sfx) in chs.iter().zip(suffixes(chs.len())) {
-            if let Some(slot) = input_names.get_mut(usize::from(*dc).wrapping_sub(1)) {
-                *slot = format!("{base} {sfx}");
+        let a = announced.get(&u32::from(ch));
+        let base = label(ch, a.map(|a| a.name.as_str()));
+        let names: Vec<String> = match d.mix {
+            Some(m) => vec![format!("{base} ({})", mix_tag(m))],
+            None => suffixes(chs.len())
+                .into_iter()
+                .map(|sfx| format!("{base} {sfx}"))
+                .collect(),
+        };
+        for (dc, n) in chs.iter().zip(names) {
+            if let Some(slot) = flat(&in_start, d.device, *dc).and_then(|i| input_names.get_mut(i))
+            {
+                *slot = n;
             }
         }
-        if let Some(first) = chs.iter().min() {
-            patched.push((*first, base));
+        if let (true, true, Some(slot)) = (
+            multi,
+            cfg.custom_device_names,
+            d.device
+                .and_then(|n| usize::from(n).checked_sub(1))
+                .and_then(|i| input_device_names.get_mut(i)),
+        ) {
+            *slot = custom(INPUT_DEVICE_NAME, ch, a, d.mix.map(mix_tag));
         }
     }
     for s in &cfg.sources {
@@ -75,29 +166,35 @@ pub fn compute(cfg: &Config, announced: &BTreeMap<u32, String>) -> Labels {
         };
         let base = label(s.channel, Some(&s.name));
         for (dc, sfx) in chs.iter().zip(suffixes(chs.len())) {
-            if let Some(slot) = output_names.get_mut(usize::from(*dc).wrapping_sub(1)) {
+            if let Some(slot) =
+                flat(&out_start, s.device, *dc).and_then(|i| output_names.get_mut(i))
+            {
                 *slot = format!("{base} {sfx}");
             }
         }
-        if let Some(first) = chs.iter().min() {
-            emitted.push((*first, base));
+        if let (true, true, Some(slot)) = (
+            multi,
+            cfg.custom_device_names,
+            s.device
+                .and_then(|n| usize::from(n).checked_sub(1))
+                .and_then(|i| output_device_names.get_mut(i)),
+        ) {
+            let own = Announced {
+                name: s.name.clone(),
+                terminal: String::new(),
+            };
+            *slot = custom(OUTPUT_DEVICE_NAME, s.channel, Some(&own), None);
         }
     }
-    let split = cfg.device_layout == Layout::Split;
-    let named = |base: &str, mut list: Vec<(u16, String)>| -> String {
-        list.sort();
-        if split && cfg.name_device_from_sources && !list.is_empty() {
-            let l: Vec<String> = list.into_iter().map(|(_, l)| l).collect();
-            format!("{base} ({})", l.join(", "))
-        } else {
-            base.into()
-        }
-    };
+    if !multi {
+        input_device_names.clear();
+        output_device_names.clear();
+    }
     Labels {
-        split,
+        multi,
         name: DEVICE_NAME.into(),
-        input_device_name: named(INPUT_DEVICE_NAME, patched),
-        output_device_name: named(OUTPUT_DEVICE_NAME, emitted),
+        input_device_names,
+        output_device_names,
         input_names,
         output_names,
     }
@@ -107,49 +204,109 @@ pub fn compute(cfg: &Config, announced: &BTreeMap<u32, String>) -> Labels {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use crate::config::Layout;
 
-    fn cfg(naming: bool) -> Config {
-        cfg_layout(naming, Layout::Split)
-    }
-
-    fn cfg_layout(naming: bool, layout: Layout) -> Config {
-        let mut c: Config = serde_json::from_str(
-            r#"{"iface":"lo0","device":{"channels_to_net":2,"channels_from_net":4},
-                "destinations":[{"channel":21,"device_channels":[3,4]},{"channel":2,"device_channels":[1,2]},{"channel":9}],
-                "sources":[{"channel":4005,"name":"STUDIO MAC","format":"standard","device_channels":[1,2]}]}"#,
-        )
-        .unwrap();
-        c.name_device_from_sources = naming;
-        c.device_layout = layout;
-        c
+    fn announced() -> BTreeMap<u32, Announced> {
+        BTreeMap::from([(
+            2,
+            Announced {
+                name: "Studio A".into(),
+                terminal: "Omnia One".into(),
+            },
+        )])
     }
 
     #[test]
-    fn names_from_announcements_and_patch() {
-        let announced = BTreeMap::from([(2, "Studio A".to_string())]);
-        let l = compute(&cfg(true), &announced);
-        assert!(l.split);
-        assert_eq!(l.input_device_name, "OpenLW In (2 - Studio A, 21)");
-        assert_eq!(l.output_device_name, "OpenLW Out (4005 - STUDIO MAC)");
+    fn duplex_channel_names() {
+        let c: Config = serde_json::from_str(
+            r#"{"iface":"lo0","device":{"channels_to_net":2,"channels_from_net":6},
+                "destinations":[{"channel":21,"device_channels":[3,4]},{"channel":2,"device_channels":[1,2]},
+                                {"channel":7,"mix":"sum","device_channels":[6]},{"channel":9}],
+                "sources":[{"channel":4005,"name":"STUDIO MAC","format":"standard","device_channels":[1,2]}]}"#,
+        )
+        .unwrap();
+        c.validate().unwrap();
+        let l = compute(&c, &announced());
+        assert!(!l.multi);
+        assert_eq!(l.name, "OpenLW");
+        assert!(l.input_device_names.is_empty() && l.output_device_names.is_empty());
         assert_eq!(
             l.input_names,
-            ["2 - Studio A L", "2 - Studio A R", "21 L", "21 R"]
+            [
+                "2 - Studio A L",
+                "2 - Studio A R",
+                "21 L",
+                "21 R",
+                "",
+                "7 (L+R)"
+            ]
         );
         assert_eq!(
             l.output_names,
             ["4005 - STUDIO MAC L", "4005 - STUDIO MAC R"]
         );
+    }
+
+    fn multi(custom: Option<bool>) -> Config {
+        let naming = match custom {
+            Some(b) => format!(r#","custom_device_names":{b}"#),
+            None => String::new(),
+        };
+        let c: Config = serde_json::from_str(&format!(
+            r#"{{"iface":"lo0","device_layout":"multi","device":{{"channels_to_net":4,"channels_from_net":8}}{naming},
+                "destinations":[{{"channel":2,"device":1,"device_channels":[1,2]}},
+                                {{"channel":21,"device":2,"mix":"left","device_channels":[1]}},
+                                {{"channel":5,"kind":"surround","device":4,"device_channels":[1,2,3,4,5,6,7,8]}}],
+                "sources":[{{"channel":4005,"name":"MAC 1-2","format":"standard","device":2,"device_channels":[1,2]}}]}}"#
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        c
+    }
+
+    #[test]
+    fn multi_device_names() {
+        let l = compute(&multi(None), &announced());
+        assert!(l.multi);
         assert_eq!(
-            compute(&cfg(false), &announced).name,
-            "OpenLW",
-            "option disabled"
+            l.input_device_names,
+            [
+                "OpenLW In - Studio A@Omnia One (ch. 2)",
+                "OpenLW In (ch. 21, L)",
+                "OpenLW In 3",
+                "OpenLW In (ch. 5)"
+            ],
+            "custom names by default; empty device keeps its number"
         );
-        let mut empty = cfg(true);
-        empty.destinations.clear();
         assert_eq!(
-            compute(&empty, &announced).name,
-            "OpenLW",
-            "no input patched"
+            l.output_device_names,
+            ["OpenLW Out 1", "OpenLW Out - MAC 1-2 (ch. 4005)"]
         );
+        // Channels concatenated in device order: 2 + 1 + 2 (empty) + 8.
+        assert_eq!(l.input_names.len(), 13);
+        assert_eq!(
+            &l.input_names[..3],
+            ["2 - Studio A L", "2 - Studio A R", "21 (L)"]
+        );
+        assert_eq!(l.input_names[5], "5 1");
+        assert_eq!(l.output_names[2], "4005 - MAC 1-2 L");
+        let g = compute(&multi(Some(false)), &announced());
+        assert_eq!(g.input_device_names[0], "OpenLW In 1", "generic names");
+        assert_eq!(g.output_device_names[1], "OpenLW Out 2");
+    }
+
+    #[test]
+    fn source_without_terminal() {
+        let a = BTreeMap::from([(
+            2,
+            Announced {
+                name: "Studio A".into(),
+                terminal: " ".into(),
+            },
+        )]);
+        let mut c = multi(None);
+        c.device_layout = Layout::Multi;
+        let l = compute(&c, &a);
+        assert_eq!(l.input_device_names[0], "OpenLW In - Studio A (ch. 2)");
     }
 }

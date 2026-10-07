@@ -300,9 +300,11 @@ public:
         if (base_ != nullptr && lw_shm_validate(base_, size_) == 0) {
             lw_shm_host_clock(base_, &clock);
         }
-        const lw_shm_header *hdr = static_cast<const lw_shm_header *>(base_);
-        if (base_ == nullptr || clock.id != LW_CLOCK_QPC || hdr->sample_rate != static_cast<uint32_t>(kRate) ||
-            hdr->channels[LW_TO_NET] != geom_.to_net || hdr->channels[LW_FROM_NET] != geom_.from_net) {
+        // Duplex region only (two rings: TO_NET then FROM_NET); ASIO exposes one device.
+        if (base_ == nullptr || clock.id != LW_CLOCK_QPC || lw_shm_sample_rate(base_) != static_cast<uint32_t>(kRate) ||
+            lw_shm_ring_count(base_) != 2 || lw_ring_dir(base_, LW_FROM_NET) != LW_FROM_NET ||
+            lw_ring_channels(base_, LW_TO_NET) != geom_.to_net ||
+            lw_ring_channels(base_, LW_FROM_NET) != geom_.from_net) {
             if (base_ != nullptr) {
                 lw_shm_unmap(base_, size_);
                 base_ = nullptr;

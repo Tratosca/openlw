@@ -947,7 +947,7 @@ mod tests {
             Box::new(|_: &str, _: &Caller| r#"{"ok":true,"device":{}}"#.to_string()),
         )
         .unwrap();
-        let region = Arc::new(Region::create(48_000, 256, 2, 2).unwrap());
+        let region = Arc::new(Region::create_duplex(48_000, 256, 2, 2).unwrap());
         server.set_region(&region);
         let client = Client::connect(&ep).unwrap();
         let (resp, obj) = client.call_with_region(r#"{"cmd":"attach"}"#).unwrap();

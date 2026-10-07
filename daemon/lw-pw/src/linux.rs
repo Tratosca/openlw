@@ -189,6 +189,10 @@ fn run(
         })
         .register();
     // Endpoints are taken only once connected, and released when this attempt ends.
+    // Duplex region only (two rings): Linux always publishes one sink and one source.
+    if region.ring_count() != 2 {
+        return Err("shared region is not duplex".into());
+    }
     let producer = region.producer(Dir::ToNet).map_err(|e| e.to_string())?;
     let consumer = region.consumer(Dir::FromNet).map_err(|e| e.to_string())?;
     let flags = pw::stream::StreamFlags::AUTOCONNECT

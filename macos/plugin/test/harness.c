@@ -75,7 +75,7 @@ static const char *gNames = "";
 
 static char *handler(const char *req, uint32_t uid, void *ctx) {
     (void)uid, (void)ctx;
-    char buf[1024];
+    char buf[4096];
     if (strstr(req, "geometry")) {
         snprintf(buf, sizeof buf, "{\"ok\":true,\"generation\":%llu,\"channels_to_net\":%u,\"channels_from_net\":%u%s}",
                  gGen, gTo, gFrom, gNames);
@@ -214,12 +214,13 @@ int main(int argc, char **argv) {
     CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
 
     printf("I/O with simulated daemon (shared region over XPC)\n");
-    size_t rsize = lw_shm_size(8192, ch, ch);
+    lw_ring_spec spec[2] = {{LW_TO_NET, ch}, {LW_FROM_NET, ch}};
+    size_t rsize = lw_shm_size(8192, 2, spec);
     lw_host_clock clock;
     lw_host_clock_info(&clock);
     void *shmem = NULL;
     void *region = lw_shm_alloc(rsize, &shmem);
-    CHECK(region && lw_shm_init(region, rsize, 48000, 8192, ch, ch, &clock) == 0, "region created (%zu bytes)", rsize);
+    CHECK(region && lw_shm_init(region, rsize, 48000, 8192, 2, spec, &clock) == 0, "region created (%zu bytes)", rsize);
     lw_server *server = lw_xpc_server_start(NULL, handler, free_resp, NULL);
     lw_xpc_server_set_shmem(server, shmem);
     void *endpoint = lw_xpc_server_endpoint(server);
@@ -299,10 +300,11 @@ int main(int argc, char **argv) {
     DRV->GetPropertyData(gDrv, 4, getpid(), &a, 0, NULL, sizeof fout, &size, &fout);
     CHECK(fout.mChannelsPerFrame == 4 && fin.mChannelsPerFrame == 6, "formats: %u outputs, %u inputs",
           fout.mChannelsPerFrame, fin.mChannelsPerFrame);
-    size_t rsize2 = lw_shm_size(8192, 4, 6);
+    lw_ring_spec spec2[2] = {{LW_TO_NET, 4}, {LW_FROM_NET, 6}};
+    size_t rsize2 = lw_shm_size(8192, 2, spec2);
     void *shmem2 = NULL;
     void *region2 = lw_shm_alloc(rsize2, &shmem2);
-    CHECK(region2 && lw_shm_init(region2, rsize2, 48000, 8192, 4, 6, &clock) == 0, "region #2 created (4 x 6)");
+    CHECK(region2 && lw_shm_init(region2, rsize2, 48000, 8192, 2, spec2, &clock) == 0, "region #2 created (4 x 6)");
     lw_xpc_server_set_shmem(server, shmem2);
     CHECK(DRV->StartIO(gDrv, 2, 1) == 0, "StartIO (reattach)");
     float six[512 * 6], back[512 * 6];
@@ -442,89 +444,181 @@ int main(int argc, char **argv) {
         CHECK(blk[0] == 0.25f && blk[B * C - 1] == 0.25f, "repriming after the underrun");
         CHECK(DRV->StopIO(gDrv, 2, 1) == 0, "StopIO");
     }
-    printf("Two devices (OpenLW In / OpenLW Out)\n");
+    printf("Numbered devices (multi layout)\n");
+    lw_ring_spec spec3[3] = {{LW_TO_NET, 2}, {LW_FROM_NET, 1}, {LW_FROM_NET, 8}};
+    size_t rsize3 = lw_shm_size(8192, 3, spec3);
+    void *shmem3 = NULL;
+    void *region3 = lw_shm_alloc(rsize3, &shmem3);
+    lw_ring_spec spec4[3] = {{LW_TO_NET, 2}, {LW_FROM_NET, 2}, {LW_FROM_NET, 8}};
+    size_t rsize4 = lw_shm_size(8192, 3, spec4);
+    void *shmem4 = NULL;
+    void *region4 = lw_shm_alloc(rsize4, &shmem4);
     {
-        UInt32 before = gPropertyChanges;
-        gNames = ",\"layout\":\"split\",\"input_device_name\":\"OpenLW In (2 - Studio A)\"";
+        CHECK(region3 && lw_shm_init(region3, rsize3, 48000, 8192, 3, spec3, &clock) == 0,
+              "region #3: Out 1 (2 ch), In 1 (1 ch), In 2 (8 ch)");
+        lw_xpc_server_set_shmem(server, shmem3);
+        UInt32 before = gPropertyChanges, req = gConfigRequests;
+        gGen = 3;
+        gNames = ",\"layout\":\"multi\",\"in_widths\":[1,8],\"out_widths\":[2],"
+                 "\"in_device_names\":[\"OpenLW In - Studio A@Omnia One (ch. 2, L+R)\",\"\"],"
+                 "\"out_device_names\":[\"OpenLW Out 1\"],"
+                 "\"input_names\":[\"2 - Studio A (L+R)\",\"5 1\",\"5 2\"],\"output_names\":[\"4005 - MAC L\",\"4005 - MAC R\"]";
         poll();
         AudioObjectPropertyAddress la = {kAudioPlugInPropertyDeviceList, kAudioObjectPropertyScopeGlobal, 0};
-        AudioObjectID devs[4] = {0};
+        AudioObjectID devs[40] = {0};
         UInt32 sz = sizeof devs;
         DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &la, 0, NULL, sz, &sz, devs);
-        CHECK(sz == 2 * sizeof(AudioObjectID) && devs[0] == 5 && devs[1] == 7, "list: %u device(s), %u and %u",
-              (unsigned)(sz / sizeof(AudioObjectID)), devs[0], devs[1]);
+        CHECK(sz == 3 * sizeof(AudioObjectID) && devs[0] == 100 && devs[1] == 102 && devs[2] == 200,
+              "list: %u device(s), %u, %u, %u", (unsigned)(sz / sizeof(AudioObjectID)), devs[0], devs[1], devs[2]);
         CHECK(gPropertyChanges > before, "list change reported to the host");
+        CHECK(gConfigRequests == req, "new devices: no configuration change request");
         char name[128];
-        CHECK(get_str(5, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW In (2 - Studio A)") == 0,
-              "input: %s", name);
-        CHECK(get_str(7, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW Out") == 0,
-              "output: %s", name);
-        CHECK(get_str(5, kAudioDevicePropertyDeviceUID, name, sizeof name) == 0 &&
-                  strcmp(name, "fr.francois-brille.openlw.device.in") == 0,
+        CHECK(get_str(100, kAudioObjectPropertyName, name, sizeof name) == 0 &&
+                  strcmp(name, "OpenLW In - Studio A@Omnia One (ch. 2, L+R)") == 0,
+              "In 1: %s", name);
+        CHECK(get_str(102, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW In 2") == 0,
+              "In 2 (no name from the daemon): %s", name);
+        CHECK(get_str(200, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW Out 1") == 0,
+              "Out 1: %s", name);
+        CHECK(get_str(102, kAudioDevicePropertyDeviceUID, name, sizeof name) == 0 &&
+                  strcmp(name, "fr.francois-brille.openlw.device.in.2") == 0,
               "UID: %s", name);
-        AudioObjectPropertyAddress sa = {kAudioDevicePropertyStreams, kAudioObjectPropertyScopeInput, 0};
+        CHECK(get_str(200, kAudioDevicePropertyDeviceUID, name, sizeof name) == 0 &&
+                  strcmp(name, "fr.francois-brille.openlw.device.out.1") == 0,
+              "UID: %s", name);
+        AudioObjectPropertyAddress ta = {kAudioPlugInPropertyTranslateUIDToDevice, kAudioObjectPropertyScopeGlobal, 0};
+        CFStringRef u = CFSTR("fr.francois-brille.openlw.device.in.2");
+        AudioObjectID found = 0;
+        sz = sizeof found;
+        DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &ta, sizeof u, &u, sz, &sz, &found);
+        CHECK(found == 102, "TranslateUIDToDevice(in.2) → %u", found);
+        u = CFSTR("fr.francois-brille.openlw.device");
+        DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &ta, sizeof u, &u, sz, &sz, &found);
+        CHECK(found == kAudioObjectUnknown, "duplex UID unknown in multi layout");
+        AudioObjectPropertyAddress na = {kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, 0};
+        CHECK(!DRV->HasProperty(gDrv, 2, getpid(), &na) && !DRV->HasProperty(gDrv, 3, getpid(), &na) &&
+                  !DRV->HasProperty(gDrv, 104, getpid(), &na),
+              "unpublished objects (duplex, In 3) answer no property");
+        AudioObjectPropertyAddress sa = {kAudioDevicePropertyStreams, kAudioObjectPropertyScopeGlobal, 0};
         AudioObjectID st[2] = {0};
         sz = sizeof st;
-        DRV->GetPropertyData(gDrv, 5, getpid(), &sa, 0, NULL, sz, &sz, st);
-        UInt32 in_n = sz / sizeof(AudioObjectID);
-        AudioObjectID in_stream = st[0];
-        sa.mScope = kAudioObjectPropertyScopeOutput;
+        DRV->GetPropertyData(gDrv, 100, getpid(), &sa, 0, NULL, sz, &sz, st);
+        CHECK(sz == sizeof(AudioObjectID) && st[0] == 101, "In 1: one input stream (101)");
         sz = sizeof st;
-        DRV->GetPropertyData(gDrv, 5, getpid(), &sa, 0, NULL, sz, &sz, st);
-        CHECK(in_n == 1 && in_stream == 6 && sz == 0, "OpenLW In: one input stream (6), no output");
-        sz = sizeof st;
-        DRV->GetPropertyData(gDrv, 7, getpid(), &sa, 0, NULL, sz, &sz, st);
-        CHECK(sz == sizeof(AudioObjectID) && st[0] == 8, "OpenLW Out: one output stream (8)");
+        DRV->GetPropertyData(gDrv, 200, getpid(), &sa, 0, NULL, sz, &sz, st);
+        CHECK(sz == sizeof(AudioObjectID) && st[0] == 201, "Out 1: one output stream (201)");
         AudioObjectPropertyAddress fa = {kAudioStreamPropertyVirtualFormat, kAudioObjectPropertyScopeGlobal, 0};
-        AudioStreamBasicDescription f6, f8;
-        sz = sizeof f6;
-        DRV->GetPropertyData(gDrv, 6, getpid(), &fa, 0, NULL, sz, &sz, &f6);
-        sz = sizeof f8;
-        DRV->GetPropertyData(gDrv, 8, getpid(), &fa, 0, NULL, sz, &sz, &f8);
-        CHECK(f6.mChannelsPerFrame == 6 && f8.mChannelsPerFrame == 4, "formats: %u inputs, %u outputs",
-              f6.mChannelsPerFrame, f8.mChannelsPerFrame);
+        AudioStreamBasicDescription f1, f2, fo;
+        sz = sizeof f1;
+        DRV->GetPropertyData(gDrv, 101, getpid(), &fa, 0, NULL, sz, &sz, &f1);
+        sz = sizeof f2;
+        DRV->GetPropertyData(gDrv, 103, getpid(), &fa, 0, NULL, sz, &sz, &f2);
+        sz = sizeof fo;
+        DRV->GetPropertyData(gDrv, 201, getpid(), &fa, 0, NULL, sz, &sz, &fo);
+        CHECK(f1.mChannelsPerFrame == 1 && f2.mChannelsPerFrame == 8 && fo.mChannelsPerFrame == 2,
+              "widths follow the sources: %u, %u, %u", f1.mChannelsPerFrame, f2.mChannelsPerFrame, fo.mChannelsPerFrame);
+        AudioObjectPropertyAddress ea = {kAudioObjectPropertyElementName, kAudioObjectPropertyScopeInput, 2};
+        CFStringRef s = NULL;
+        sz = sizeof s;
+        CHECK(DRV->GetPropertyData(gDrv, 102, getpid(), &ea, 0, NULL, sz, &sz, &s) == 0 && s &&
+                  CFStringGetCString(s, name, sizeof name, kCFStringEncodingUTF8) && strcmp(name, "5 2") == 0,
+              "In 2, input 2 (names spread over devices): %s", name);
+        if (s) CFRelease(s);
+        ea.mElement = 2;
+        CHECK(!DRV->HasProperty(gDrv, 100, getpid(), &ea), "In 1 has a single channel");
 
-        /* Separate I/O: read on OpenLW In, write on OpenLW Out. */
-        CHECK(DRV->StartIO(gDrv, 5, 1) == 0 && DRV->StartIO(gDrv, 7, 2) == 0, "StartIO on both devices");
-        static float six[1024 * 6], back[512 * 6], four[512 * 4], got4[512 * 4];
-        for (int i = 0; i < 1024 * 6; i++) {
-            six[i] = 0.5f;
+        /* Each device reads its own ring. */
+        CHECK(DRV->StartIO(gDrv, 100, 1) == 0 && DRV->StartIO(gDrv, 102, 2) == 0 && DRV->StartIO(gDrv, 200, 3) == 0,
+              "StartIO on three devices");
+        static float one[1024], eight[1024 * 8], got1[512], got8[512 * 8], two[512 * 2], got2[512 * 2];
+        for (int i = 0; i < 1024; i++) {
+            one[i] = 0.5f;
         }
-        lw_ring_write(region2, LW_FROM_NET, six, 1024);
-        DRV->DoIOOperation(gDrv, 5, 6, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, back, NULL);
-        CHECK(back[0] == 0.5f && back[512 * 6 - 1] == 0.5f, "OpenLW In returns network audio");
-        for (int i = 0; i < 512 * 4; i++) {
-            four[i] = 0.25f;
+        for (int i = 0; i < 1024 * 8; i++) {
+            eight[i] = 0.25f;
         }
-        DRV->DoIOOperation(gDrv, 7, 8, 2, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, four, NULL);
-        lw_ring_read(region2, LW_TO_NET, got4, 512);
-        CHECK(got4[0] == 0.25f && got4[512 * 4 - 1] == 0.25f, "OpenLW Out sends to the network");
-        CHECK(DRV->DoIOOperation(gDrv, 5, 8, 1, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, four, NULL) != 0,
+        lw_ring_write(region3, 1, one, 1024);
+        lw_ring_write(region3, 2, eight, 1024);
+        DRV->DoIOOperation(gDrv, 100, 101, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got1, NULL);
+        DRV->DoIOOperation(gDrv, 102, 103, 2, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got8, NULL);
+        int ok1 = 1, ok8 = 1;
+        for (int i = 0; i < 512; i++) {
+            ok1 &= got1[i] == 0.5f;
+        }
+        for (int i = 0; i < 512 * 8; i++) {
+            ok8 &= got8[i] == 0.25f;
+        }
+        CHECK(ok1 && ok8, "In 1 (1 ch) and In 2 (8 ch) read their own rings, no crosstalk");
+        for (int i = 0; i < 512 * 2; i++) {
+            two[i] = -0.75f;
+        }
+        DRV->DoIOOperation(gDrv, 200, 201, 3, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, two, NULL);
+        lw_ring_read(region3, 0, got2, 512);
+        CHECK(got2[0] == -0.75f && got2[512 * 2 - 1] == -0.75f, "Out 1 writes its ring");
+        CHECK(DRV->DoIOOperation(gDrv, 100, 201, 1, kAudioServerPlugInIOOperationWriteMix, 512, &cycle_info, two, NULL) != 0,
               "stream of another device rejected");
 
-        /* Channel count changed: one request per device, applied per direction. */
-        UInt32 req = gConfigRequests;
-        gGen = 3, gTo = 2, gFrom = 2;
+        /* In 1 widened to 2 (stereo patch): new region, one request, for In 1 only. In 2
+         * resumes on the new region at once; In 1 stays silent until reconfigured. */
+        CHECK(region4 && lw_shm_init(region4, rsize4, 48000, 8192, 3, spec4, &clock) == 0, "region #4: In 1 at 2 ch");
+        lw_xpc_server_set_shmem(server, shmem4);
+        req = gConfigRequests;
+        gGen = 4;
+        gNames = ",\"layout\":\"multi\",\"in_widths\":[2,8],\"out_widths\":[2]";
         poll();
-        CHECK(gConfigRequests == req + 2, "two configuration change requests (%u)", gConfigRequests - req);
-        DRV->StopIO(gDrv, 5, 1);
-        CHECK(DRV->PerformDeviceConfigurationChange(gDrv, 5, 0, NULL) == 0, "change applied to OpenLW In");
-        sz = sizeof f6;
-        DRV->GetPropertyData(gDrv, 6, getpid(), &fa, 0, NULL, sz, &sz, &f6);
-        sz = sizeof f8;
-        DRV->GetPropertyData(gDrv, 8, getpid(), &fa, 0, NULL, sz, &sz, &f8);
-        CHECK(f6.mChannelsPerFrame == 2 && f8.mChannelsPerFrame == 4, "inputs at 2, outputs still at 4 (Out running)");
-        DRV->StopIO(gDrv, 7, 2);
-        DRV->PerformDeviceConfigurationChange(gDrv, 7, 0, NULL);
-        sz = sizeof f8;
-        DRV->GetPropertyData(gDrv, 8, getpid(), &fa, 0, NULL, sz, &sz, &f8);
-        CHECK(f8.mChannelsPerFrame == 2, "outputs at 2 after OpenLW Out");
+        CHECK(gConfigRequests == req + 1, "one configuration change request (%u)", gConfigRequests - req);
+        static float stereo[1024 * 2];
+        for (int i = 0; i < 1024 * 2; i++) {
+            stereo[i] = 0.125f;
+        }
+        lw_ring_write(region4, 1, stereo, 1024);
+        lw_ring_write(region4, 2, eight, 1024);
+        for (int i = 0; i < 512; i++) {
+            got1[i] = 1.0f;
+        }
+        DRV->DoIOOperation(gDrv, 102, 103, 2, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got8, NULL);
+        DRV->DoIOOperation(gDrv, 100, 101, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got1, NULL);
+        int silent1 = 1;
+        for (int i = 0; i < 512; i++) {
+            silent1 &= got1[i] == 0.0f;
+        }
+        CHECK(got8[0] == 0.25f && got8[512 * 8 - 1] == 0.25f, "In 2 (width unchanged) reads the new region");
+        CHECK(silent1, "In 1 awaiting reconfiguration: silence, 2-channel ring never read into a 1-channel buffer");
+        DRV->StopIO(gDrv, 100, 1);
+        CHECK(DRV->PerformDeviceConfigurationChange(gDrv, 100, 0, NULL) == 0, "change applied to In 1");
+        sz = sizeof f1;
+        DRV->GetPropertyData(gDrv, 101, getpid(), &fa, 0, NULL, sz, &sz, &f1);
+        CHECK(f1.mChannelsPerFrame == 2, "In 1 now %u channels", f1.mChannelsPerFrame);
+        CHECK(DRV->StartIO(gDrv, 100, 1) == 0, "StartIO In 1");
+        lw_ring_write(region4, 1, stereo, 1024);
+        DRV->DoIOOperation(gDrv, 100, 101, 1, kAudioServerPlugInIOOperationReadInput, 512, &cycle_info, got2, NULL);
+        CHECK(got2[0] == 0.125f && got2[512 * 2 - 1] == 0.125f, "In 1 reads its 2-channel ring");
 
+        /* Renaming a device: notified without configuration change. */
+        before = gPropertyChanges;
+        req = gConfigRequests;
+        gNames = ",\"layout\":\"multi\",\"in_widths\":[2,8],\"out_widths\":[2],\"in_device_names\":[\"\",\"OpenLW In - X (ch. 9)\"]";
+        poll();
+        CHECK(get_str(102, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW In - X (ch. 9)") == 0,
+              "In 2 renamed: %s", name);
+        CHECK(gPropertyChanges > before && gConfigRequests == req, "rename notified, no configuration change");
+
+        /* Fewer devices, then back to duplex. */
+        DRV->StopIO(gDrv, 100, 1);
+        DRV->StopIO(gDrv, 102, 2);
+        DRV->StopIO(gDrv, 200, 3);
+        gNames = ",\"layout\":\"multi\",\"in_widths\":[2],\"out_widths\":[2]";
+        poll();
+        sz = sizeof devs;
+        DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &la, 0, NULL, sz, &sz, devs);
+        CHECK(sz == 2 * sizeof(AudioObjectID) && devs[0] == 100 && devs[1] == 200, "In 2 removed");
         gNames = "";
         poll();
         sz = sizeof devs;
         DRV->GetPropertyData(gDrv, kAudioObjectPlugInObject, getpid(), &la, 0, NULL, sz, &sz, devs);
         CHECK(sz == sizeof(AudioObjectID) && devs[0] == 2, "back to one duplex device");
+        CHECK(get_str(2, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW") == 0, "name: %s", name);
+        CHECK(!DRV->HasProperty(gDrv, 100, getpid(), &na), "In 1 no longer published");
     }
 
     use_endpoint(NULL);
@@ -534,6 +628,10 @@ int main(int argc, char **argv) {
     lw_shm_unmap(region, rsize);
     lw_xpc_release(shmem2);
     lw_shm_unmap(region2, rsize2);
+    lw_xpc_release(shmem3);
+    lw_shm_unmap(region3, rsize3);
+    lw_xpc_release(shmem4);
+    lw_shm_unmap(region4, rsize4);
     free(buf);
     free(src);
     free(ahead);

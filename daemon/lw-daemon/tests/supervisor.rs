@@ -127,6 +127,44 @@ fn device_geometry_follows_configuration() {
         std::thread::sleep(Duration::from_millis(500));
         assert_eq!(call(&client, json!({"cmd":"geometry"}))["generation"], 2);
 
+        // Multi layout (macOS only): one ring per device; a patch changing a device's width
+        // recreates the region, a stereo patch on an empty device does not.
+        let r = call(&client, json!({"cmd":"set_device_layout","layout":"multi"}));
+        if cfg!(target_os = "macos") {
+            assert_eq!(r["ok"], true, "{r}");
+            assert!(wait(|| call(&client, json!({"cmd":"geometry"}))
+                ["generation"]
+                == 3));
+            let g = call(&client, json!({"cmd":"geometry"}));
+            assert_eq!(g["layout"], "multi");
+            assert_eq!(g["in_widths"], json!([2, 2, 2]));
+            assert_eq!(g["out_widths"], json!([2, 2]), "output patch 1-2 → Out 1");
+            assert_eq!(
+                g["out_device_names"][0],
+                "OpenLW Out - PC (ch. 4001)".replace("PC", lw_daemon::config::DEFAULT_SOURCE_NAME)
+            );
+            let r = call(
+                &client,
+                json!({"cmd":"patch_input","channel":21,"device":1,"device_channels":[1,2]}),
+            );
+            assert_eq!(r["ok"], true, "{r}");
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(call(&client, json!({"cmd":"geometry"}))["generation"], 3);
+            let r = call(
+                &client,
+                json!({"cmd":"patch_input","channel":22,"device":2,"mix":"sum","device_channels":[1]}),
+            );
+            assert_eq!(r["ok"], true, "{r}");
+            assert!(wait(|| call(&client, json!({"cmd":"geometry"}))
+                ["generation"]
+                == 4));
+            let g = call(&client, json!({"cmd":"geometry"}));
+            assert_eq!(g["in_widths"], json!([2, 1, 2]));
+            assert_eq!(g["channels_from_net"], 5);
+        } else {
+            assert_eq!(r["ok"], false, "multi layout refused outside macOS");
+        }
+
         stop.request();
         h.join().unwrap().unwrap();
     });

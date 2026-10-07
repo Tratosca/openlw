@@ -15,7 +15,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::config::{Config, Format, Kind};
+use crate::config::{Config, Format, Kind, Layout, Mix};
 use crate::editor::{self, Edit};
 use crate::rx::RxStats;
 use crate::tx::TxReport;
@@ -208,18 +208,19 @@ impl Shared {
             .directory
             .sources(Instant::now())
             .into_iter()
-            .map(|s| (s.channel, s.name))
+            .map(|s| {
+                (
+                    s.channel,
+                    crate::labels::Announced {
+                        name: s.name,
+                        terminal: s.terminal,
+                    },
+                )
+            })
             .collect();
         match self.current_config() {
             Some(cfg) => crate::labels::compute(&cfg, &announced),
-            None => crate::labels::Labels {
-                split: false,
-                name: crate::labels::DEVICE_NAME.into(),
-                input_device_name: crate::labels::INPUT_DEVICE_NAME.into(),
-                output_device_name: crate::labels::OUTPUT_DEVICE_NAME.into(),
-                input_names: Vec::new(),
-                output_names: Vec::new(),
-            },
+            None => crate::labels::Labels::fallback(),
         }
     }
 
@@ -317,10 +318,12 @@ impl Shared {
                             "generation": d.generation,
                             "channels_to_net": d.channels_to_net,
                             "channels_from_net": d.channels_from_net,
-                            "layout": if labels.split { "split" } else { "duplex" },
+                            "layout": if labels.multi { "multi" } else { "duplex" },
+                            "in_widths": d.in_widths,
+                            "out_widths": d.out_widths,
                             "name": labels.name,
-                            "input_device_name": labels.input_device_name,
-                            "output_device_name": labels.output_device_name,
+                            "in_device_names": labels.input_device_names,
+                            "out_device_names": labels.output_device_names,
                             "input_margin": self.current_config().map(|c| c.latency.input_margin()).unwrap_or(256),
                             "input_names": labels.input_names,
                             "output_names": labels.output_names,
@@ -421,9 +424,18 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
             port: opt_u16(v, "port")?.unwrap_or(5004),
             kind: serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
                 .map_err(|e| format!("`kind`: {e}"))?,
+            device: opt_u16(v, "device")?,
+            mix: match v.get("mix") {
+                None | Some(Value::Null) => None,
+                Some(m) => Some(
+                    serde_json::from_value::<Mix>(m.clone())
+                        .map_err(|_| "`mix`: left, right, or sum".to_string())?,
+                ),
+            },
             device_channels: channels_arg(v, "device_channels")?,
         }),
         "unpatch_input" => Ok(Edit::UnpatchInput {
+            device: opt_u16(v, "device")?,
             device_channels: channels_arg(v, "device_channels")?,
         }),
         "remove_input" => Ok(Edit::RemoveInput {
@@ -448,6 +460,7 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
                 .to_string(),
             format: serde_json::from_value::<Format>(from_json("format", "standard")?)
                 .map_err(|e| format!("`format`: {e}"))?,
+            device: opt_u16(v, "device")?,
             device_channels: channels_arg(v, "device_channels")?,
         }),
         "unpatch_output" => Ok(Edit::UnpatchOutput {
@@ -485,10 +498,17 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
                 ),
             },
         }),
-        "set_device_layout" => Ok(Edit::SetDeviceLayout(
-            serde_json::from_value(v.get("layout").cloned().unwrap_or(Value::Null))
-                .map_err(|_| "`layout`: duplex or split".to_string())?,
-        )),
+        "set_device_layout" => {
+            let layout: Layout =
+                serde_json::from_value(v.get("layout").cloned().unwrap_or(Value::Null))
+                    .map_err(|_| "`layout`: duplex or multi".to_string())?;
+            // Numbered devices exist only in the macOS HAL plugin (ASIO: one driver;
+            // PipeWire: one source and one sink).
+            if layout == Layout::Multi && !cfg!(target_os = "macos") {
+                return Err("multi layout is available on macOS only".into());
+            }
+            Ok(Edit::SetDeviceLayout(layout))
+        }
         "set_device_naming" => Ok(Edit::SetDeviceNaming(
             v.get("enabled")
                 .and_then(Value::as_bool)

@@ -91,25 +91,44 @@ final class MeterView: NSView {
     }
 }
 
+/// Patch drawn on a row: first column, column count, label (“L”, “R”, “L+R”, “8”, or none).
+struct GridPatch: Equatable {
+    let column: Int
+    let span: Int
+    let tag: String
+
+    func covers(_ c: Int) -> Bool { c >= column && c < column + span }
+}
+
+/// Column-header group: title, meters, and state over a column range.
+struct GridHeader {
+    let columns: Range<Int>
+    let title: String
+    let levels: [Double?]
+    let status: String
+}
+
 /// Input matrix row: source (discovered/manual) and optional patch.
 struct GridRow {
     let source: DiscoveredSource
-    /// Patched column (pair index), or nil.
-    let patchedColumn: Int?
+    /// Patch, or nil.
+    let patch: GridPatch?
     /// Transmitting terminal, or row provenance if source not advertised.
     let origin: String
     /// Removable row (manual channel or configured unadvertised stream).
     let removable: Bool
 }
 
-/// Input patch matrix: source rows, Mac input-pair columns.
+/// Input patch matrix: source rows; columns are device channels (duplex layout) or input
+/// devices (multi layout).
 final class InputGridView: NSView {
     var rows: [GridRow] = [] { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
-    var pairs: [[Int]] = [[1, 2], [3, 4], [5, 6], [7, 8]] { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
-    var columnLevels: [[Double?]] = [] { didSet { needsDisplay = true } }
-    var columnStatus: [String] = [] { didSet { needsDisplay = true } }
-    /// Cell click (row, column).
-    var onToggle: ((Int, Int) -> Void)?
+    var columns = 4 { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    /// Column width: 46 for channels (two per pair), 92 for devices.
+    var columnWidth: CGFloat = 46 { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
+    var headers: [GridHeader] = [] { didSet { needsDisplay = true } }
+    /// Cell click (row, column, click point in view coordinates).
+    var onToggle: ((Int, Int, NSPoint) -> Void)?
     /// Row preview-button click.
     var onListen: ((Int) -> Void)?
     /// Row removal-button click.
@@ -121,7 +140,6 @@ final class InputGridView: NSView {
     private let headerHeight: CGFloat = 46
     private let rowHeight: CGFloat = 30
     private let labelWidth: CGFloat = 330
-    private let columnWidth: CGFloat = 92
     private var hover: (Int, Int)?
     private var hoverListen: Int?
     private var hoverRemove: Int?
@@ -135,7 +153,7 @@ final class InputGridView: NSView {
     }
 
     private func removeRect(row: Int) -> NSRect {
-        NSRect(x: labelWidth + columnWidth * CGFloat(pairs.count) + 10, y: headerHeight + CGFloat(row) * rowHeight + 6,
+        NSRect(x: labelWidth + columnWidth * CGFloat(columns) + 10, y: headerHeight + CGFloat(row) * rowHeight + 6,
                width: 18, height: 18)
     }
 
@@ -149,7 +167,7 @@ final class InputGridView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: max(680, labelWidth + columnWidth * CGFloat(pairs.count) + 40), height: headerHeight + rowHeight * CGFloat(max(rows.count, 1)))
+        NSSize(width: max(680, labelWidth + columnWidth * CGFloat(columns) + 40), height: headerHeight + rowHeight * CGFloat(max(rows.count, 1)))
     }
 
     override func updateTrackingAreas() {
@@ -162,7 +180,7 @@ final class InputGridView: NSView {
         guard p.x >= labelWidth, p.y >= headerHeight else { return nil }
         let col = Int((p.x - labelWidth) / columnWidth)
         let row = Int((p.y - headerHeight) / rowHeight)
-        guard row < rows.count, col < pairs.count else { return nil }
+        guard row < rows.count, col < columns else { return nil }
         return (row, col)
     }
 
@@ -210,7 +228,7 @@ final class InputGridView: NSView {
         } else if let r = removeRow(at: point) {
             onRemove?(r)
         } else if let (r, c) = cell(at: point) {
-            onToggle?(r, c)
+            onToggle?(r, c, point)
         }
     }
 
@@ -222,14 +240,13 @@ final class InputGridView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Column headers: pair, meter, state.
-        for (c, pair) in pairs.enumerated() {
-            let x = labelWidth + CGFloat(c) * columnWidth
-            let name = pair.count > 2 ? "\(pair.first ?? 1)-\(pair.last ?? 8)" : "\(pair[0])-\(pair[1])"
-            text("Inputs \(name)", NSRect(x: x, y: 0, width: columnWidth, height: 16), font: Theme.small, color: .secondaryLabelColor, center: true)
-            let levels = c < columnLevels.count ? columnLevels[c] : []
-            let mrect = NSRect(x: x + 14, y: 19, width: columnWidth - 28, height: 9)
-            for (i, level) in levels.prefix(2).enumerated() {
+        // Column headers: title, meters (first two channels), state.
+        for h in headers {
+            let x = labelWidth + CGFloat(h.columns.lowerBound) * columnWidth
+            let w = columnWidth * CGFloat(h.columns.count)
+            text(h.title, NSRect(x: x, y: 0, width: w, height: 16), font: Theme.small, color: .secondaryLabelColor, center: true)
+            let mrect = NSRect(x: x + 14, y: 19, width: w - 28, height: 9)
+            for (i, level) in h.levels.prefix(2).enumerated() {
                 let y = mrect.minY + CGFloat(i) * 5
                 NSColor.quaternaryLabelColor.setFill()
                 NSRect(x: mrect.minX, y: y, width: mrect.width, height: 4).fill()
@@ -238,9 +255,7 @@ final class InputGridView: NSView {
                     NSRect(x: mrect.minX, y: y, width: mrect.width * CGFloat((db + 60) / 60), height: 4).fill()
                 }
             }
-            if c < columnStatus.count {
-                text(columnStatus[c], NSRect(x: x, y: 30, width: columnWidth, height: 14), font: Theme.small, color: .tertiaryLabelColor, center: true)
-            }
+            text(h.status, NSRect(x: x, y: 30, width: w, height: 14), font: Theme.small, color: .tertiaryLabelColor, center: true)
         }
         if rows.isEmpty {
             text("No sources discovered. Choose the interface, or enter a channel below.",
@@ -281,20 +296,29 @@ final class InputGridView: NSView {
                 let kind = s.kind == "surround" ? " · surround" : ""
                 text(row.origin + kind, originRect, font: Theme.small, color: .secondaryLabelColor)
             }
-            for c in 0..<pairs.count {
+            for c in 0..<columns where !(row.patch?.covers(c) ?? false) {
                 let x = labelWidth + CGFloat(c) * columnWidth
                 let box = NSRect(x: x + columnWidth / 2 - 9, y: y + 6, width: 18, height: 18)
-                let patched = row.patchedColumn == c
                 let hovered = hover.map { $0.0 == r && $0.1 == c } ?? false
-                let path = NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5)
-                if patched {
-                    Theme.accent.setFill()
-                    path.fill()
+                (hovered ? Theme.accent.withAlphaComponent(0.25) : NSColor.labelColor.withAlphaComponent(0.08)).setFill()
+                NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5).fill()
+            }
+            // Patch: one capsule over its columns, with its label (or a dot for stereo).
+            if let p = row.patch, p.column < columns {
+                let span = min(p.span, columns - p.column)
+                // A labelled single-column patch widens to fit its label (“L+R”).
+                let half: CGFloat = span == 1 && !p.tag.isEmpty ? min(columnWidth / 2 - 4, 20) : 9
+                let x0 = labelWidth + CGFloat(p.column) * columnWidth + columnWidth / 2 - half
+                let x1 = labelWidth + CGFloat(p.column + span - 1) * columnWidth + columnWidth / 2 + half
+                let box = NSRect(x: x0, y: y + 6, width: x1 - x0, height: 18)
+                let hovered = hover.map { $0.0 == r && p.covers($0.1) } ?? false
+                (hovered ? Theme.accent.withAlphaComponent(0.8) : Theme.accent).setFill()
+                NSBezierPath(roundedRect: box, xRadius: 9, yRadius: 9).fill()
+                if p.tag.isEmpty {
                     NSColor.white.setFill()
-                    NSBezierPath(ovalIn: box.insetBy(dx: 5.5, dy: 5.5)).fill()
+                    NSBezierPath(ovalIn: NSRect(x: box.midX - 3.5, y: box.midY - 3.5, width: 7, height: 7)).fill()
                 } else {
-                    (hovered ? Theme.accent.withAlphaComponent(0.25) : NSColor.labelColor.withAlphaComponent(0.08)).setFill()
-                    path.fill()
+                    text(p.tag, box.insetBy(dx: 2, dy: 2), font: Theme.small, color: .white, center: true)
                 }
             }
         }

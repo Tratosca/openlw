@@ -154,17 +154,29 @@ enum CtlCmd {
         port: u16,
         #[arg(long, value_enum, default_value = "stereo")]
         kind: CliKind,
-        /// Device inputs, e.g. 1,2.
+        /// Mono patch onto one input: left, right, or sum (L+R, −6 dB).
+        #[arg(long, value_enum)]
+        mix: Option<CliMix>,
+        /// Multi layout: input device number (OpenLW In n); `--to` is then 1,2 / 1 / 1..8.
+        #[arg(long)]
+        device: Option<u16>,
+        /// Device inputs, e.g. 1,2 (or 3 with `--mix`).
         #[arg(long, value_delimiter = ',', required = true)]
         to: Vec<u16>,
     },
     /// Release device inputs.
     UnpatchIn {
+        /// Multi layout: input device number.
+        #[arg(long)]
+        device: Option<u16>,
         #[arg(long, value_delimiter = ',', required = true)]
         to: Vec<u16>,
     },
     /// Transmit device outputs on a Livewire channel.
     PatchOut {
+        /// Multi layout: output device number (OpenLW Out n); `--from` is then 1,2.
+        #[arg(long)]
+        device: Option<u16>,
         /// Device outputs, e.g. 1,2.
         #[arg(long, value_delimiter = ',', required = true)]
         from: Vec<u16>,
@@ -189,9 +201,9 @@ enum CtlCmd {
         #[arg(long)]
         from_net: u32,
     },
-    /// macOS layout: duplex (one device) or split (OpenLW In / OpenLW Out).
+    /// macOS layout: duplex (one OpenLW device) or multi (OpenLW In n / OpenLW Out n).
     SetLayout { layout: String },
-    /// With split layout, name devices after patched channels.
+    /// Multi layout: name devices after their source (otherwise OpenLW In n).
     SetNaming {
         #[arg(action = clap::ArgAction::Set)]
         enabled: bool,
@@ -231,6 +243,13 @@ impl From<CliFormat> for Format {
             CliFormat::Surround => Format::Surround,
         }
     }
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum CliMix {
+    Left,
+    Right,
+    Sum,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -498,20 +517,26 @@ fn run(cli: Cli) -> Res {
                     group,
                     port,
                     kind,
+                    mix,
+                    device,
                     to,
                 } => serde_json::json!({
                     "cmd": "patch_input", "channel": channel, "group": group.map(|g| g.to_string()),
-                    "port": port, "kind": kind_name(*kind), "device_channels": to }),
-                CtlCmd::UnpatchIn { to } => {
-                    serde_json::json!({ "cmd": "unpatch_input", "device_channels": to })
+                    "port": port, "kind": kind_name(*kind), "device": device,
+                    "mix": mix.map(|m| match m { CliMix::Left => "left", CliMix::Right => "right", CliMix::Sum => "sum" }),
+                    "device_channels": to }),
+                CtlCmd::UnpatchIn { device, to } => {
+                    serde_json::json!({ "cmd": "unpatch_input", "device": device, "device_channels": to })
                 }
                 CtlCmd::PatchOut {
+                    device,
                     from,
                     channel,
                     name,
                     format,
                 } => serde_json::json!({
-                    "cmd": "patch_output", "channel": channel, "name": name, "format": fmt_name(*format), "device_channels": from }),
+                    "cmd": "patch_output", "channel": channel, "name": name, "format": fmt_name(*format),
+                    "device": device, "device_channels": from }),
                 CtlCmd::UnpatchOut { channel } => {
                     serde_json::json!({ "cmd": "unpatch_output", "channel": channel })
                 }

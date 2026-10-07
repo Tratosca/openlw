@@ -7,20 +7,61 @@
 //! per ring per process: endpoints ([`Producer`], [`Consumer`], [`ClockWriter`]) cannot be
 //! cloned and can be obtained only once.
 
-use std::ffi::{c_int, c_void};
+use std::ffi::c_void;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::ffi;
 
-/// Ring direction.
+/// Ring direction. In a duplex region (two rings) it is also the ring index: `Dir` converts
+/// into `usize` for ring-indexed methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dir {
     /// Applications → network (producer: plugin; consumer: daemon).
     ToNet = 0,
     /// Network → applications (producer: daemon; consumer: plugin).
     FromNet = 1,
+}
+
+impl From<Dir> for usize {
+    fn from(d: Dir) -> usize {
+        d as usize
+    }
+}
+
+/// Ring description: direction and channel count. Region rings are ordered TO_NET first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RingSpec {
+    /// Direction.
+    pub dir: Dir,
+    /// Interleaved frame width.
+    pub channels: u32,
+}
+
+impl RingSpec {
+    /// Applications → network ring.
+    pub fn to_net(channels: u32) -> Self {
+        Self {
+            dir: Dir::ToNet,
+            channels,
+        }
+    }
+
+    /// Network → applications ring.
+    pub fn from_net(channels: u32) -> Self {
+        Self {
+            dir: Dir::FromNet,
+            channels,
+        }
+    }
+
+    fn ffi(self) -> ffi::RingSpec {
+        ffi::RingSpec {
+            dir: self.dir as u32,
+            channels: self.channels,
+        }
+    }
 }
 
 /// Shared-region error.
@@ -69,9 +110,9 @@ struct Inner {
     size: usize,
     /// Creator sharing object or received client object, released on drop; NULL on Linux.
     handle: *mut c_void,
-    /// Endpoints currently held (TO_NET producer/consumer, FROM_NET producer/consumer, clock
-    /// writer); released when the endpoint is dropped.
-    taken: [AtomicBool; 5],
+    /// Endpoints currently held (producer and consumer of each ring, then clock writer);
+    /// released when the endpoint is dropped.
+    taken: Vec<AtomicBool>,
 }
 
 impl Inner {
@@ -106,16 +147,14 @@ pub struct Region {
 }
 
 /// Parameters read from header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Geometry {
     /// Sample rate (Hz).
     pub sample_rate: u32,
-    /// Ring size in frames (power of two).
+    /// Ring size in frames (power of two), shared by all rings.
     pub ring_frames: u32,
-    /// Applications → network ring channels.
-    pub channels_to_net: u32,
-    /// Network → applications ring channels.
-    pub channels_from_net: u32,
+    /// Ring table, in region order.
+    pub rings: Vec<RingSpec>,
 }
 
 /// Ring counters.
@@ -132,18 +171,33 @@ pub struct Counters {
 }
 
 impl Region {
-    /// Create region (daemon side): rings of `ring_frames` frames (power of two).
-    pub fn create(
+    /// Create a duplex region (daemon side): TO_NET ring (index 0) and FROM_NET ring (index 1).
+    pub fn create_duplex(
         sample_rate: u32,
         ring_frames: u32,
         channels_to_net: u32,
         channels_from_net: u32,
     ) -> Result<Self, Error> {
-        // SAFETY: pure C function.
-        let size = unsafe { ffi::lw_shm_size(ring_frames, channels_to_net, channels_from_net) };
+        Self::create(
+            sample_rate,
+            ring_frames,
+            &[
+                RingSpec::to_net(channels_to_net),
+                RingSpec::from_net(channels_from_net),
+            ],
+        )
+    }
+
+    /// Create region (daemon side): rings of `ring_frames` frames (power of two), TO_NET
+    /// rings first.
+    pub fn create(sample_rate: u32, ring_frames: u32, rings: &[RingSpec]) -> Result<Self, Error> {
+        let specs: Vec<ffi::RingSpec> = rings.iter().map(|r| r.ffi()).collect();
+        let n = u32::try_from(specs.len()).map_err(|_| Error("too many rings"))?;
+        // SAFETY: pure C function; `specs` holds `n` entries.
+        let size = unsafe { ffi::lw_shm_size(ring_frames, n, specs.as_ptr()) };
         if size == 0 {
             return Err(Error(
-                "invalid geometry (ring a power of two between 64 and 65536, ≤ 64 channels)",
+                "invalid geometry (ring a power of two between 64 and 65536, 1 to 32 rings, TO_NET first, ≤ 64 channels)",
             ));
         }
         let mut handle: *mut c_void = std::ptr::null_mut();
@@ -162,12 +216,12 @@ impl Region {
                 size,
                 sample_rate,
                 ring_frames,
-                channels_to_net,
-                channels_from_net,
+                n,
+                specs.as_ptr(),
                 &clock,
             )
         };
-        let region = Self::wrap(base, size, handle);
+        let region = Self::wrap(base, size, handle, rings.len());
         if rc != 0 {
             return Err(Error("cannot initialize the region"));
         }
@@ -184,21 +238,28 @@ impl Region {
         }
         let obj = object.0;
         std::mem::forget(object); // Object ownership transfers to `Inner`
-        let region = Self::wrap(base, size, obj);
-        // SAFETY: `base` points to `size` mapped bytes.
-        if unsafe { ffi::lw_shm_validate(base, size) } != 0 {
+                                  // SAFETY: `base` points to `size` mapped bytes.
+        let valid = unsafe { ffi::lw_shm_validate(base, size) } == 0;
+        let rings = if valid {
+            // SAFETY: validated header.
+            unsafe { ffi::lw_shm_ring_count(base) }
+        } else {
+            0
+        };
+        let region = Self::wrap(base, size, obj, rings as usize);
+        if !valid {
             return Err(Error("invalid region (magic, version or size)"));
         }
         Ok(region)
     }
 
-    fn wrap(base: *mut c_void, size: usize, handle: *mut c_void) -> Self {
+    fn wrap(base: *mut c_void, size: usize, handle: *mut c_void, rings: usize) -> Self {
         Self {
             inner: Arc::new(Inner {
                 base,
                 size,
                 handle,
-                taken: Default::default(),
+                taken: (0..=rings * 2).map(|_| AtomicBool::new(false)).collect(),
             }),
         }
     }
@@ -230,51 +291,60 @@ impl Region {
         self.inner.size
     }
 
-    /// Geometry read from header.
+    /// Geometry read from header (fields immutable after initialization).
     pub fn geometry(&self) -> Geometry {
-        // Read fields immutable after initialization (written before release-published magic).
-        let base = self.inner.base.cast::<u32>();
-        // SAFETY: header is 4096 bytes; lw_shm_header fixes offsets: sample_rate @12,
-        // ring_frames @16, channels @20/@24 (aligned u32 values).
+        let b = self.inner.base;
+        // SAFETY: validated region; accessors bound-check the ring index.
         unsafe {
             Geometry {
-                sample_rate: base.add(3).read_volatile(),
-                ring_frames: base.add(4).read_volatile(),
-                channels_to_net: base.add(5).read_volatile(),
-                channels_from_net: base.add(6).read_volatile(),
+                sample_rate: ffi::lw_shm_sample_rate(b),
+                ring_frames: ffi::lw_shm_ring_frames(b),
+                rings: (0..ffi::lw_shm_ring_count(b))
+                    .map(|i| RingSpec {
+                        dir: if ffi::lw_ring_dir(b, i) == 0 {
+                            Dir::ToNet
+                        } else {
+                            Dir::FromNet
+                        },
+                        channels: ffi::lw_ring_channels(b, i),
+                    })
+                    .collect(),
             }
         }
     }
 
-    /// Channel count for ring `dir`.
-    pub fn channels(&self, dir: Dir) -> u32 {
-        let g = self.geometry();
-        match dir {
-            Dir::ToNet => g.channels_to_net,
-            Dir::FromNet => g.channels_from_net,
-        }
+    /// Ring count.
+    pub fn ring_count(&self) -> usize {
+        // SAFETY: validated region.
+        unsafe { ffi::lw_shm_ring_count(self.inner.base) as usize }
     }
 
-    /// Readable frames in ring `dir`.
-    pub fn readable(&self, dir: Dir) -> u32 {
-        // SAFETY: valid region; atomic read.
-        unsafe { ffi::lw_ring_readable(self.inner.base, dir as c_int) }
+    /// Channel count for ring `ring` (0 if out of range).
+    pub fn channels(&self, ring: impl Into<usize>) -> u32 {
+        // SAFETY: validated region; accessor bound-checks.
+        unsafe { ffi::lw_ring_channels(self.inner.base, ring_id(ring)) }
     }
 
-    /// Free space (frames) in ring `dir`.
-    pub fn writable(&self, dir: Dir) -> u32 {
-        // SAFETY: valid region; atomic read.
-        unsafe { ffi::lw_ring_writable(self.inner.base, dir as c_int) }
+    /// Readable frames in ring `ring`.
+    pub fn readable(&self, ring: impl Into<usize>) -> u32 {
+        // SAFETY: valid region; atomic read; index bound-checked in C.
+        unsafe { ffi::lw_ring_readable(self.inner.base, ring_id(ring)) }
     }
 
-    /// Ring `dir` positions and counters.
-    pub fn counters(&self, dir: Dir) -> Counters {
+    /// Free space (frames) in ring `ring`.
+    pub fn writable(&self, ring: impl Into<usize>) -> u32 {
+        // SAFETY: valid region; atomic read; index bound-checked in C.
+        unsafe { ffi::lw_ring_writable(self.inner.base, ring_id(ring)) }
+    }
+
+    /// Ring `ring` positions and counters.
+    pub fn counters(&self, ring: impl Into<usize>) -> Counters {
         let mut c = Counters::default();
         // SAFETY: valid region; valid output pointers.
         unsafe {
             ffi::lw_ring_counters(
                 self.inner.base,
-                dir as c_int,
+                ring_id(ring),
                 &mut c.write_pos,
                 &mut c.read_pos,
                 &mut c.overruns,
@@ -305,37 +375,55 @@ impl Region {
         }
     }
 
-    /// Producer for ring `dir` (one owner at a time).
-    pub fn producer(&self, dir: Dir) -> Result<Producer, Error> {
-        let slot = dir as usize * 2;
+    fn ring_index(&self, ring: impl Into<usize>) -> Result<usize, Error> {
+        let ring = ring.into();
+        if ring < self.ring_count() {
+            Ok(ring)
+        } else {
+            Err(Error("unknown ring"))
+        }
+    }
+
+    /// Producer for ring `ring` (one owner at a time).
+    pub fn producer(&self, ring: impl Into<usize>) -> Result<Producer, Error> {
+        let ring = self.ring_index(ring)?;
+        let slot = ring * 2;
         self.take(slot)?;
         Ok(Producer {
             inner: self.inner.clone(),
-            dir,
-            channels: self.channels(dir),
+            ring: ring_id(ring),
+            channels: self.channels(ring),
             slot,
         })
     }
 
-    /// Consumer for ring `dir` (one owner at a time).
-    pub fn consumer(&self, dir: Dir) -> Result<Consumer, Error> {
-        let slot = dir as usize * 2 + 1;
+    /// Consumer for ring `ring` (one owner at a time).
+    pub fn consumer(&self, ring: impl Into<usize>) -> Result<Consumer, Error> {
+        let ring = self.ring_index(ring)?;
+        let slot = ring * 2 + 1;
         self.take(slot)?;
         Ok(Consumer {
             inner: self.inner.clone(),
-            dir,
-            channels: self.channels(dir),
+            ring: ring_id(ring),
+            channels: self.channels(ring),
             slot,
         })
     }
 
     /// Clock writer (daemon, one owner at a time).
     pub fn clock_writer(&self) -> Result<ClockWriter, Error> {
-        self.take(4)?;
+        let slot = self.inner.taken.len() - 1;
+        self.take(slot)?;
         Ok(ClockWriter {
             inner: self.inner.clone(),
+            slot,
         })
     }
+}
+
+/// C ring index; values beyond `u32` map to an out-of-range ring (inert in C).
+fn ring_id(ring: impl Into<usize>) -> u32 {
+    u32::try_from(ring.into()).unwrap_or(u32::MAX)
 }
 
 fn frames_of(len: usize, channels: u32) -> Result<u32, Error> {
@@ -352,7 +440,7 @@ fn frames_of(len: usize, channels: u32) -> Result<u32, Error> {
 /// Ring producer.
 pub struct Producer {
     inner: Arc<Inner>,
-    dir: Dir,
+    ring: u32,
     channels: u32,
     slot: usize,
 }
@@ -374,21 +462,14 @@ impl Producer {
         let frames = frames_of(interleaved.len(), self.channels)?;
         // SAFETY: unique producer for this ring (guaranteed by `Region::producer`); `interleaved`
         // contains `frames × channels` samples.
-        Ok(unsafe {
-            ffi::lw_ring_write(
-                self.inner.base,
-                self.dir as c_int,
-                interleaved.as_ptr(),
-                frames,
-            )
-        })
+        Ok(unsafe { ffi::lw_ring_write(self.inner.base, self.ring, interleaved.as_ptr(), frames) })
     }
 }
 
 /// Ring consumer.
 pub struct Consumer {
     inner: Arc<Inner>,
-    dir: Dir,
+    ring: u32,
     channels: u32,
     slot: usize,
 }
@@ -408,14 +489,14 @@ impl Consumer {
     /// Readable frames.
     pub fn readable(&self) -> u32 {
         // SAFETY: valid region; atomic read.
-        unsafe { ffi::lw_ring_readable(self.inner.base, self.dir as c_int) }
+        unsafe { ffi::lw_ring_readable(self.inner.base, self.ring) }
     }
 
     /// Discard up to `frames` oldest frames (latency catch-up); return discarded
     /// count.
     pub fn skip(&mut self, frames: u32) -> u32 {
         // SAFETY: unique consumer for this ring (guaranteed by `Region::consumer`).
-        unsafe { ffi::lw_ring_skip(self.inner.base, self.dir as c_int, frames) }
+        unsafe { ffi::lw_ring_skip(self.inner.base, self.ring, frames) }
     }
 
     /// Fill `out` (interleaved frames); pad missing frames with silence.
@@ -423,20 +504,19 @@ impl Consumer {
     pub fn read(&mut self, out: &mut [f32]) -> Result<u32, Error> {
         let frames = frames_of(out.len(), self.channels)?;
         // SAFETY: unique consumer for this ring; `out` can hold `frames × channels` samples.
-        Ok(unsafe {
-            ffi::lw_ring_read(self.inner.base, self.dir as c_int, out.as_mut_ptr(), frames)
-        })
+        Ok(unsafe { ffi::lw_ring_read(self.inner.base, self.ring, out.as_mut_ptr(), frames) })
     }
 }
 
 /// Shared-clock writer.
 pub struct ClockWriter {
     inner: Arc<Inner>,
+    slot: usize,
 }
 
 impl Drop for ClockWriter {
     fn drop(&mut self) {
-        self.inner.release(4);
+        self.inner.release(self.slot);
     }
 }
 
@@ -455,30 +535,84 @@ mod tests {
 
     #[test]
     fn geometry_and_invalid_parameters() {
-        let r = Region::create(48_000, 1024, 8, 2).unwrap();
+        let r = Region::create_duplex(48_000, 1024, 8, 2).unwrap();
         assert_eq!(
             r.geometry(),
             Geometry {
                 sample_rate: 48_000,
                 ring_frames: 1024,
-                channels_to_net: 8,
-                channels_from_net: 2
+                rings: vec![RingSpec::to_net(8), RingSpec::from_net(2)],
             }
         );
-        assert_eq!(r.size(), 4096 + 1024 * 10 * 4);
+        assert_eq!(r.size(), 8192 + 1024 * 10 * 4);
         assert!(
-            Region::create(48_000, 1000, 2, 2).is_err(),
+            Region::create_duplex(48_000, 1000, 2, 2).is_err(),
             "ring not a power of two"
         );
         assert!(
-            Region::create(48_000, 1024, 65, 2).is_err(),
+            Region::create_duplex(48_000, 1024, 65, 2).is_err(),
             "too many channels"
+        );
+        assert!(
+            Region::create(48_000, 1024, &[RingSpec::from_net(2), RingSpec::to_net(2)]).is_err(),
+            "TO_NET rings come first"
+        );
+        assert!(Region::create(48_000, 1024, &[]).is_err(), "no ring");
+        let many = vec![RingSpec::from_net(2); 33];
+        assert!(
+            Region::create(48_000, 1024, &many).is_err(),
+            "too many rings"
+        );
+    }
+
+    #[test]
+    fn rings_are_independent() {
+        // Multi-device layout: Out 1 (2 ch), In 1 (1 ch), In 2 (8 ch).
+        let rings = [
+            RingSpec::to_net(2),
+            RingSpec::from_net(1),
+            RingSpec::from_net(8),
+        ];
+        let r = Region::create(48_000, 256, &rings).unwrap();
+        assert_eq!(r.size(), 8192 + 256 * 11 * 4);
+        assert_eq!(r.geometry().rings, rings);
+        assert_eq!(r.ring_count(), 3);
+        assert_eq!(
+            (r.channels(1usize), r.channels(2usize), r.channels(3usize)),
+            (1, 8, 0)
+        );
+        let (mut p1, mut p2) = (r.producer(1usize).unwrap(), r.producer(2usize).unwrap());
+        let (mut c1, mut c2) = (r.consumer(1usize).unwrap(), r.consumer(2usize).unwrap());
+        assert!(r.producer(3usize).is_err(), "unknown ring");
+        assert_eq!(p1.write(&[0.25; 10]).unwrap(), 10);
+        assert_eq!(p2.write(&[-0.5; 8 * 4]).unwrap(), 4);
+        assert_eq!(
+            (
+                r.readable(1usize),
+                r.readable(2usize),
+                r.readable(Dir::ToNet)
+            ),
+            (10, 4, 0)
+        );
+        let mut a = vec![0f32; 10];
+        let mut b = vec![0f32; 8 * 4];
+        assert_eq!(c1.read(&mut a).unwrap(), 10);
+        assert_eq!(c2.read(&mut b).unwrap(), 4);
+        assert!(
+            a.iter().all(|&s| s == 0.25) && b.iter().all(|&s| s == -0.5),
+            "no crosstalk"
+        );
+        assert_eq!(r.counters(2usize).read_pos, 4);
+        let _w = r.clock_writer().unwrap();
+        assert!(
+            r.clock_writer().is_err(),
+            "clock slot follows the ring slots"
         );
     }
 
     #[test]
     fn ends_are_unique_while_held() {
-        let r = Region::create(48_000, 256, 2, 2).unwrap();
+        let r = Region::create_duplex(48_000, 256, 2, 2).unwrap();
         let p = r.producer(Dir::ToNet).unwrap();
         assert!(r.producer(Dir::ToNet).is_err());
         let _c = r.consumer(Dir::ToNet).unwrap();
@@ -492,7 +626,7 @@ mod tests {
 
     #[test]
     fn ring_wraps_and_counts() {
-        let r = Region::create(48_000, 64, 2, 2).unwrap();
+        let r = Region::create_duplex(48_000, 64, 2, 2).unwrap();
         let (mut p, mut c) = (
             r.producer(Dir::FromNet).unwrap(),
             r.consumer(Dir::FromNet).unwrap(),
@@ -523,7 +657,7 @@ mod tests {
 
     #[test]
     fn host_clock_is_declared() {
-        let r = Region::create(48_000, 256, 2, 2).unwrap();
+        let r = Region::create_duplex(48_000, 256, 2, 2).unwrap();
         let (id, numer, denom) = r.host_clock();
         let expected = if cfg!(target_os = "macos") {
             1
@@ -558,7 +692,7 @@ mod tests {
     #[cfg(any(target_os = "macos", windows))]
     #[test]
     fn spsc_across_two_mappings() {
-        let daemon = Region::create(48_000, 1024, 2, 2).unwrap();
+        let daemon = Region::create_duplex(48_000, 1024, 2, 2).unwrap();
         let plugin = second_mapping(&daemon);
         assert_eq!(plugin.geometry(), daemon.geometry());
         assert_eq!(plugin.host_clock(), daemon.host_clock());
@@ -613,7 +747,7 @@ mod tests {
 
     #[test]
     fn clock_seqlock_is_consistent() {
-        let r = Region::create(48_000, 256, 2, 2).unwrap();
+        let r = Region::create_duplex(48_000, 256, 2, 2).unwrap();
         assert!(r.clock().is_none(), "no clock before publication");
         let mut w = r.clock_writer().unwrap();
         let stop = Arc::new(AtomicBool::new(false));

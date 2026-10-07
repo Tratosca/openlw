@@ -174,13 +174,13 @@ final class InputGridView: NSView {
         part == .labels ? rows.indices.first { listenRect(row: $0).contains(p) } : nil
     }
 
+    /// Removal button, at the right end of the fixed labels (reachable whatever the scroll).
     private func removeRect(row: Int) -> NSRect {
-        NSRect(x: x0 + columnWidth * CGFloat(columns) + 10, y: headerHeight + CGFloat(row) * rowHeight + 6,
-               width: 18, height: 18)
+        NSRect(x: labelWidth - 24, y: headerHeight + CGFloat(row) * rowHeight + 6, width: 18, height: 18)
     }
 
     private func removeRow(at p: NSPoint) -> Int? {
-        part == .cells ? rows.indices.first { rows[$0].removable && removeRect(row: $0).contains(p) } : nil
+        part == .labels ? rows.indices.first { rows[$0].removable && removeRect(row: $0).contains(p) } : nil
     }
 
     override var isFlipped: Bool { true }
@@ -191,7 +191,7 @@ final class InputGridView: NSView {
     override var intrinsicContentSize: NSSize {
         // Empty grid: two lines for the message in the labels part.
         let height = headerHeight + rowHeight * CGFloat(rows.isEmpty ? 2 : rows.count)
-        return NSSize(width: part == .labels ? labelWidth : columnWidth * CGFloat(columns) + 40, height: height)
+        return NSSize(width: part == .labels ? labelWidth : columnWidth * CGFloat(columns) + 8, height: height)
     }
 
     override func updateTrackingAreas() {
@@ -329,15 +329,6 @@ final class InputGridView: NSView {
                 drawLabels(row: row, r: r, y: y)
                 continue
             }
-            if row.removable {
-                let rect = removeRect(row: r)
-                let hot = hoverRemove == r
-                if hot {
-                    NSColor.systemRed.withAlphaComponent(0.18).setFill()
-                    NSBezierPath(roundedRect: rect.insetBy(dx: -2, dy: -1), xRadius: 5, yRadius: 5).fill()
-                }
-                text("✕", rect, font: Theme.body, color: hot ? .systemRed : .secondaryLabelColor, center: true)
-            }
             for (h, g) in headers.enumerated() {
                 if g.coupled || row.source.patchKind == "surround" {
                     drawGroup(row: r, header: h, columns: g.columns, y: y, tag: row.groups[h], whole: g.coupled)
@@ -421,9 +412,18 @@ final class InputGridView: NSView {
     private func drawLabels(row: GridRow, r: Int, y: CGFloat) {
         let s = row.source
         drawListenButton(row: r)
+        if row.removable {
+            let rect = removeRect(row: r)
+            let hot = hoverRemove == r
+            if hot {
+                NSColor.systemRed.withAlphaComponent(0.18).setFill()
+                NSBezierPath(roundedRect: rect.insetBy(dx: -2, dy: -1), xRadius: 5, yRadius: 5).fill()
+            }
+            text("✕", rect, font: Theme.body, color: hot ? .systemRed : .secondaryLabelColor, center: true)
+        }
         text("\(s.channel)", NSRect(x: 34, y: y + 8, width: 50, height: 16), font: Theme.mono)
         text(s.name.isEmpty ? "—" : s.name, NSRect(x: 88, y: y + 8, width: 130, height: 16), font: Theme.body)
-        let originRect = NSRect(x: 220, y: y + 8, width: labelWidth - 226, height: 16)
+        let originRect = NSRect(x: 220, y: y + 8, width: labelWidth - 250, height: 16)
         if listeningRow == r {
             // During preview: received level replaces provenance.
             let track = NSRect(x: originRect.minX, y: y + 13, width: 70, height: 5)

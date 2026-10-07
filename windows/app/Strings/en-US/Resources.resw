@@ -17,7 +17,7 @@
   <data name="AsioTrademark.Text" xml:space="preserve"><value>ASIO is a registered trademark of Steinberg Media Technologies GmbH.</value></data>
   <data name="InputsTitle.Text" xml:space="preserve"><value>Inputs (network to computer)</value></data>
   <data name="InCountLabel.Text" xml:space="preserve"><value>Received Livewire channels:</value></data>
-  <data name="InputsHint.Text" xml:space="preserve"><value>Click a cell to send the source to the OpenLW driver: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. The headphone button plays the source on the Windows output without patching it.</value></data>
+  <data name="InputsHint.Text" xml:space="preserve"><value>Click a cell to send the source in stereo to that pair of the OpenLW driver; click again to release it. The link button above a pair uncouples it: each input then offers the left (L) and right (R) sides of the source, both for L+R, and a source can feed several inputs. The headphone button plays the source on the Windows output without patching it.</value></data>
   <data name="ManualLabel.Text" xml:space="preserve"><value>Unadvertised source, channel:</value></data>
   <data name="ManualChannel.PlaceholderText" xml:space="preserve"><value>1 to 32766</value></data>
   <data name="KindStereo.Content" xml:space="preserve"><value>Stereo</value></data>
@@ -65,18 +65,20 @@
   <data name="KindTagBackfeed" xml:space="preserve"><value>backfeed</value></data>
   <data name="OriginManual" xml:space="preserve"><value>manual</value></data>
   <data name="OriginNotAdvertised" xml:space="preserve"><value>not advertised</value></data>
-  <data name="SendToInput" xml:space="preserve"><value>Send channel {0} to input {1}…</value></data>
+  <data name="SendToInput" xml:space="preserve"><value>Send channel {0} to input {1}</value></data>
   <data name="SendToInputs" xml:space="preserve"><value>Send channel {0} to inputs {1}-{2}</value></data>
   <data name="ReleaseInput" xml:space="preserve"><value>Release input {0}</value></data>
   <data name="ReleaseInputs" xml:space="preserve"><value>Release inputs {0}-{1}</value></data>
   <data name="RemoveFromGrid" xml:space="preserve"><value>Remove from grid</value></data>
-  <data name="MenuStereo" xml:space="preserve"><value>Stereo on inputs {0}-{1}</value></data>
-  <data name="MenuLeft" xml:space="preserve"><value>Left only on input {0}</value></data>
-  <data name="MenuRight" xml:space="preserve"><value>Right only on input {0}</value></data>
-  <data name="MenuSum" xml:space="preserve"><value>L+R (mono) on input {0}</value></data>
   <data name="TagLeft" xml:space="preserve"><value>L</value></data>
   <data name="TagRight" xml:space="preserve"><value>R</value></data>
   <data name="TagSum" xml:space="preserve"><value>L+R</value></data>
+  <data name="SideLeftTooltip" xml:space="preserve"><value>Left side (L) of channel {0} on input {1}</value></data>
+  <data name="SideRightTooltip" xml:space="preserve"><value>Right side (R) of channel {0} on input {1}</value></data>
+  <data name="Couple" xml:space="preserve"><value>Couple</value></data>
+  <data name="Uncouple" xml:space="preserve"><value>Uncouple</value></data>
+  <data name="CoupleTitle" xml:space="preserve"><value>Couple inputs {0}-{1}?</value></data>
+  <data name="CoupleText" xml:space="preserve"><value>The source of the first input becomes stereo on the pair; the other patches on these inputs are released.</value></data>
   <data name="LostOutputsOne" xml:space="preserve"><value>1 transmission stopped</value></data>
   <data name="LostOutputsMany" xml:space="preserve"><value>{0} transmissions stopped</value></data>
   <data name="LostInputsOne" xml:space="preserve"><value>1 source removed from the inputs</value></data>

@@ -49,6 +49,7 @@ public sealed partial class MainWindow : Window
     private LinkStatus link = new();
     private bool reachable;
     private List<GridRow> gridRows = [];
+    /// Header pairs (1-based driver inputs; an odd count ends with a single input).
     private List<List<int>> pairs = [];
     private (int Channel, string Kind)? listening;
     /// Programmatic control updates must not be taken as user choices.
@@ -83,7 +84,9 @@ public sealed partial class MainWindow : Window
         AdvancedExpander.IsExpanded = settings.AdvancedVisible;
         updating = false;
 
-        grid.Toggle += ToggleInput;
+        grid.Group += ToggleGroup;
+        grid.Side += ToggleSide;
+        grid.Coupling += ToggleCoupling;
         grid.Listen += ToggleListen;
         grid.Remove += RemoveRow;
         GridHost.Content = grid;
@@ -229,7 +232,6 @@ public sealed partial class MainWindow : Window
         {
             RebuildOutputRows(Math.Max(1, c.ChannelsToNet / 2));
         }
-        // Header pairs of device channels (an odd count ends with a single channel).
         pairs = Enumerable.Range(0, (c.ChannelsFromNet + 1) / 2)
             .Select(i => Enumerable.Range(2 * i + 1, Math.Min(2, c.ChannelsFromNet - 2 * i)).ToList()).ToList();
         foreach (OutputRowView row in outputRows)
@@ -267,25 +269,64 @@ public sealed partial class MainWindow : Window
         updating = false;
     }
 
-    /// Configured patch of a source, if any.
-    private InputPatch? PatchOf(int channel, string kind) =>
-        config.Inputs.FirstOrDefault(i => i.Channel == channel && i.Kind == kind && i.DeviceChannels.Count > 0);
+    /// Configured received stream of a source, if any.
+    private InputPatch? InputOf(int channel, string kind) =>
+        config.Inputs.FirstOrDefault(i => i.Channel == channel && i.Kind == kind);
 
-    /// Grid patch: channel span and tag (mono mix, surround width, nothing for stereo).
-    private GridPatch? GridPatchOf(int channel, string kind)
+    /// Header groups: one per pair (0-based first column, title, coupling); index h is pair h + 1.
+    private List<GridHeader> HeaderGroups() => pairs.Select(p => new GridHeader(p[0] - 1, p.Count,
+        p.Count == 1 ? Loc.F("InputSingle", p[0]) : Loc.F("InputsRange", p[0], p[^1]), config.Coupled((p[0] + 1) / 2))).ToList();
+
+    /// Label of a stereo tap on a coupled pair: L, R, L+R (other stream channels as is).
+    private static string SideTag(List<int> from) => from switch
     {
-        if (PatchOf(channel, kind) is not { } p)
+        [1] => Loc.S("TagLeft"),
+        [2] => Loc.S("TagRight"),
+        [1, 2] => Loc.S("TagSum"),
+        _ => string.Join("+", from),
+    };
+
+    /// Crosspoints of a source as drawn: coupled pairs (and every pair of a surround source),
+    /// uncoupled inputs, surround block.
+    private GridRow RowOf(DiscoveredSource s, string origin, bool removable)
+    {
+        var groups = new Dictionary<int, string>();
+        var sides = new Dictionary<int, GridSides>();
+        (int, int)? block = null;
+        if (InputOf(s.Channel, s.PatchKind) is { Taps.Count: > 0 } p)
         {
-            return null;
+            bool stereo = p.Kind != "surround";
+            List<GridHeader> heads = HeaderGroups();
+            for (int h = 0; h < heads.Count; h++)
+            {
+                GridHeader g = heads[h];
+                List<Tap> taps = p.Taps.Where(t => g.Contains(t.Channel - 1)).ToList();
+                if (taps.Count == 0)
+                {
+                    continue;
+                }
+                if (g.Coupled || !stereo)
+                {
+                    // Plain stereo: left on the pair's first input, right on the second.
+                    bool plain = stereo && taps.Count == 2 && taps.All(t => t.From.SequenceEqual([t.Channel - g.First]));
+                    groups[h] = plain ? ""
+                        : stereo ? string.Join("·", taps.Select(t => SideTag(t.From)))
+                        : $"{taps.SelectMany(t => t.From).DefaultIfEmpty(1).Min()}-{taps.SelectMany(t => t.From).DefaultIfEmpty(8).Max()}";
+                }
+                else
+                {
+                    foreach (Tap t in taps)
+                    {
+                        sides[t.Channel - 1] = new GridSides(t.From.Contains(1), t.From.Contains(2));
+                    }
+                }
+            }
+            if (!stereo)
+            {
+                block = (p.Taps.Min(t => t.Channel), p.Taps.Max(t => t.Channel));
+            }
         }
-        string tag = p.Mix switch
-        {
-            "left" => Loc.S("TagLeft"),
-            "right" => Loc.S("TagRight"),
-            "sum" => Loc.S("TagSum"),
-            _ => p.Kind == "surround" ? "8" : "",
-        };
-        return new GridPatch(p.DeviceChannels.Min() - 1, p.DeviceChannels.Count, tag);
+        return new GridRow(s, groups, sides, block, origin, removable);
     }
 
     /// Matrix rows: discovered sources, then manual entries, then configured unadvertised streams.
@@ -297,7 +338,7 @@ public sealed partial class MainWindow : Window
         {
             if (seen.Add($"{s.Channel}/{s.PatchKind}"))
             {
-                rows.Add(new GridRow(s, GridPatchOf(s.Channel, s.PatchKind), origin, removable));
+                rows.Add(RowOf(s, origin, removable));
             }
         }
         foreach (DiscoveredSource s in discovered)
@@ -314,7 +355,7 @@ public sealed partial class MainWindow : Window
         }
         gridRows = rows;
         int idx = listening is { } l ? rows.FindIndex(r => r.Source.Channel == l.Channel && r.Source.PatchKind == l.Kind) : -1;
-        grid.Update(rows, pairs, idx >= 0 ? idx : null);
+        grid.Update(rows, HeaderGroups(), idx >= 0 ? idx : null);
         UpdateMeters();
     }
 
@@ -323,7 +364,7 @@ public sealed partial class MainWindow : Window
         var columns = pairs.Select(p => (IReadOnlyList<double?>)p.Select(c => DeviceMeters.Peak(meters.FromNet, [c])).ToList()).ToList();
         var status = pairs.Select(p =>
         {
-            // A mono patch occupies one channel of the pair.
+            // A route may occupy one input of the pair only.
             var route = meters.Inputs.FirstOrDefault(r => r.Channels.Intersect(p).Any());
             return Loc.S(route.Channels is null ? "StatusFree" : route.Primed ? "StatusReceiving" : "StatusWaiting");
         }).ToList();
@@ -405,7 +446,8 @@ public sealed partial class MainWindow : Window
             return;
         }
         int lostOut = config.Outputs.Count(o => (o.DeviceChannels?.DefaultIfEmpty(0).Max() ?? 0) > toNet);
-        int lostIn = config.Inputs.Count(i => i.DeviceChannels.DefaultIfEmpty(0).Max() > fromNet);
+        // Sources losing all their crosspoints (the others keep those that remain).
+        int lostIn = config.Inputs.Count(i => i.Taps.Count > 0 && i.Taps.All(t => t.Channel > fromNet));
         if (lostOut + lostIn > 0)
         {
             var lost = new List<string>();
@@ -461,60 +503,90 @@ public sealed partial class MainWindow : Window
         UpdateGrid();
     }
 
-    /// Cell click: releases the patch under it, patches a surround source on 8 channels from the
-    /// pair start, or offers stereo on the pair and the three mono mixes on the channel.
-    private void ToggleInput(int row, int column, FrameworkElement anchor)
+    /// Click on a coupled pair (or on a surround row): patches the source in stereo there (surround:
+    /// 8 inputs from the pair start), or releases it from the pair (surround: the whole block).
+    /// The source keeps its other crosspoints: it may feed several pairs.
+    private void ToggleGroup(int row, int h)
     {
-        if (row >= gridRows.Count || column >= config.ChannelsFromNet)
+        List<GridHeader> heads = HeaderGroups();
+        if (row >= gridRows.Count || h >= heads.Count)
         {
             return;
         }
         GridRow r = gridRows[row];
         DiscoveredSource s = r.Source;
-        if (r.Patch is { } patch && patch.Covers(column) && PatchOf(s.Channel, s.PatchKind) is { } current)
+        GridHeader g = heads[h];
+        bool surround = s.PatchKind == "surround";
+        if (r.Groups.ContainsKey(h) || r.Sides.Keys.Any(g.Contains))
         {
-            Mutate(Cmd("unpatch_input", ("device_channels", Ints(current.DeviceChannels))));
+            IEnumerable<int> release = surround
+                ? InputOf(s.Channel, s.PatchKind)?.Taps.Select(t => t.Channel) ?? []
+                : Enumerable.Range(g.First + 1, g.Count);
+            Mutate(Cmd("unpatch_input", ("device_channels", Ints(release))));
             return;
         }
-        int ch = column + 1, pairFirst = ch % 2 == 0 ? ch - 1 : ch;
-        if (s.PatchKind == "surround")
+        int first = g.First + 1, width = surround ? 8 : Math.Min(2, g.Count);
+        if (first + width - 1 > config.ChannelsFromNet)
         {
-            if (pairFirst + 7 > config.ChannelsFromNet)
-            {
-                ShowError(new DaemonError(DaemonErrorKind.Refused,
-                    Loc.F("ReasonSurroundWidth", config.ChannelsFromNet - 7, config.ChannelsFromNet - 6)));
-                return;
-            }
-            PatchInput(s, null, Enumerable.Range(pairFirst, 8));
+            ShowError(new DaemonError(DaemonErrorKind.Refused,
+                Loc.F("ReasonSurroundWidth", config.ChannelsFromNet - 7, config.ChannelsFromNet - 6)));
             return;
         }
-        var menu = new MenuFlyout();
-        void Item(string title, string? mix, IEnumerable<int> channels)
-        {
-            var item = new MenuFlyoutItem { Text = title };
-            item.Click += (_, _) => PatchInput(s, mix, channels);
-            menu.Items.Add(item);
-        }
-        if (pairFirst + 1 <= config.ChannelsFromNet)
-        {
-            Item(Loc.F("MenuStereo", pairFirst, pairFirst + 1), null, [pairFirst, pairFirst + 1]);
-        }
-        Item(Loc.F("MenuLeft", ch), "left", [ch]);
-        Item(Loc.F("MenuRight", ch), "right", [ch]);
-        Item(Loc.F("MenuSum", ch), "sum", [ch]);
-        menu.ShowAt(anchor);
+        PatchInput(s, Enumerable.Range(0, width).Select(i => new Tap(first + i, [i + 1])));
     }
 
-    /// Patches source `s` on device channels `channels`; `mix`: mono mix of a single channel.
-    private void PatchInput(DiscoveredSource s, string? mix, IEnumerable<int> channels)
+    /// Click on one half of an uncoupled input: adds or removes that side of the source on the
+    /// input (both sides: L+R; none: released).
+    private void ToggleSide(int row, int column, bool left)
     {
-        JsonObject request = Cmd("patch_input", ("channel", s.Channel), ("kind", s.PatchKind), ("device_channels", Ints(channels)));
-        if (mix is not null)
+        if (row >= gridRows.Count)
         {
-            request["mix"] = mix;
+            return;
         }
-        Mutate(request);
+        DiscoveredSource s = gridRows[row].Source;
+        int side = left ? 1 : 2, channel = column + 1;
+        List<int> current = InputOf(s.Channel, s.PatchKind)?.Taps.FirstOrDefault(t => t.Channel == channel)?.From ?? [];
+        List<int> from = current.Contains(side) ? [.. current.Where(f => f != side)] : [.. current.Append(side).Order()];
+        PatchInput(s, [new Tap(channel, from)]);
     }
+
+    /// Link button: couples or uncouples a pair. Uncoupling keeps the audio (a stereo patch becomes
+    /// left and right); coupling makes the first input's source stereo on the pair and releases
+    /// the rest, so it asks first when other sources' patches would go.
+    private async void ToggleCoupling(int h)
+    {
+        List<GridHeader> heads = HeaderGroups();
+        if (h >= heads.Count)
+        {
+            return;
+        }
+        GridHeader g = heads[h];
+        int n = h + 1;
+        bool coupled = config.Coupled(n);
+        int owners = config.Inputs.Count(i => i.Taps.Any(t => g.Contains(t.Channel - 1)));
+        if (!coupled && owners > 1)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = Loc.F("CoupleTitle", g.First + 1, g.First + g.Count),
+                Content = Loc.S("CoupleText"),
+                PrimaryButtonText = Loc.S("Couple"),
+                CloseButtonText = Loc.S("CancelButton"),
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+        Mutate(Cmd("set_coupling", ("pair", n), ("coupled", !coupled)));
+    }
+
+    /// Sets crosspoints of source `s` (added to its others; an empty `From` releases the input).
+    private void PatchInput(DiscoveredSource s, IEnumerable<Tap> taps) =>
+        Mutate(Cmd("patch_input", ("channel", s.Channel), ("kind", s.PatchKind),
+            ("taps", new JsonArray(taps.Select(t => (JsonNode?)t.ToJson()).ToArray()))));
 
     /// Removes a manual or unadvertised row; releases its inputs if patched.
     private void RemoveRow(int row)

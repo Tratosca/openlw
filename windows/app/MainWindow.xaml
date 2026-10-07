@@ -67,9 +67,8 @@
                             <ComboBox x:Name="InCount" MinWidth="220" SelectionChanged="ChannelCountChanged" />
                         </StackPanel>
                         <TextBlock x:Uid="InputsHint" Style="{StaticResource Hint}" />
-                        <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled">
-                            <ContentControl x:Name="GridHost" HorizontalContentAlignment="Left" />
-                        </ScrollViewer>
+                        <!-- Input matrix: source columns fixed, cells scrolling horizontally (InputGrid). -->
+                        <ContentControl x:Name="GridHost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBlock x:Uid="ManualLabel" VerticalAlignment="Center" />
                             <TextBox x:Name="ManualChannel" x:Uid="ManualChannel" Width="110" KeyDown="ManualKeyDown" />

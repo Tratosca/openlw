@@ -31,8 +31,8 @@ msgstr "Les autres appareils Livewire voient les canaux émis et leurs noms."
 msgid "Audio Device"
 msgstr "Périphérique audio"
 
-msgid "Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel for a mono patch, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."
-msgstr "Deux périphériques : chaque source va sur des canaux de « OpenLW In », comme avec une carte son multicanal ; convient aux applications qui utilisent un périphérique par sens. Plusieurs périphériques : chaque source a son propre périphérique, avec autant de canaux que la source (1 pour une affectation mono, 8 pour le surround) ; convient aux applications qui choisissent une seule entrée, comme la visioconférence. Les applications PipeWire, PulseAudio et JACK voient les mêmes périphériques. Après un changement de disposition ou de noms, sélectionnez de nouveau le périphérique dans les applications qui le retrouvent par son nom."
+msgid "Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel when uncoupled, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."
+msgstr "Deux périphériques : chaque source va sur des canaux de « OpenLW In », comme avec une carte son multicanal ; convient aux applications qui utilisent un périphérique par sens. Plusieurs périphériques : chaque source a son propre périphérique, avec autant de canaux que la source (1 quand il est découplé, 8 pour le surround) ; convient aux applications qui choisissent une seule entrée, comme la visioconférence. Les applications PipeWire, PulseAudio et JACK voient les mêmes périphériques. Après un changement de disposition ou de noms, sélectionnez de nouveau le périphérique dans les applications qui le retrouvent par son nom."
 
 msgid "Name Devices After Their Source"
 msgstr "Nommer les périphériques d’après leur source"
@@ -148,8 +148,8 @@ msgstr "Canaux Livewire reçus"
 msgid "Transmitted Livewire Channels"
 msgstr "Canaux Livewire émis"
 
-msgid "Click a cell to send the source to that device: stereo, left, right, or L+R in mono. Click again to release it. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it."
-msgstr "Cliquez sur une case pour envoyer la source vers ce périphérique : en stéréo, gauche seule, droite seule ou G+D en mono. Cliquez de nouveau pour la libérer. Les applications enregistrent depuis « OpenLW In n ». Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur, sans l’affecter."
+msgid "Click a cell to send the source to that device in stereo; click again to release it. The link button above a device uncouples it: the device becomes mono and each cell offers the left (L) and right (R) sides of the source, both for L+R. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it."
+msgstr "Cliquez sur une case pour envoyer la source en stéréo vers ce périphérique ; cliquez de nouveau pour la libérer. Le bouton de lien au-dessus d’un périphérique le découple : il devient mono et chaque case propose le côté gauche (G) et le côté droit (D) de la source, les deux pour G+D. Les applications enregistrent depuis « OpenLW In n ». Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur, sans l’affecter."
 
 msgid "Each “OpenLW Out n” device is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on."
 msgstr "Chaque périphérique « OpenLW Out n » est émis sur le canal Livewire de votre choix, sous le nom indiqué. Les modifications s’appliquent pendant l’émission."
@@ -166,8 +166,8 @@ msgstr "OpenLW In n"
 msgid "Choose one as the input: each device receives the source patched to it in the input grid."
 msgstr "Choisissez-en un comme entrée : chaque périphérique reçoit la source qui lui est affectée dans la grille des entrées."
 
-msgid "Click a cell to send the source to “OpenLW In”: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. The headphone button plays the source on the computer's audio output, without patching it."
-msgstr "Cliquez sur une case pour envoyer la source vers « OpenLW In » : en stéréo sur la paire, ou gauche seule, droite seule ou G+D en mono sur cette entrée. Cliquez de nouveau pour la libérer. Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur, sans l’affecter."
+msgid "Click a cell to send the source in stereo to that pair of “OpenLW In”; click again to release it. The link button above a pair uncouples it: each input then offers the left (L) and right (R) sides of the source, both for L+R, and a source can feed several inputs. The headphone button plays the source on the computer's audio output, without patching it."
+msgstr "Cliquez sur une case pour envoyer la source en stéréo vers cette paire de « OpenLW In » ; cliquez de nouveau pour la libérer. Le bouton de lien au-dessus d’une paire la découple : chaque entrée propose alors le côté gauche (G) et le côté droit (D) de la source, les deux pour G+D, et une source peut alimenter plusieurs entrées. Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur, sans l’affecter."
 
 msgid "Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on."
 msgstr "Chaque paire de canaux d’OpenLW Out est émise sur le canal Livewire de votre choix, sous le nom indiqué. Les modifications s’appliquent pendant l’émission."
@@ -253,26 +253,8 @@ msgstr "Réduire le nombre de canaux ?"
 msgid "Reduce"
 msgstr "Réduire"
 
-msgid "Stereo on In {n}"
-msgstr "Stéréo sur In {n}"
-
-msgid "Left only (mono)"
-msgstr "Gauche seule (mono)"
-
-msgid "Right only (mono)"
-msgstr "Droite seule (mono)"
-
-msgid "L+R (mono)"
-msgstr "G+D (mono)"
-
 msgid "a surround source takes 8 inputs. Choose a pair from 1-2 to {a}-{b}."
 msgstr "une source surround occupe 8 entrées. Choisissez une paire de 1-2 à {a}-{b}."
-
-msgid "Stereo on inputs {a}-{b}"
-msgstr "Stéréo sur les entrées {a}-{b}"
-
-msgid "{count} OpenLW input devices change width."
-msgstr "Le nombre de canaux de {count} périphériques d’entrée OpenLW change."
 
 msgid "“OpenLW In {n}” changes from {from} channels to 1 channel."
 msgstr "« OpenLW In {n} » passe de {from} canaux à 1 canal."
@@ -460,11 +442,45 @@ msgstr "Retour (vers la source)"
 msgid "8-Channel Surround"
 msgstr "Surround 8 canaux"
 
-msgid "Left only on input {n}"
-msgstr "Gauche seule sur l’entrée {n}"
+# Input crosspoints: coupled pairs or devices, left and right sides.
+msgid "Send channel {channel} to inputs {a}-{b}"
+msgstr "Envoyer le canal {channel} vers les entrées {a}-{b}"
 
-msgid "Right only on input {n}"
-msgstr "Droite seule sur l’entrée {n}"
+msgid "Left side of channel {channel} to input {n}"
+msgstr "Côté gauche du canal {channel} vers l’entrée {n}"
 
-msgid "L+R (mono) on input {n}"
-msgstr "G+D (mono) sur l’entrée {n}"
+msgid "Right side of channel {channel} to input {n}"
+msgstr "Côté droit du canal {channel} vers l’entrée {n}"
+
+msgid "Left side of channel {channel} to In {n}"
+msgstr "Côté gauche du canal {channel} vers In {n}"
+
+msgid "Right side of channel {channel} to In {n}"
+msgstr "Côté droit du canal {channel} vers In {n}"
+
+msgid "Couple"
+msgstr "Coupler"
+
+msgid "Uncouple"
+msgstr "Découpler"
+
+msgid "Couple This Device?"
+msgstr "Coupler ce périphérique ?"
+
+msgid "Uncouple This Device?"
+msgstr "Découpler ce périphérique ?"
+
+msgid "“OpenLW In {n}” becomes a mono device."
+msgstr "« OpenLW In {n} » devient un périphérique mono."
+
+msgid "“OpenLW In {n}” becomes a stereo device."
+msgstr "« OpenLW In {n} » devient un périphérique stéréo."
+
+msgid "Couple Inputs {a}-{b}?"
+msgstr "Coupler les entrées {a}-{b} ?"
+
+msgid "The source of the first input becomes stereo on the pair; the other patches on these inputs are released."
+msgstr "La source de la première entrée passe en stéréo sur la paire ; les autres affectations de ces entrées sont libérées."
+
+msgid "a surround source needs a coupled device. Couple “OpenLW In {n}” first."
+msgstr "une source surround demande un périphérique couplé. Couplez d’abord « OpenLW In {n} »."

@@ -242,7 +242,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         row.spacing = 8
         namingCheck.target = self
         namingCheck.action = #selector(namingToggled(_:))
-        let hint = NSTextField(wrappingLabelWithString: L("One device: every source goes to channels of “OpenLW”, as with a multichannel sound card; suits applications that use one device for input and output. Several devices: each source gets its own device, as wide as the source (1 channel for a mono patch, 8 for surround); suits applications that pick one input, such as video calls. Channels always carry the name of their source (Audio MIDI Setup, Logic…). After changing the layout or the names, select the device again in applications that find it by name, such as Audacity."))
+        let hint = NSTextField(wrappingLabelWithString: L("One device: every source goes to channels of “OpenLW”, as with a multichannel sound card; suits applications that use one device for input and output. Several devices: each source gets its own device, as wide as the source (1 channel when uncoupled, 8 for surround); suits applications that pick one input, such as video calls. Channels always carry the name of their source (Audio MIDI Setup, Logic…). After changing the layout or the names, select the device again in applications that find it by name, such as Audacity."))
         hint.font = Theme.small
         hint.textColor = .secondaryLabelColor
         let v = NSStackView(views: [row, namingCheck, hint])

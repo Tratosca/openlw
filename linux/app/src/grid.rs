@@ -1,47 +1,53 @@
 //! Input patch matrix: rows = sources (discovered, configured, manual), columns = channels of the
-//! input device (duplex layout) or input devices (multi layout). Clicking an empty cell opens the
-//! patch menu (stereo, left, right, L+R); a patch is drawn as one block over its columns, with
-//! its tag, and clicking it releases it. The headphone button previews the source; the cross
-//! removes a manual or unadvertised row. Same behavior as the macOS grid.
+//! input device (duplex layout) or input devices (multi layout), grouped by pair or device.
+//! A coupled group (stereo, the default) is one target: a click patches the source in stereo
+//! (surround: 8 channels from the pair start), a click on a patched group releases it. The
+//! link button of a group header uncouples it: each column then offers the left (top) and
+//! right (bottom) sides of the source, both for L+R. Surround rows keep one target per group.
+//! The source labels stay on the left while the cells scroll horizontally, so the window keeps
+//! its width with 32 inputs. The headphone button previews the source; the cross removes a
+//! manual or unadvertised row. Same behavior as the macOS grid (macos/app/Sources/Views.swift).
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::rc::Rc;
 
-use gtk::glib;
 use gtk::prelude::*;
 
 use crate::i18n::{tr, trf};
 use crate::meter::Meter;
 use crate::models::DiscoveredSource;
 
-/// Patch shown on a row: first column, column count, tag (“L”, “R”, “L+R”, “8” or none).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GridPatch {
-    pub column: usize,
-    pub span: usize,
-    pub tag: String,
+/// Sides of a stereo source feeding an uncoupled column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GridSides {
+    pub left: bool,
+    pub right: bool,
 }
 
-impl GridPatch {
-    pub fn covers(&self, c: usize) -> bool {
-        c >= self.column && c < self.column + self.span
-    }
-}
-
+/// Matrix row: source and its crosspoints.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridRow {
     pub source: DiscoveredSource,
-    pub patch: Option<GridPatch>,
+    /// Coupled groups (or groups of a surround source) fed by this source: header index →
+    /// tag (empty: plain stereo, shown as a check mark).
+    pub groups: BTreeMap<usize, String>,
+    /// Uncoupled columns fed by this source.
+    pub sides: BTreeMap<usize, GridSides>,
     pub origin: String,
     pub removable: bool,
 }
 
-/// Column header group: title, then meters and state over a column range.
+/// Column header group: a pair (duplex layout) or a device (multi layout); title, then
+/// meters and state over a column range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridHeader {
     pub columns: Range<usize>,
     pub title: String,
+    /// Pair number (duplex) or device number (multi), 1-based.
+    pub number: u32,
+    pub coupled: bool,
 }
 
 /// Matrix geometry: one column per device channel (duplex) or per device (multi).
@@ -52,28 +58,49 @@ pub struct GridLayout {
     pub headers: Vec<GridHeader>,
 }
 
-/// Cell click: row, column, clicked cell.
-pub type ToggleFn = dyn Fn(usize, usize, &gtk::Widget);
-
-/// Grid actions, called with row and column indexes; `toggle` also gets the clicked cell, to
-/// anchor the patch menu.
+/// Grid actions, called with row, header and column indexes.
 pub struct GridActions {
-    pub toggle: Box<ToggleFn>,
+    /// Click on a coupled group, or on any group of a surround source (row, header).
+    pub group: Box<dyn Fn(usize, usize)>,
+    /// Click on one side of an uncoupled column (row, column, left side?).
+    pub side: Box<dyn Fn(usize, usize, bool)>,
+    /// Click on a header's link button (header).
+    pub coupling: Box<dyn Fn(usize)>,
     pub listen: Box<dyn Fn(usize)>,
     pub remove: Box<dyn Fn(usize)>,
 }
 
-/// Patch menu entry: title and action.
-pub type MenuItem = (String, Rc<dyn Fn()>);
-
 const CSS: &str = "
 button.openlw-cell { padding: 0; min-width: 0; min-height: 26px; }
 button.openlw-cell > label { font-size: smaller; font-weight: bold; }
-popover.openlw-menu button label { font-weight: normal; }
+button.openlw-side { padding: 0; min-width: 0; min-height: 11px; border-radius: 4px; }
+button.openlw-side > label { font-size: x-small; font-weight: bold; }
+button.openlw-link { padding: 0 2px; min-width: 16px; min-height: 16px; }
 ";
 
+/// Tooltips of the sides of an uncoupled column: [duplex, multi] × [left, right].
+const SIDE_TIPS: [[&str; 2]; 2] = [
+    [
+        "Left side of channel {channel} to input {n}",
+        "Right side of channel {channel} to input {n}",
+    ],
+    [
+        "Left side of channel {channel} to In {n}",
+        "Right side of channel {channel} to In {n}",
+    ],
+];
+
+/// Column width: device channels (two per pair) or devices.
+const CHANNEL_WIDTH: i32 = 46;
+const DEVICE_WIDTH: i32 = 88;
+const SPACING: i32 = 4;
+
 pub struct InputGrid {
-    grid: gtk::Grid,
+    root: gtk::Box,
+    /// Fixed part: preview button, channel, name, origin.
+    labels: gtk::Grid,
+    /// Scrolling part: header groups, cells, removal button.
+    cells: gtk::Grid,
     actions: Rc<GridActions>,
     rows: RefCell<Vec<GridRow>>,
     layout: RefCell<GridLayout>,
@@ -86,14 +113,34 @@ pub struct InputGrid {
 
 impl InputGrid {
     pub fn new(actions: GridActions) -> Self {
-        let grid = gtk::Grid::builder()
-            .column_spacing(4)
-            .row_spacing(4)
+        let labels = gtk::Grid::builder()
+            .column_spacing(SPACING)
+            .row_spacing(SPACING)
             .margin_top(12)
             .margin_bottom(12)
             .margin_start(12)
+            .margin_end(SPACING)
+            .build();
+        let cells = gtk::Grid::builder()
+            .column_spacing(SPACING)
+            .row_spacing(SPACING)
+            .column_homogeneous(true)
+            .halign(gtk::Align::Start)
+            .margin_top(12)
+            .margin_bottom(12)
             .margin_end(12)
             .build();
+        // Horizontal scrolling only: the window does not grow with the input count.
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Automatic)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .hexpand(true)
+            .child(&cells)
+            .build();
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        root.append(&labels);
+        root.append(&scroll);
         let css = gtk::CssProvider::new();
         css.load_from_string(CSS);
         if let Some(display) = gtk::gdk::Display::default() {
@@ -104,7 +151,9 @@ impl InputGrid {
             );
         }
         Self {
-            grid,
+            root,
+            labels,
+            cells,
             actions: Rc::new(actions),
             rows: RefCell::default(),
             layout: RefCell::default(),
@@ -116,8 +165,8 @@ impl InputGrid {
         }
     }
 
-    pub fn widget(&self) -> &gtk::Grid {
-        &self.grid
+    pub fn widget(&self) -> &gtk::Box {
+        &self.root
     }
 
     /// Replaces rows, geometry and preview row; rebuilds only when something changed.
@@ -154,57 +203,12 @@ impl InputGrid {
         }
     }
 
-    /// Patch menu under `anchor` (a cell of this grid).
-    pub fn popup(&self, anchor: &gtk::Widget, items: Vec<MenuItem>) {
-        let popover = gtk::Popover::new();
-        popover.add_css_class("menu");
-        popover.add_css_class("openlw-menu");
-        let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        for (title, action) in items {
-            let label = gtk::Label::builder().label(&title).xalign(0.0).build();
-            let item = gtk::Button::builder().child(&label).build();
-            item.add_css_class("flat");
-            let p = popover.downgrade();
-            item.connect_clicked(move |_| {
-                if let Some(p) = p.upgrade() {
-                    p.popdown();
-                }
-                action();
-            });
-            list.append(&item);
-        }
-        popover.set_child(Some(&list));
-        // Attached to the cell, like a menu button's popover.
-        popover.set_parent(anchor);
-        // The cell tooltip would cover the menu while it is open.
-        anchor.set_has_tooltip(false);
-        let p = popover.downgrade();
-        // A grid rebuild while the menu is open destroys the cell: release the popover first.
-        let destroyed = anchor.connect_destroy(move |_| {
-            if let Some(p) = p.upgrade() {
-                p.unparent();
-            }
-        });
-        let cell = anchor.downgrade();
-        let destroyed = RefCell::new(Some(destroyed));
-        // Unparented once closed, outside its own signal handlers.
-        popover.connect_closed(move |p| {
-            if let Some(c) = cell.upgrade() {
-                c.set_has_tooltip(true);
-                if let Some(id) = destroyed.take() {
-                    c.disconnect(id);
-                }
-            }
-            let p = p.clone();
-            glib::idle_add_local_once(move || p.unparent());
-        });
-        popover.popup();
-    }
-
     fn rebuild(&self) {
         self.built.set(true);
-        while let Some(child) = self.grid.first_child() {
-            self.grid.remove(&child);
+        for grid in [&self.labels, &self.cells] {
+            while let Some(child) = grid.first_child() {
+                grid.remove(&child);
+            }
         }
         self.column_meters.borrow_mut().clear();
         self.column_status.borrow_mut().clear();
@@ -212,22 +216,43 @@ impl InputGrid {
         let rows = self.rows.borrow();
         let layout = self.layout.borrow();
         let listening = self.listening.get();
-        let width = if layout.multi { 88 } else { 40 };
-        // Columns: preview, channel, name, origin, one per device channel or device, removal.
-        let first_col = 4;
-        let x = |c: usize| first_col + c as i32;
-        for h in &layout.headers {
-            let span = h.columns.len().max(1) as i32;
+        let width = if layout.multi {
+            DEVICE_WIDTH
+        } else {
+            CHANNEL_WIDTH
+        };
+        let span_width = |span: usize| {
+            let span = span.max(1) as i32;
+            span * width + (span - 1) * SPACING
+        };
+
+        // Header row: the labels part keeps a placeholder of the same height.
+        let header_height = gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical);
+        let placeholder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        header_height.add_widget(&placeholder);
+        self.labels.attach(&placeholder, 0, 0, 4, 1);
+        for (i, h) in layout.headers.iter().enumerate() {
+            let span = h.columns.len().max(1);
             let head = gtk::Box::new(gtk::Orientation::Vertical, 3);
-            head.append(&caption(&h.title, true));
-            let meter = Meter::new(2, span * width + (span - 1) * 4 - 16);
+            head.set_size_request(span_width(span), -1);
+            let top = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+            let title = caption(&h.title, true);
+            // Full title: the columns widen rather than truncate it.
+            title.set_ellipsize(gtk::pango::EllipsizeMode::None);
+            title.set_hexpand(true);
+            top.append(&title);
+            top.append(&self.link_button(i, h));
+            head.append(&top);
+            let meter = Meter::new(2, span_width(span) - 16);
             meter.widget().set_halign(gtk::Align::Center);
             head.append(meter.widget());
             let status = caption(tr("free"), true);
             head.append(&status);
             self.column_meters.borrow_mut().push(meter);
             self.column_status.borrow_mut().push(status);
-            self.grid.attach(&head, x(h.columns.start), 0, span, 1);
+            header_height.add_widget(&head);
+            self.cells
+                .attach(&head, h.columns.start as i32, 0, span as i32, 1);
         }
         if rows.is_empty() {
             let empty = caption(
@@ -235,16 +260,23 @@ impl InputGrid {
                 false,
             );
             empty.set_wrap(true);
+            empty.set_max_width_chars(40);
             empty.set_margin_top(8);
-            self.grid.attach(&empty, 0, 1, x(layout.columns.max(1)), 1);
+            self.labels.attach(&empty, 0, 1, 4, 1);
             return;
         }
         for (r, g) in rows.iter().enumerate() {
             let y = r as i32 + 1;
             let on_air = listening == Some(r);
+            // Same height for both parts of the row.
+            let height = gtk::SizeGroup::new(gtk::SizeGroupMode::Vertical);
+            let put = |grid: &gtk::Grid, w: &gtk::Widget, x: i32, span: i32| {
+                let holder = centered(w);
+                height.add_widget(&holder);
+                grid.attach(&holder, x, y, span, 1);
+            };
 
             let listen = gtk::Button::from_icon_name("audio-headphones-symbolic");
-            listen.set_valign(gtk::Align::Center);
             listen.set_tooltip_text(Some(if on_air {
                 tr("Stop listening")
             } else {
@@ -257,16 +289,15 @@ impl InputGrid {
             }
             let a = self.actions.clone();
             listen.connect_clicked(move |_| (a.listen)(r));
-            self.grid.attach(&listen, 0, y, 1, 1);
+            put(&self.labels, listen.upcast_ref(), 0, 1);
 
             let ch = gtk::Label::new(Some(&g.source.channel.to_string()));
             ch.add_css_class("monospace");
             ch.set_xalign(1.0);
             ch.set_width_chars(5);
-            self.grid.attach(&ch, 1, y, 1, 1);
+            put(&self.labels, ch.upcast_ref(), 1, 1);
 
             let name = gtk::Box::new(gtk::Orientation::Vertical, 2);
-            name.set_valign(gtk::Align::Center);
             name.set_size_request(150, -1);
             let label = gtk::Label::new(Some(if g.source.name.is_empty() {
                 "—"
@@ -282,7 +313,7 @@ impl InputGrid {
                 name.append(m.widget());
                 *self.listen_meter.borrow_mut() = Some(m);
             }
-            self.grid.attach(&name, 2, y, 1, 1);
+            put(&self.labels, name.upcast_ref(), 2, 1);
 
             let kind = match g.source.patch_kind() {
                 "surround" => tr(" · surround"),
@@ -292,67 +323,147 @@ impl InputGrid {
             let origin = caption(&format!("{}{kind}", g.origin), false);
             origin.set_max_width_chars(24);
             origin.set_size_request(150, -1);
-            self.grid.attach(&origin, 3, y, 1, 1);
+            put(&self.labels, origin.upcast_ref(), 3, 1);
 
+            let surround = g.source.patch_kind() == "surround";
             let channel = g.source.channel;
-            for c in 0..layout.columns {
-                if g.patch.as_ref().is_some_and(|p| p.covers(c)) {
+            for (h, head) in layout.headers.iter().enumerate() {
+                let span = head.columns.len().max(1);
+                if head.coupled || surround {
+                    let cell = self.group_cell(r, h, head, layout.multi, channel, g.groups.get(&h));
+                    cell.set_size_request(span_width(span), -1);
+                    put(
+                        &self.cells,
+                        cell.upcast_ref(),
+                        head.columns.start as i32,
+                        span as i32,
+                    );
                     continue;
                 }
-                let cell = gtk::Button::new();
-                cell.add_css_class("openlw-cell");
-                cell.set_size_request(width, -1);
-                cell.set_tooltip_text(Some(&if layout.multi {
-                    trf(
-                        "Send channel {channel} to In {n}",
-                        &[("channel", &channel), ("n", &(c + 1))],
-                    )
-                } else {
-                    trf(
-                        "Send channel {channel} to input {n}",
-                        &[("channel", &channel), ("n", &(c + 1))],
-                    )
-                }));
-                let a = self.actions.clone();
-                cell.connect_clicked(move |b| (a.toggle)(r, c, b.upcast_ref()));
-                self.grid.attach(&cell, x(c), y, 1, 1);
-            }
-            // Patch: one block over its columns, with its tag (or a check mark for stereo).
-            if let Some(p) = g.patch.as_ref().filter(|p| p.column < layout.columns) {
-                let span = p.span.min(layout.columns - p.column).max(1);
-                let cell = gtk::Button::new();
-                cell.add_css_class("openlw-cell");
-                cell.add_css_class("suggested-action");
-                if p.tag.is_empty() {
-                    cell.set_icon_name("object-select-symbolic");
-                } else {
-                    cell.set_label(&p.tag);
+                for c in head.columns.clone() {
+                    let sides = g.sides.get(&c).copied().unwrap_or_default();
+                    let cell = self.side_cell(r, c, layout.multi, channel, sides);
+                    cell.set_size_request(width, -1);
+                    put(&self.cells, cell.upcast_ref(), c as i32, 1);
                 }
-                let (a, b) = (p.column + 1, p.column + span);
-                cell.set_tooltip_text(Some(&if layout.multi {
-                    trf("Release In {n}", &[("n", &a)])
-                } else if a == b {
-                    trf("Release input {n}", &[("n", &a)])
-                } else {
-                    trf("Release inputs {a}-{b}", &[("a", &a), ("b", &b)])
-                }));
-                let column = p.column;
-                let actions = self.actions.clone();
-                cell.connect_clicked(move |b| (actions.toggle)(r, column, b.upcast_ref()));
-                self.grid.attach(&cell, x(p.column), y, span as i32, 1);
             }
             if g.removable {
                 let remove = gtk::Button::from_icon_name("window-close-symbolic");
                 remove.add_css_class("flat");
                 remove.add_css_class("circular");
-                remove.set_valign(gtk::Align::Center);
+                remove.set_halign(gtk::Align::Start);
                 remove.set_tooltip_text(Some(tr("Remove from grid")));
                 let a = self.actions.clone();
                 remove.connect_clicked(move |_| (a.remove)(r));
-                self.grid.attach(&remove, x(layout.columns), y, 1, 1);
+                put(&self.cells, remove.upcast_ref(), layout.columns as i32, 1);
             }
         }
     }
+
+    /// Link button of a header group: coupled (accent) or uncoupled (dimmed).
+    fn link_button(&self, h: usize, head: &GridHeader) -> gtk::Button {
+        let link = gtk::Button::from_icon_name("insert-link-symbolic");
+        link.add_css_class("flat");
+        link.add_css_class("openlw-link");
+        link.add_css_class(if head.coupled { "accent" } else { "dim-label" });
+        link.set_tooltip_text(Some(if head.coupled {
+            tr("Uncouple")
+        } else {
+            tr("Couple")
+        }));
+        link.set_valign(gtk::Align::Center);
+        let a = self.actions.clone();
+        link.connect_clicked(move |_| (a.coupling)(h));
+        link
+    }
+
+    /// Coupled group (or a surround source's group): one target; patched, with its tag or a
+    /// check mark for plain stereo.
+    fn group_cell(
+        &self,
+        r: usize,
+        h: usize,
+        head: &GridHeader,
+        multi: bool,
+        channel: u16,
+        tag: Option<&String>,
+    ) -> gtk::Button {
+        let cell = gtk::Button::new();
+        cell.add_css_class("openlw-cell");
+        let (a, b) = (head.columns.start + 1, head.columns.end);
+        let tooltip = match (tag, multi) {
+            (Some(_), true) => trf("Release In {n}", &[("n", &head.number)]),
+            (Some(_), false) if a == b => trf("Release input {n}", &[("n", &a)]),
+            (Some(_), false) => trf("Release inputs {a}-{b}", &[("a", &a), ("b", &b)]),
+            (None, true) => trf(
+                "Send channel {channel} to In {n}",
+                &[("channel", &channel), ("n", &head.number)],
+            ),
+            (None, false) if a == b => trf(
+                "Send channel {channel} to input {n}",
+                &[("channel", &channel), ("n", &a)],
+            ),
+            (None, false) => trf(
+                "Send channel {channel} to inputs {a}-{b}",
+                &[("channel", &channel), ("a", &a), ("b", &b)],
+            ),
+        };
+        cell.set_tooltip_text(Some(&tooltip));
+        if let Some(tag) = tag {
+            cell.add_css_class("suggested-action");
+            if tag.is_empty() {
+                cell.set_icon_name("object-select-symbolic");
+            } else {
+                cell.set_label(tag);
+            }
+        }
+        let actions = self.actions.clone();
+        cell.connect_clicked(move |_| (actions.group)(r, h));
+        cell
+    }
+
+    /// Uncoupled column: left side on top, right side below, each a target.
+    fn side_cell(
+        &self,
+        r: usize,
+        c: usize,
+        multi: bool,
+        channel: u16,
+        sides: GridSides,
+    ) -> gtk::Box {
+        let cell = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(2)
+            .homogeneous(true)
+            .build();
+        let n = c + 1;
+        for (left, on) in [(true, sides.left), (false, sides.right)] {
+            let half = gtk::Button::with_label(if left { tr("L") } else { tr("R") });
+            half.add_css_class("openlw-side");
+            if on {
+                half.add_css_class("suggested-action");
+            }
+            let [duplex, devices] = SIDE_TIPS;
+            let [left_tip, right_tip] = if multi { devices } else { duplex };
+            let tooltip = if left { left_tip } else { right_tip };
+            half.set_tooltip_text(Some(&trf(tooltip, &[("channel", &channel), ("n", &n)])));
+            let a = self.actions.clone();
+            half.connect_clicked(move |_| (a.side)(r, c, left));
+            cell.append(&half);
+        }
+        cell
+    }
+}
+
+/// Holder of a grid cell: takes the row height, the widget stays centered.
+fn centered(w: &gtk::Widget) -> gtk::Box {
+    let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    w.set_valign(gtk::Align::Center);
+    w.set_vexpand(true);
+    // The row does not claim the window's extra height.
+    holder.set_vexpand(false);
+    holder.append(w);
+    holder
 }
 
 fn caption(text: &str, center: bool) -> gtk::Label {
@@ -369,12 +480,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn patch_span() {
-        let p = GridPatch {
-            column: 2,
-            span: 8,
-            tag: "8".into(),
-        };
-        assert!(!p.covers(1) && p.covers(2) && p.covers(9) && !p.covers(10));
+    fn side_tooltips_are_translated() {
+        let fr = crate::i18n::french_catalog();
+        for t in SIDE_TIPS.iter().flatten() {
+            assert!(fr.contains_key(*t), "missing in fr.po: {t:?}");
+        }
     }
 }

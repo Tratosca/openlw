@@ -74,6 +74,7 @@ lw-daemon ctl sources                           # Advertised sources (channel, n
 lw-daemon ctl patch-in --channel 21 --to 1,2    # Livewire channel 21 → device inputs 1–2
 lw-daemon ctl patch-out --from 1,2 --channel 4001 --name "MAC 1"   # Outputs 1–2 → channel 4001
 lw-daemon ctl patch-in --channel 22 --mix sum --to 5   # Mono (L+R)/2 of channel 22 → input 5 (also left, right)
+lw-daemon ctl set-coupling --pair 3 --coupled false    # Uncouple inputs 5-6 (multi layout: OpenLW In 3 becomes mono)
 lw-daemon ctl unpatch-in --to 1,2 ; lw-daemon ctl unpatch-out --channel 4001
 lw-daemon ctl set-layout multi                  # macOS: OpenLW In n / OpenLW Out n (ADR 0010)
 lw-daemon ctl patch-in --channel 21 --device 2 --to 1,2   # Multi layout: channel 21 → OpenLW In 2
@@ -83,6 +84,7 @@ lw-daemon discover --iface en7 --seconds 30     # Discovery without the daemon
 ```
 
 - **Discovery:** the daemon listens to advertisements (239.192.255.3:4001), accumulates full-advertisement pages, and sends `READ` to unknown terminals. If a terminal does not respond, its sources appear only with the next full advertisement (up to 2–3 min).
+- **Crosspoints:** a received stream feeds device inputs through `taps` (`{"channel": 3, "from": [1]}`: left on input 3; `[2]` right, `[1, 2]` (L+R)/2, `[k]` channel k of a surround stream; `device` in multi layout). JSON command `patch_input` with `taps` adds crosspoints (an empty `from` releases the input); the CLI `patch-in --to` form moves the stream. Pairs are coupled in stereo by default (`uncoupled_inputs`, `set_coupling`, see [ADR 0010](../docs/adr/0010-macos-device-layouts.md)).
 - **Live patching:** each command validates and saves the new configuration (`lw-daemon.json`), then reloads the network session without touching the device: the plugin retains its region. Patching an occupied input releases it first.
 - **Authorization on macOS:** patch-changing commands require root or `admin` membership (XPC caller's effective UID); `status`, `sources`, and `config` are unrestricted. Other platforms use the caller rules in ADR 0007.
 - **Clocks:** received streams follow the transmitter clock; the device follows the Mac clock. The jitter buffer absorbs network jitter and compensates for drift by slipping (discarding or repriming; `slips` and `underruns` counters in `status`). Occasional slight audible jumps may occur until clock synchronization is implemented (ADR 0003, adaptive resampling).

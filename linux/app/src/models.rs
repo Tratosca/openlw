@@ -162,30 +162,41 @@ pub fn group(channel: u16, kind: &str) -> Option<Ipv4Addr> {
     Channel::new(channel).map(|c| c.group(k))
 }
 
-/// Configured received stream (destination).
+/// Crosspoint: one device input fed by stream channels (1-based: [1] left, [2] right,
+/// [1, 2] L+R, [k] surround channel k). Same as `Tap` in daemon/lw-daemon/src/config.rs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tap {
+    /// Multi layout: input device number (“OpenLW In n”, 1-based).
+    pub device: Option<u32>,
+    /// Device input, 1-based (within `device` in multi layout).
+    pub channel: u32,
+    pub from: Vec<u32>,
+}
+
+impl Tap {
+    pub fn from(v: &Value) -> Option<Self> {
+        Some(Self {
+            device: u(v, "device"),
+            channel: u(v, "channel")?,
+            from: ints(v, "from"),
+        })
+    }
+
+    pub fn json(&self) -> Value {
+        let mut v = serde_json::json!({"channel": self.channel, "from": self.from});
+        if let (Some(d), Some(o)) = (self.device, v.as_object_mut()) {
+            o.insert("device".into(), d.into());
+        }
+        v
+    }
+}
+
+/// Configured received stream (destination): its crosspoints (none: received, unpatched).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputPatch {
     pub channel: Option<u16>,
     pub kind: String,
-    /// Duplex layout: channels of the input device; multi layout: channels within `device`.
-    pub device_channels: Vec<u32>,
-    /// Multi layout: input device number (“OpenLW In n”, 1-based).
-    pub device: Option<u32>,
-    /// Mono patch: "left", "right" or "sum".
-    pub mix: Option<String>,
-}
-
-impl InputPatch {
-    /// Device width this patch needs (multi layout).
-    pub fn width(&self) -> u32 {
-        if self.mix.is_some() {
-            1
-        } else if self.kind == "surround" {
-            8
-        } else {
-            2
-        }
-    }
+    pub taps: Vec<Tap>,
 }
 
 /// Configured transmitted stream (source).
@@ -214,6 +225,9 @@ pub struct DaemonConfig {
     pub layout: String,
     /// Multi layout: devices named after their source (default), otherwise “OpenLW In n”.
     pub custom_names: bool,
+    /// Input pairs (duplex layout: pair n = inputs 2n-1 and 2n) or input devices (multi
+    /// layout) not coupled in stereo.
+    pub uncoupled: Vec<u32>,
 }
 
 impl Default for DaemonConfig {
@@ -230,6 +244,7 @@ impl Default for DaemonConfig {
             tos: 184,
             layout: "duplex".into(),
             custom_names: true,
+            uncoupled: Vec::new(),
         }
     }
 }
@@ -253,15 +268,27 @@ impl DaemonConfig {
         self.channels_to_net.div_ceil(2)
     }
 
-    /// Multi layout: width of each input device after `inputs` (2 when empty), as computed by
-    /// the daemon (daemon/lw-daemon/src/config.rs, `in_widths`).
-    pub fn in_widths(inputs: &[InputPatch], devices: u32) -> Vec<u32> {
+    /// Is input pair (duplex) or input device (multi) `n` coupled in stereo?
+    pub fn coupled(&self, n: u32) -> bool {
+        !self.uncoupled.contains(&n)
+    }
+
+    /// Multi layout: width of each input device, as computed by the daemon
+    /// (daemon/lw-daemon/src/config.rs, `in_widths`): 1 uncoupled, 8 with a surround stream,
+    /// otherwise 2.
+    pub fn in_widths(inputs: &[InputPatch], uncoupled: &[u32], devices: u32) -> Vec<u32> {
         (1..=devices.max(1))
             .map(|n| {
-                inputs
+                let surround = inputs
                     .iter()
-                    .find(|i| i.device == Some(n) && !i.device_channels.is_empty())
-                    .map_or(2, InputPatch::width)
+                    .any(|i| i.kind == "surround" && i.taps.iter().any(|t| t.device == Some(n)));
+                if uncoupled.contains(&n) {
+                    1
+                } else if surround {
+                    8
+                } else {
+                    2
+                }
             })
             .collect()
     }
@@ -290,11 +317,10 @@ impl DaemonConfig {
                     kind: Some(s(v, "kind"))
                         .filter(|k| !k.is_empty())
                         .unwrap_or_else(|| "stereo".into()),
-                    device_channels: ints(v, "device_channels"),
-                    device: u(v, "device"),
-                    mix: Some(s(v, "mix")).filter(|m| !m.is_empty()),
+                    taps: objects(v, "taps").filter_map(Tap::from).collect(),
                 })
                 .collect(),
+            uncoupled: ints(c, "uncoupled_inputs"),
             outputs: objects(c, "sources")
                 .filter_map(|v| {
                     Some(OutputPatch {
@@ -412,8 +438,11 @@ mod tests {
         let c = DaemonConfig::from(&json!({
             "iface": "auto", "advertise": false, "tos": 136, "latency": "low",
             "device": {"channels_to_net": 4, "channels_from_net": 6},
-            "destinations": [{"channel": 101, "kind": "surround", "device_channels": [1,2,3,4,5,6,7,8]},
-                             {"group": "239.192.0.9", "device_channels": [3,4]}],
+            "uncoupled_inputs": [2],
+            "destinations": [{"channel": 101, "kind": "surround", "taps": [
+                                  {"channel": 1, "from": [1]}, {"channel": 2, "from": [2]}]},
+                             {"group": "239.192.0.9", "taps": [{"channel": 3, "from": [1, 2]},
+                                                              {"from": [1]}]}],
             "sources": [{"channel": 2001, "name": "PC", "device_channels": [1,2]},
                         {"channel": 2002}, {"name": "no channel"}],
         }));
@@ -421,6 +450,16 @@ mod tests {
         assert_eq!((c.channels_to_net, c.channels_from_net, c.tos), (4, 6, 136));
         assert_eq!(c.inputs.len(), 2);
         assert_eq!(c.inputs[1].channel, None);
+        // A tap without input is skipped.
+        assert_eq!(
+            c.inputs[1].taps,
+            vec![Tap {
+                device: None,
+                channel: 3,
+                from: vec![1, 2]
+            }]
+        );
+        assert!(c.coupled(1) && !c.coupled(2));
         assert_eq!(c.outputs.len(), 2);
         assert_eq!(c.outputs[0].device_channels, Some(vec![1, 2]));
         assert_eq!(c.outputs[1].device_channels, None);
@@ -430,16 +469,38 @@ mod tests {
         let m = DaemonConfig::from(&json!({
             "device_layout": "multi", "custom_device_names": false,
             "device": {"channels_to_net": 4, "channels_from_net": 6},
+            "uncoupled_inputs": [1],
             "destinations": [
-                {"channel": 1, "device": 1, "device_channels": [1], "mix": "sum"},
-                {"channel": 2, "kind": "surround", "device": 3, "device_channels": [1,2,3,4,5,6,7,8]}],
+                {"channel": 1, "taps": [{"device": 1, "channel": 1, "from": [1, 2]}]},
+                {"channel": 2, "kind": "surround", "taps": (1..=8)
+                    .map(|k| json!({"device": 3, "channel": k, "from": [k]})).collect::<Vec<_>>()}],
             "sources": [{"channel": 2001, "device": 2, "device_channels": [1,2]}],
         }));
         assert!(m.multi() && !m.custom_names);
         assert_eq!((m.in_devices(), m.out_devices()), (3, 2));
-        assert_eq!(m.inputs[0].mix.as_deref(), Some("sum"));
+        assert_eq!(m.inputs[0].taps[0].from, vec![1, 2]);
+        assert_eq!(m.inputs[1].taps.len(), 8);
         assert_eq!(m.outputs[0].device, Some(2));
-        assert_eq!(DaemonConfig::in_widths(&m.inputs, 3), vec![1, 2, 8]);
+        assert_eq!(
+            DaemonConfig::in_widths(&m.inputs, &m.uncoupled, 3),
+            vec![1, 2, 8]
+        );
+        // Uncoupled wins over surround; no config: stereo devices.
+        assert_eq!(DaemonConfig::in_widths(&m.inputs, &[3], 3), vec![2, 2, 1]);
+        assert_eq!(DaemonConfig::in_widths(&[], &[], 0), vec![2]);
+        assert_eq!(
+            m.inputs[0].taps[0].json(),
+            json!({"device": 1, "channel": 1, "from": [1, 2]})
+        );
+        assert_eq!(
+            Tap {
+                device: None,
+                channel: 4,
+                from: vec![]
+            }
+            .json(),
+            json!({"channel": 4, "from": []})
+        );
         assert_eq!(device_channels(3, &[1, 2, 8]), (4..=11).collect::<Vec<_>>());
         assert_eq!(device_channels(1, &[1, 2, 8]), vec![1]);
         assert!(device_channels(0, &[2]).is_empty() && device_channels(2, &[2]).is_empty());

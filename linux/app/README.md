@@ -6,11 +6,17 @@ GTK 4 and libadwaita configuration app (Rust, gtk4-rs and libadwaita-rs), x86_64
 |---|---|
 | Livewire network | Connection state, interface (automatic or forced), source advertisement |
 | Audio device | Layout ([ADR 0010](../../docs/adr/0010-macos-device-layouts.md)): two multichannel nodes “OpenLW In” and “OpenLW Out”, or one node per source, “OpenLW In n” and “OpenLW Out n” (optionally named after their source); state of the PipeWire nodes |
-| Inputs | Patch matrix (discovered, manual and unadvertised sources × input channels or input devices): stereo, left, right or L+R in mono, surround on 8 channels; per-pair or per-device meters and state, headphone preview |
+| Inputs | Patch matrix (discovered, manual and unadvertised sources × input pairs or input devices): stereo in one click on a coupled pair or device, left and right sides per input once uncoupled, surround on 8 channels; per-pair or per-device meters and state, headphone preview |
 | Outputs | One row per output pair or output device: meter, Livewire channel, advertised name, format, transmission |
 | Advanced settings | Advertised name, receive latency, DSCP |
 
-In the several-devices layout, a patch that changes a device's width (1 channel for a mono patch, 2 for stereo, 8 for surround) recreates the shared region: the app warns first, as all OpenLW nodes stop for a moment (“Do not ask again” is stored in the app preferences).
+## Input grid
+
+Input pairs (two devices: inputs 2n-1 and 2n of “OpenLW In”) and input devices (several devices: “OpenLW In n”) are coupled in stereo by default. On a coupled group, a click patches the source in stereo (a surround source: 8 inputs from the pair start, or an 8-channel device), and a click on a patched group releases it. The link button in the group header uncouples it (`set_coupling`): each input then shows two halves, L on top and R below (G and D in French); a click toggles that side of the source on that input, both sides give L+R. The same source can feed several inputs, and stereo on inputs 2-3 is possible. On uncoupled columns, a surround row still patches as a whole. Patches go to the service as crosspoints (`patch_input` with `taps`, a tap without stream channels releases its input); the configuration returns them as `taps` and `uncoupled_inputs`.
+
+Coupling a pair fed by several sources keeps the source of its first input in stereo and releases the others: the app asks first. In the several-devices layout, an uncoupled device is mono (1 channel), a coupled one stereo (2, or 8 with a surround source), and a surround source needs a coupled device. Coupling, uncoupling, and a patch that changes a device's width recreate the shared region: the app warns first, as all OpenLW nodes stop for a moment (“Do not ask again” is stored in the app preferences).
+
+The source columns (preview, channel, name, origin) stay on the left; with many inputs (16 pairs: 32 columns), the cells scroll horizontally and the window keeps its width.
 
 ## Languages
 

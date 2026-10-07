@@ -17,7 +17,7 @@
   <data name="AsioTrademark.Text" xml:space="preserve"><value>ASIO est une marque déposée de Steinberg Media Technologies GmbH.</value></data>
   <data name="InputsTitle.Text" xml:space="preserve"><value>Entrées (réseau vers ordinateur)</value></data>
   <data name="InCountLabel.Text" xml:space="preserve"><value>Canaux Livewire reçus :</value></data>
-  <data name="InputsHint.Text" xml:space="preserve"><value>Cliquez sur une case pour envoyer la source sur le pilote OpenLW : en stéréo sur la paire, ou à gauche, à droite ou G+D en mono sur cette entrée. Cliquez de nouveau pour la libérer. Le bouton casque fait écouter la source sur la sortie de Windows, sans la patcher.</value></data>
+  <data name="InputsHint.Text" xml:space="preserve"><value>Cliquez sur une case pour envoyer la source en stéréo sur cette paire du pilote OpenLW ; cliquez de nouveau pour la libérer. Le bouton de lien au-dessus d’une paire la découple : chaque entrée propose alors le côté gauche (G) et le côté droit (D) de la source, les deux pour G+D, et une source peut alimenter plusieurs entrées. Le bouton casque fait écouter la source sur la sortie de Windows, sans la patcher.</value></data>
   <data name="ManualLabel.Text" xml:space="preserve"><value>Source non annoncée, canal :</value></data>
   <data name="ManualChannel.PlaceholderText" xml:space="preserve"><value>1 à 32766</value></data>
   <data name="KindStereo.Content" xml:space="preserve"><value>Stéréo</value></data>
@@ -65,18 +65,20 @@
   <data name="KindTagBackfeed" xml:space="preserve"><value>retour</value></data>
   <data name="OriginManual" xml:space="preserve"><value>manuel</value></data>
   <data name="OriginNotAdvertised" xml:space="preserve"><value>non annoncé</value></data>
-  <data name="SendToInput" xml:space="preserve"><value>Envoyer le canal {0} sur l’entrée {1}…</value></data>
+  <data name="SendToInput" xml:space="preserve"><value>Envoyer le canal {0} sur l’entrée {1}</value></data>
   <data name="SendToInputs" xml:space="preserve"><value>Envoyer le canal {0} sur les entrées {1}-{2}</value></data>
   <data name="ReleaseInput" xml:space="preserve"><value>Libérer l’entrée {0}</value></data>
   <data name="ReleaseInputs" xml:space="preserve"><value>Libérer les entrées {0}-{1}</value></data>
   <data name="RemoveFromGrid" xml:space="preserve"><value>Retirer de la grille</value></data>
-  <data name="MenuStereo" xml:space="preserve"><value>Stéréo sur les entrées {0}-{1}</value></data>
-  <data name="MenuLeft" xml:space="preserve"><value>Gauche seule sur l’entrée {0}</value></data>
-  <data name="MenuRight" xml:space="preserve"><value>Droite seule sur l’entrée {0}</value></data>
-  <data name="MenuSum" xml:space="preserve"><value>G+D (mono) sur l’entrée {0}</value></data>
   <data name="TagLeft" xml:space="preserve"><value>G</value></data>
   <data name="TagRight" xml:space="preserve"><value>D</value></data>
   <data name="TagSum" xml:space="preserve"><value>G+D</value></data>
+  <data name="SideLeftTooltip" xml:space="preserve"><value>Côté gauche (G) du canal {0} sur l’entrée {1}</value></data>
+  <data name="SideRightTooltip" xml:space="preserve"><value>Côté droit (D) du canal {0} sur l’entrée {1}</value></data>
+  <data name="Couple" xml:space="preserve"><value>Coupler</value></data>
+  <data name="Uncouple" xml:space="preserve"><value>Découpler</value></data>
+  <data name="CoupleTitle" xml:space="preserve"><value>Coupler les entrées {0}-{1} ?</value></data>
+  <data name="CoupleText" xml:space="preserve"><value>La source de la première entrée passe en stéréo sur la paire ; les autres patchs de ces entrées sont libérés.</value></data>
   <data name="LostOutputsOne" xml:space="preserve"><value>1 émission arrêtée</value></data>
   <data name="LostOutputsMany" xml:space="preserve"><value>{0} émissions arrêtées</value></data>
   <data name="LostInputsOne" xml:space="preserve"><value>1 source retirée des entrées</value></data>

@@ -5,7 +5,7 @@
 //! interfaces every 2 s.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::net::Ipv4Addr;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -16,13 +16,13 @@ use gtk::{gio, glib};
 use serde_json::{json, Value};
 
 use crate::client::{Client, DaemonError};
-use crate::grid::{GridActions, GridHeader, GridLayout, GridPatch, GridRow, InputGrid, MenuItem};
+use crate::grid::{GridActions, GridHeader, GridLayout, GridRow, GridSides, InputGrid};
 use crate::i18n::{tr, trf};
 use crate::listener::Listener;
 use crate::meter::Meter;
 use crate::models::{
     device_channels, patch_kind, peak, DaemonConfig, DeviceMeters, DiscoveredSource, Iface,
-    InputPatch, LinkStatus, OutputPatch,
+    InputPatch, LinkStatus, OutputPatch, Tap,
 };
 use crate::settings::{ManualSource, Settings};
 
@@ -190,7 +190,7 @@ impl Window {
         // ---------- Audio device (PipeWire nodes) ----------
         let device = group(
             tr("Audio Device"),
-            tr("Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel for a mono patch, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."),
+            tr("Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel when uncoupled, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."),
         );
         // Layout: one radio row per choice (the titles are too long for a drop-down).
         let mut layout_checks: Vec<gtk::CheckButton> = Vec::new();
@@ -234,26 +234,16 @@ impl Window {
         let in_count = adw::ComboRow::builder().model(&in_count_model).build();
         inputs_group.add(&in_count);
         let grid = InputGrid::new(GridActions {
-            toggle: {
-                let weak = weak.clone();
-                Box::new(move |r, c, anchor: &gtk::Widget| {
-                    if let Some(w) = weak.upgrade() {
-                        w.toggle_input(r, c, anchor);
-                    }
-                })
-            },
+            group: Box::new(on!(weak, |w, r, h| w.toggle_group(r, h))),
+            side: Box::new(on!(weak, |w, r, c, left| w.toggle_side(r, c, left))),
+            coupling: Box::new(on!(weak, |w, h| w.toggle_coupling(h))),
             listen: Box::new(on!(weak, |w, r| w.toggle_listen(r))),
             remove: Box::new(on!(weak, |w, r| w.remove_row(r))),
         });
-        let grid_scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Automatic)
-            .vscrollbar_policy(gtk::PolicyType::Never)
-            .propagate_natural_height(true)
-            .child(grid.widget())
-            .build();
+        // The grid scrolls its cells horizontally: the card keeps the window width.
         let grid_card = gtk::Box::new(gtk::Orientation::Vertical, 0);
         grid_card.add_css_class("card");
-        grid_card.append(&grid_scroll);
+        grid_card.append(grid.widget());
         let manual = adw::PreferencesGroup::new();
         let manual_entry = adw::EntryRow::builder()
             .title(tr("Unadvertised source, channel (1 to 32766)"))
@@ -663,14 +653,14 @@ impl Window {
         self.in_count.set_title(in_title);
         self.out_count.set_title(out_title);
         if multi {
-            self.inputs_group.set_description(Some(tr("Click a cell to send the source to that device: stereo, left, right, or L+R in mono. Click again to release it. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it.")));
+            self.inputs_group.set_description(Some(tr("Click a cell to send the source to that device in stereo; click again to release it. The link button above a device uncouples it: the device becomes mono and each cell offers the left (L) and right (R) sides of the source, both for L+R. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it.")));
             self.outputs_group.set_description(Some(tr("Each “OpenLW Out n” device is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.")));
             self.out_device_row.set_title(tr("OpenLW Out n"));
             self.out_device_row.set_subtitle(tr("Choose one as the output: what applications play to it is transmitted to the network, according to the outputs set below."));
             self.in_device_row.set_title(tr("OpenLW In n"));
             self.in_device_row.set_subtitle(tr("Choose one as the input: each device receives the source patched to it in the input grid."));
         } else {
-            self.inputs_group.set_description(Some(tr("Click a cell to send the source to “OpenLW In”: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. The headphone button plays the source on the computer's audio output, without patching it.")));
+            self.inputs_group.set_description(Some(tr("Click a cell to send the source in stereo to that pair of “OpenLW In”; click again to release it. The link button above a pair uncouples it: each input then offers the left (L) and right (R) sides of the source, both for L+R, and a source can feed several inputs. The headphone button plays the source on the computer's audio output, without patching it.")));
             self.outputs_group.set_description(Some(tr("Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.")));
             self.out_device_row.set_title(tr("OpenLW Out"));
             self.out_device_row.set_subtitle(tr("Choose it as the output: what applications play to it is transmitted to the network, according to the outputs set below."));
@@ -805,8 +795,11 @@ impl Window {
             let mut seen = HashSet::new();
             let mut add = |s: DiscoveredSource, origin: &str, removable: bool| {
                 if seen.insert((s.channel, s.patch_kind().to_string())) {
+                    let (groups, sides) =
+                        grid_cells(&st.config, &st.grid_layout, s.channel, s.patch_kind());
                     rows.push(GridRow {
-                        patch: grid_patch(&st.config, s.channel, s.patch_kind()),
+                        groups,
+                        sides,
                         source: s,
                         origin: origin.into(),
                         removable,
@@ -851,7 +844,7 @@ impl Window {
             let widths = if st.meters.in_widths.len() == c.in_devices() as usize {
                 st.meters.in_widths.clone()
             } else {
-                DaemonConfig::in_widths(&c.inputs, c.in_devices())
+                DaemonConfig::in_widths(&c.inputs, &c.uncoupled, c.in_devices())
             };
             (1..=c.in_devices().max(1))
                 .map(|n| device_channels(n, &widths))
@@ -1098,20 +1091,7 @@ impl Window {
                     }
                 })
                 .count();
-            let lost_in = c
-                .inputs
-                .iter()
-                .filter(|i| {
-                    if multi {
-                        i.device.unwrap_or(0) > from_net.div_ceil(2)
-                    } else {
-                        i.device_channels
-                            .iter()
-                            .max()
-                            .is_some_and(|&m| m > from_net)
-                    }
-                })
-                .count();
+            let lost_in = lost_inputs(c, from_net);
             (lost_out, lost_in, multi)
         };
         let request = json!({"cmd": "set_device_channels", "to_net": to_net, "from_net": from_net});
@@ -1176,142 +1156,153 @@ impl Window {
         self.update_grid();
     }
 
-    /// Cell click: releases the patch under it, or offers the patch menu (stereo, left, right,
-    /// L+R); a surround source is patched on 8 channels at once.
-    fn toggle_input(self: &Rc<Self>, row: usize, column: usize, anchor: &gtk::Widget) {
-        let (r, c, columns) = {
+    /// Click on a coupled group (or on a group of a surround source): patches the source in
+    /// stereo (surround: 8 channels from the group start; uncoupled device: L+R), or releases
+    /// it from the group.
+    fn toggle_group(self: &Rc<Self>, row: usize, h: usize) {
+        let (r, c, layout) = {
             let st = self.st.borrow();
             match st.grid_rows.get(row) {
-                Some(r) => (r.clone(), st.config.clone(), st.grid_layout.columns),
+                Some(r) => (r.clone(), st.config.clone(), st.grid_layout.clone()),
                 None => return,
             }
         };
-        if column >= columns {
+        let Some(g) = layout.headers.get(h) else {
             return;
-        }
-        let s = r.source.clone();
-        let kind = s.patch_kind().to_string();
-        let current = input_patch(&c, s.channel, &kind).cloned();
-        if let (Some(p), Some(cur)) = (&r.patch, current) {
-            if p.covers(column) {
-                let mut req =
-                    json!({"cmd": "unpatch_input", "device_channels": cur.device_channels});
-                if let (Some(d), Some(o)) = (cur.device, req.as_object_mut()) {
-                    o.insert("device".into(), d.into());
-                }
-                self.patch_input(req, &s, cur.device, None);
-                return;
-            }
-        }
+        };
+        let s = &r.source;
+        let kind = s.patch_kind();
         let surround = kind == "surround";
-        let weak = Rc::downgrade(self);
-        let item = |title: String, request: Value, device: Option<u32>, width: u32| -> MenuItem {
-            let (weak, s) = (weak.clone(), s.clone());
-            let f = move || {
-                if let Some(w) = weak.upgrade() {
-                    w.patch_input(request.clone(), &s, device, Some(width));
-                }
-            };
-            (title, Rc::new(f))
-        };
-        let base = json!({"cmd": "patch_input", "channel": s.channel, "kind": kind});
-        let with = |extra: Value| {
-            let mut req = base.clone();
-            if let (Some(o), Some(e)) = (req.as_object_mut(), extra.as_object()) {
-                o.extend(e.clone());
+        let n = g.number;
+        if r.groups.contains_key(&h) || r.sides.keys().any(|k| g.columns.contains(k)) {
+            // Release: the group's inputs, or the whole surround block.
+            if c.multi() {
+                let w = DaemonConfig::in_widths(&c.inputs, &c.uncoupled, c.in_devices())
+                    .get(n as usize - 1)
+                    .copied()
+                    .unwrap_or(2);
+                let request = json!({"cmd": "unpatch_input", "device": n,
+                    "device_channels": (1..=w).collect::<Vec<u32>>()});
+                self.send(request, Some(n), None);
+            } else {
+                let block: Vec<u32> = if surround {
+                    input_patch(&c, s.channel, kind)
+                        .map(|p| p.taps.iter().map(|t| t.channel).collect())
+                        .unwrap_or_default()
+                } else {
+                    (g.columns.start as u32 + 1..=g.columns.end as u32).collect()
+                };
+                self.mutate(json!({"cmd": "unpatch_input", "device_channels": block}));
             }
-            req
-        };
-        if c.multi() {
-            let n = column as u32 + 1;
-            if surround {
-                self.patch_input(
-                    with(json!({"device": n, "device_channels": (1..=8).collect::<Vec<u32>>()})),
-                    &s,
-                    Some(n),
-                    Some(8),
-                );
-                return;
-            }
-            let mut items = vec![item(
-                trf("Stereo on In {n}", &[("n", &n)]),
-                with(json!({"device": n, "device_channels": [1, 2]})),
-                Some(n),
-                2,
-            )];
-            for (title, mix) in [
-                (tr("Left only (mono)"), "left"),
-                (tr("Right only (mono)"), "right"),
-                (tr("L+R (mono)"), "sum"),
-            ] {
-                items.push(item(
-                    title.into(),
-                    with(json!({"device": n, "mix": mix, "device_channels": [1]})),
-                    Some(n),
-                    1,
-                ));
-            }
-            self.grid.popup(anchor, items);
             return;
         }
-        let ch = column as u32 + 1;
-        let pair_first = if ch.is_multiple_of(2) { ch - 1 } else { ch };
-        let from_net = c.channels_from_net;
-        if surround {
-            if pair_first + 7 > from_net {
-                self.show_error(Some(
-                    DaemonError::Refused(trf(
-                        "a surround source takes 8 inputs. Choose a pair from 1-2 to {a}-{b}.",
-                        &[
-                            ("a", &from_net.saturating_sub(7)),
-                            ("b", &from_net.saturating_sub(6)),
-                        ],
-                    ))
-                    .message(),
-                ));
-                return;
+        match group_taps(&c, g, surround) {
+            Ok(taps) => {
+                let width = taps.len();
+                let request = json!({"cmd": "patch_input", "channel": s.channel, "kind": kind,
+                    "taps": taps.iter().map(Tap::json).collect::<Vec<_>>()});
+                self.send(request, c.multi().then_some(n), Some(width));
             }
-            self.mutate(with(
-                json!({"device_channels": (pair_first..pair_first + 8).collect::<Vec<u32>>()}),
-            ));
-            return;
+            Err(e) => self.show_error(Some(DaemonError::Refused(e).message())),
         }
-        let mut items = Vec::new();
-        if pair_first < from_net {
-            items.push(item(
-                trf(
-                    "Stereo on inputs {a}-{b}",
-                    &[("a", &pair_first), ("b", &(pair_first + 1))],
-                ),
-                with(json!({"device_channels": [pair_first, pair_first + 1]})),
-                None,
-                2,
-            ));
-        }
-        for (title, mix) in [
-            ("Left only on input {n}", "left"),
-            ("Right only on input {n}", "right"),
-            ("L+R (mono) on input {n}", "sum"),
-        ] {
-            items.push(item(
-                trf(title, &[("n", &ch)]),
-                with(json!({"mix": mix, "device_channels": [ch]})),
-                None,
-                1,
-            ));
-        }
-        self.grid.popup(anchor, items);
     }
 
-    /// Multi layout: sends an input patch (`width` `None`: unpatch), warning first if it
-    /// changes a device's width (the daemon then recreates the shared region).
-    fn patch_input(
-        self: &Rc<Self>,
-        request: Value,
-        s: &DiscoveredSource,
-        device: Option<u32>,
-        width: Option<u32>,
-    ) {
+    /// Click on one side of an uncoupled column: adds or removes that side of the source on
+    /// this input (both sides: L+R).
+    fn toggle_side(self: &Rc<Self>, row: usize, column: usize, left: bool) {
+        let (s, c) = {
+            let st = self.st.borrow();
+            match st.grid_rows.get(row) {
+                Some(r) => (r.source.clone(), st.config.clone()),
+                None => return,
+            }
+        };
+        let multi = c.multi();
+        let device = multi.then_some(column as u32 + 1);
+        let channel = if multi { 1 } else { column as u32 + 1 };
+        let current = input_patch(&c, s.channel, s.patch_kind())
+            .and_then(|p| {
+                p.taps
+                    .iter()
+                    .find(|t| t.device == device && t.channel == channel)
+            })
+            .map(|t| t.from.clone())
+            .unwrap_or_default();
+        let tap = Tap {
+            device,
+            channel,
+            from: toggled_side(&current, if left { 1 } else { 2 }),
+        };
+        // An uncoupled device stays 1 channel wide: no width warning.
+        self.mutate(
+            json!({"cmd": "patch_input", "channel": s.channel, "kind": s.patch_kind(),
+            "taps": [tap.json()]}),
+        );
+    }
+
+    /// Link button: couples or uncouples a pair (multi layout: a device, whose width changes).
+    fn toggle_coupling(self: &Rc<Self>, h: usize) {
+        let (c, g, skip) = {
+            let st = self.st.borrow();
+            match st.grid_layout.headers.get(h) {
+                Some(g) => (
+                    st.config.clone(),
+                    g.clone(),
+                    self.settings.borrow().skip_width_warning,
+                ),
+                None => return,
+            }
+        };
+        let n = g.number;
+        let coupled = c.coupled(n);
+        let request = json!({"cmd": "set_coupling", "pair": n, "coupled": !coupled});
+        if c.multi() {
+            if skip {
+                self.mutate(request);
+                return;
+            }
+            let detail = if coupled {
+                trf("“OpenLW In {n}” becomes a mono device.", &[("n", &n)])
+            } else {
+                trf("“OpenLW In {n}” becomes a stereo device.", &[("n", &n)])
+            };
+            let body = trf(
+                "{detail} Audio on all OpenLW devices stops for a moment while PipeWire publishes them again.",
+                &[("detail", &detail)],
+            );
+            let (heading, accept) = if coupled {
+                (tr("Uncouple This Device?"), tr("Uncouple"))
+            } else {
+                (tr("Couple This Device?"), tr("Couple"))
+            };
+            self.confirm(heading, &body, accept, false, true, move |w| {
+                w.mutate(request)
+            });
+            return;
+        }
+        // Coupling releases what does not fit a stereo patch of the first input's source.
+        if !coupled && coupling_releases(&c, &g) {
+            let heading = trf(
+                "Couple Inputs {a}-{b}?",
+                &[("a", &(g.columns.start + 1)), ("b", &g.columns.end)],
+            );
+            self.confirm(
+                &heading,
+                tr("The source of the first input becomes stereo on the pair; the other patches on these inputs are released."),
+                tr("Couple"),
+                true,
+                false,
+                move |w| w.mutate(request),
+            );
+            return;
+        }
+        self.mutate(request);
+    }
+
+    /// Multi layout: sends an input patch to device `device` (`width` `None`: release),
+    /// warning first if it changes a device's width (the daemon then recreates the shared
+    /// region).
+    fn send(self: &Rc<Self>, request: Value, device: Option<u32>, width: Option<usize>) {
         let (c, skip) = (
             self.st.borrow().config.clone(),
             self.settings.borrow().skip_width_warning,
@@ -1320,17 +1311,11 @@ impl Window {
             self.mutate(request);
             return;
         };
-        let changed = width_changes(&c, s, n, width);
-        let Some(&(device, from, to)) = changed.first() else {
+        let Some((device, from, to)) = width_change(&c, n, width) else {
             self.mutate(request);
             return;
         };
-        let detail = if changed.len() > 1 {
-            trf(
-                "{count} OpenLW input devices change width.",
-                &[("count", &changed.len())],
-            )
-        } else if to == 1 {
+        let detail = if to == 1 {
             trf(
                 "“OpenLW In {n}” changes from {from} channels to 1 channel.",
                 &[("n", &device), ("from", &from)],
@@ -1597,88 +1582,244 @@ impl Window {
     }
 }
 
-/// Multi layout: input devices whose width changes (device, from, to) when source `s` goes to
-/// device `n` with `width` channels (`None`: released), as the daemon would compute them.
-fn width_changes(
-    c: &DaemonConfig,
-    s: &DiscoveredSource,
-    n: u32,
-    width: Option<u32>,
-) -> Vec<(usize, u32, u32)> {
-    let kind = s.patch_kind();
+/// Multi layout: first input device whose width changes (device, from, to) when device `n`
+/// gets `width` channels of a source (`None`: released), as the daemon computes it: the
+/// device's other crosspoints go, a surround patch makes it 8 wide.
+fn width_change(c: &DaemonConfig, n: u32, width: Option<usize>) -> Option<(u32, u32, u32)> {
     let devices = c.in_devices();
-    let before = DaemonConfig::in_widths(&c.inputs, devices);
-    // After: the source leaves its device, the target device takes the new width (or empties).
+    let before = DaemonConfig::in_widths(&c.inputs, &c.uncoupled, devices);
     let mut after: Vec<InputPatch> = c
         .inputs
         .iter()
-        .filter(|i| !(i.channel == Some(s.channel) && i.kind == kind) && i.device != Some(n))
-        .cloned()
+        .map(|i| InputPatch {
+            taps: i
+                .taps
+                .iter()
+                .filter(|t| t.device != Some(n))
+                .cloned()
+                .collect(),
+            ..i.clone()
+        })
         .collect();
-    if let Some(w) = width {
+    if width == Some(8) {
         after.push(InputPatch {
-            channel: Some(s.channel),
-            kind: kind.into(),
-            device_channels: (1..=w).collect(),
-            device: Some(n),
-            mix: (w == 1).then(|| "sum".into()),
+            channel: None,
+            kind: "surround".into(),
+            taps: straight_taps(Some(n), 1, 8),
         });
     }
-    let widths = DaemonConfig::in_widths(&after, devices);
-    before
-        .iter()
-        .zip(&widths)
-        .enumerate()
-        .filter(|(_, (a, b))| a != b)
-        .map(|(i, (&a, &b))| (i + 1, a, b))
+    let widths = DaemonConfig::in_widths(&after, &c.uncoupled, devices);
+    (1..)
+        .zip(before.iter().zip(&widths))
+        .find(|(_, (a, b))| a != b)
+        .map(|(d, (&a, &b))| (d, a, b))
+}
+
+/// Taps of a source patched “as is”: stream channel i on input `first + i`.
+fn straight_taps(device: Option<u32>, first: u32, channels: u32) -> Vec<Tap> {
+    (0..channels)
+        .map(|i| Tap {
+            device,
+            channel: first + i,
+            from: vec![i + 1],
+        })
         .collect()
 }
 
-/// Configured patch of a source, if any.
+/// Crosspoints of a click on group `g`: stereo (surround: 8 channels from the group start);
+/// an uncoupled device takes L+R. Error message when the source does not fit.
+fn group_taps(c: &DaemonConfig, g: &GridHeader, surround: bool) -> Result<Vec<Tap>, String> {
+    let n = g.number;
+    if c.multi() {
+        if !c.coupled(n) {
+            if surround {
+                return Err(trf(
+                    "a surround source needs a coupled device. Couple “OpenLW In {n}” first.",
+                    &[("n", &n)],
+                ));
+            }
+            return Ok(vec![Tap {
+                device: Some(n),
+                channel: 1,
+                from: vec![1, 2],
+            }]);
+        }
+        return Ok(straight_taps(Some(n), 1, if surround { 8 } else { 2 }));
+    }
+    let from_net = c.channels_from_net;
+    let first = g.columns.start as u32 + 1;
+    let width = if surround {
+        8
+    } else {
+        (g.columns.len() as u32).clamp(1, 2)
+    };
+    if first + width - 1 > from_net {
+        return Err(trf(
+            "a surround source takes 8 inputs. Choose a pair from 1-2 to {a}-{b}.",
+            &[
+                ("a", &from_net.saturating_sub(7)),
+                ("b", &from_net.saturating_sub(6)),
+            ],
+        ));
+    }
+    Ok(straight_taps(None, first, width))
+}
+
+/// Stream channels of a tap after a click on side `side` (1 left, 2 right): toggled.
+fn toggled_side(current: &[u32], side: u32) -> Vec<u32> {
+    let mut from: Vec<u32> = current.iter().copied().filter(|&k| k != side).collect();
+    if from.len() == current.len() {
+        from.push(side);
+        from.sort_unstable();
+    }
+    from
+}
+
+/// Duplex layout: coupling pair `g` releases patches (several sources feed its inputs).
+fn coupling_releases(c: &DaemonConfig, g: &GridHeader) -> bool {
+    let inputs = g.columns.start as u32 + 1..=g.columns.end as u32;
+    c.inputs
+        .iter()
+        .filter(|i| {
+            i.taps
+                .iter()
+                .any(|t| t.device.is_none() && inputs.contains(&t.channel))
+        })
+        .count()
+        > 1
+}
+
+/// Received sources left without crosspoints with `from_net` input channels (multi layout:
+/// `from_net / 2` devices).
+fn lost_inputs(c: &DaemonConfig, from_net: u32) -> usize {
+    let multi = c.multi();
+    c.inputs
+        .iter()
+        .filter(|i| {
+            !i.taps.is_empty()
+                && i.taps.iter().all(|t| {
+                    if multi {
+                        t.device.unwrap_or(0) > from_net.div_ceil(2)
+                    } else {
+                        t.channel > from_net
+                    }
+                })
+        })
+        .count()
+}
+
+/// Configured received stream of a source, if any.
 fn input_patch<'a>(c: &'a DaemonConfig, channel: u16, kind: &str) -> Option<&'a InputPatch> {
     c.inputs
         .iter()
-        .find(|i| i.channel == Some(channel) && i.kind == kind && !i.device_channels.is_empty())
+        .find(|i| i.channel == Some(channel) && i.kind == kind)
 }
 
-/// Grid patch of a source: device column (multi layout) or channel span (duplex layout).
-fn grid_patch(c: &DaemonConfig, channel: u16, kind: &str) -> Option<GridPatch> {
-    let p = input_patch(c, channel, kind)?;
-    let first = *p.device_channels.iter().min()?;
-    let tag = match p.mix.as_deref() {
-        Some("left") => tr("L"),
-        Some("right") => tr("R"),
-        Some("sum") => tr("L+R"),
-        _ if p.kind == "surround" => "8",
-        _ => "",
+/// Tag of a stereo tap on a coupled group: L, R, L+R, or the stream channels.
+fn side_tag(from: &[u32]) -> String {
+    match from {
+        [1] => tr("L").into(),
+        [2] => tr("R").into(),
+        [1, 2] => tr("L+R").into(),
+        _ => from
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join("+"),
     }
-    .to_string();
-    if c.multi() {
-        let d = p.device?;
-        return Some(GridPatch {
-            column: d.checked_sub(1)? as usize,
-            span: 1,
-            tag,
-        });
+}
+
+/// Crosspoints of a source as drawn: coupled groups (header → tag, empty for plain stereo;
+/// every group of a surround source) and uncoupled columns (column → sides).
+fn grid_cells(
+    c: &DaemonConfig,
+    layout: &GridLayout,
+    channel: u16,
+    kind: &str,
+) -> (BTreeMap<usize, String>, BTreeMap<usize, GridSides>) {
+    let (mut groups, mut sides) = (BTreeMap::new(), BTreeMap::new());
+    let Some(p) = input_patch(c, channel, kind) else {
+        return (groups, sides);
+    };
+    let multi = c.multi();
+    let stereo = p.kind != "surround";
+    for (h, g) in layout.headers.iter().enumerate() {
+        // Taps of this group (multi: the device's).
+        let taps: Vec<&Tap> = p
+            .taps
+            .iter()
+            .filter(|t| {
+                if multi {
+                    t.device == Some(g.number)
+                } else {
+                    t.device.is_none()
+                        && (t.channel as usize)
+                            .checked_sub(1)
+                            .is_some_and(|i| g.columns.contains(&i))
+                }
+            })
+            .collect();
+        if taps.is_empty() {
+            continue;
+        }
+        if g.coupled || !stereo {
+            let first = if multi { 1 } else { g.columns.start as u32 + 1 };
+            let plain = stereo
+                && taps.len() == 2
+                && taps.iter().all(|t| {
+                    t.from.len() == 1
+                        && t.channel.checked_sub(first).map(|d| d + 1) == t.from.first().copied()
+                });
+            let tag = if plain {
+                String::new()
+            } else if stereo {
+                taps.iter()
+                    .map(|t| side_tag(&t.from))
+                    .collect::<Vec<_>>()
+                    .join("·")
+            } else {
+                let firsts = taps.iter().filter_map(|t| t.from.first().copied());
+                let (lo, hi) = (firsts.clone().min(), firsts.max());
+                match (lo, hi) {
+                    (Some(lo), Some(hi)) if lo != hi => format!("{lo}-{hi}"),
+                    (Some(lo), _) => lo.to_string(),
+                    _ => String::new(),
+                }
+            };
+            groups.insert(h, tag);
+        } else {
+            for t in taps {
+                let col = if multi {
+                    g.columns.start
+                } else {
+                    t.channel as usize - 1
+                };
+                sides.insert(
+                    col,
+                    GridSides {
+                        left: t.from.contains(&1),
+                        right: t.from.contains(&2),
+                    },
+                );
+            }
+        }
     }
-    Some(GridPatch {
-        column: first.checked_sub(1)? as usize,
-        span: p.device_channels.len(),
-        tag,
-    })
+    (groups, sides)
 }
 
 /// Grid columns and header groups: device channels in pairs (duplex), or devices (multi).
 fn grid_layout(c: &DaemonConfig) -> GridLayout {
     if c.multi() {
-        let n = c.in_devices().max(1) as usize;
+        let n = c.in_devices().max(1);
         return GridLayout {
             multi: true,
-            columns: n,
-            headers: (0..n)
-                .map(|i| GridHeader {
-                    columns: i..i + 1,
-                    title: trf("In {n}", &[("n", &(i + 1))]),
+            columns: n as usize,
+            headers: (1..=n)
+                .map(|d| GridHeader {
+                    columns: d as usize - 1..d as usize,
+                    title: trf("In {n}", &[("n", &d)]),
+                    number: d,
+                    coupled: c.coupled(d),
                 })
                 .collect(),
         };
@@ -1691,6 +1832,7 @@ fn grid_layout(c: &DaemonConfig) -> GridLayout {
             .step_by(2)
             .map(|a| {
                 let b = (a + 1).min(ch);
+                let number = a.div_ceil(2) as u32;
                 GridHeader {
                     columns: a - 1..b,
                     title: if a == b {
@@ -1698,6 +1840,8 @@ fn grid_layout(c: &DaemonConfig) -> GridLayout {
                     } else {
                         trf("Inputs {a}-{b}", &[("a", &a), ("b", &b)])
                     },
+                    number,
+                    coupled: c.coupled(number),
                 }
             })
             .collect(),
@@ -1935,53 +2079,129 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn tap(device: Option<u32>, channel: u32, from: &[u32]) -> Tap {
+        Tap {
+            device,
+            channel,
+            from: from.to_vec(),
+        }
+    }
+
     #[test]
-    fn grid_geometry_and_patches() {
+    fn grid_geometry_and_crosspoints() {
         let duplex = DaemonConfig::from(&json!({
             "device": {"channels_from_net": 6},
+            "uncoupled_inputs": [3],
             "destinations": [
-                {"channel": 1, "device_channels": [3, 4]},
-                {"channel": 2, "device_channels": [5], "mix": "right"},
-                {"channel": 3, "kind": "surround", "device_channels": []}],
+                {"channel": 1, "taps": [{"channel": 3, "from": [1]}, {"channel": 4, "from": [2]}]},
+                {"channel": 2, "taps": [{"channel": 1, "from": [2]}, {"channel": 2, "from": [1]},
+                                        {"channel": 5, "from": [1]}, {"channel": 6, "from": [1, 2]}]},
+                {"channel": 3, "kind": "surround", "taps": []}],
         }));
         let l = grid_layout(&duplex);
         assert_eq!((l.multi, l.columns, l.headers.len()), (false, 6, 3));
         assert_eq!(l.headers[1].columns, 2..4);
         assert_eq!(
-            grid_patch(&duplex, 1, "stereo"),
-            Some(GridPatch {
-                column: 2,
-                span: 2,
-                tag: String::new()
-            })
+            l.headers
+                .iter()
+                .map(|h| (h.number, h.coupled))
+                .collect::<Vec<_>>(),
+            vec![(1, true), (2, true), (3, false)]
+        );
+        // Plain stereo on pair 3-4.
+        let (groups, sides) = grid_cells(&duplex, &l, 1, "stereo");
+        assert_eq!(groups, BTreeMap::from([(1, String::new())]));
+        assert!(sides.is_empty());
+        // Swapped on coupled pair 1-2; L on input 5 and L+R on input 6 (uncoupled pair).
+        let (groups, sides) = grid_cells(&duplex, &l, 2, "stereo");
+        assert_eq!(groups, BTreeMap::from([(0, "R·L".to_string())]));
+        let side = |left, right| GridSides { left, right };
+        assert_eq!(
+            sides,
+            BTreeMap::from([(4, side(true, false)), (5, side(true, true))])
+        );
+        // Received, unpatched.
+        let (groups, sides) = grid_cells(&duplex, &l, 3, "surround");
+        assert!(groups.is_empty() && sides.is_empty());
+
+        let mut wide = DaemonConfig::from(&json!({
+            "device": {"channels_from_net": 10},
+            "uncoupled_inputs": [2],
+            "destinations": [{"channel": 9, "kind": "surround", "taps": (1..=8)
+                .map(|k| json!({"channel": k + 2, "from": [k]})).collect::<Vec<_>>()}],
+        }));
+        let l = grid_layout(&wide);
+        // Surround: one target per group, even uncoupled, tagged with its stream channels.
+        let (groups, sides) = grid_cells(&wide, &l, 9, "surround");
+        assert_eq!(
+            groups.into_iter().collect::<Vec<_>>(),
+            vec![
+                (1, "1-2".to_string()),
+                (2, "3-4".to_string()),
+                (3, "5-6".to_string()),
+                (4, "7-8".to_string())
+            ]
+        );
+        assert!(sides.is_empty());
+        // Surround from pair 7-8 does not fit in 10 inputs; stereo on a pair does.
+        assert!(group_taps(&wide, &l.headers[3], true).is_err());
+        assert_eq!(
+            group_taps(&wide, &l.headers[1], true).unwrap(),
+            straight_taps(None, 3, 8)
         );
         assert_eq!(
-            grid_patch(&duplex, 2, "stereo"),
-            Some(GridPatch {
-                column: 4,
-                span: 1,
-                tag: "R".into()
-            })
+            group_taps(&wide, &l.headers[4], false).unwrap(),
+            vec![tap(None, 9, &[1]), tap(None, 10, &[2])]
         );
-        assert_eq!(grid_patch(&duplex, 3, "surround"), None);
+        // Coupling pair 3-4 releases patches only when several sources feed it.
+        assert!(!coupling_releases(&wide, &l.headers[1]));
+        wide.inputs.push(InputPatch {
+            channel: Some(7),
+            kind: "stereo".into(),
+            taps: vec![tap(None, 4, &[1, 2])],
+        });
+        assert!(coupling_releases(&wide, &l.headers[1]));
+        assert!(!coupling_releases(&wide, &l.headers[0]));
 
         let multi = DaemonConfig::from(&json!({
             "device_layout": "multi",
-            "device": {"channels_from_net": 4},
+            "device": {"channels_from_net": 6},
+            "uncoupled_inputs": [3],
             "destinations": [
-                {"channel": 5, "kind": "surround", "device": 2, "device_channels": [1,2,3,4,5,6,7,8]}],
+                {"channel": 5, "kind": "surround", "taps": (1..=8)
+                    .map(|k| json!({"device": 2, "channel": k, "from": [k]})).collect::<Vec<_>>()},
+                {"channel": 6, "taps": [{"device": 1, "channel": 1, "from": [1]},
+                                        {"device": 1, "channel": 2, "from": [2]},
+                                        {"device": 3, "channel": 1, "from": [2]}]}],
         }));
         let l = grid_layout(&multi);
-        assert_eq!((l.multi, l.columns), (true, 2));
+        assert_eq!((l.multi, l.columns), (true, 3));
         assert_eq!(l.headers[1].title, "In 2");
+        assert!(l.headers[0].coupled && !l.headers[2].coupled);
+        let (groups, _) = grid_cells(&multi, &l, 5, "surround");
+        assert_eq!(groups, BTreeMap::from([(1, "1-8".to_string())]));
+        let (groups, sides) = grid_cells(&multi, &l, 6, "stereo");
+        assert_eq!(groups, BTreeMap::from([(0, String::new())]));
+        assert_eq!(sides, BTreeMap::from([(2, side(false, true))]));
+        // Clicks: stereo on a coupled device, L+R on an uncoupled one, no surround there.
         assert_eq!(
-            grid_patch(&multi, 5, "surround"),
-            Some(GridPatch {
-                column: 1,
-                span: 1,
-                tag: "8".into()
-            })
+            group_taps(&multi, &l.headers[0], false).unwrap(),
+            straight_taps(Some(1), 1, 2)
         );
+        assert_eq!(
+            group_taps(&multi, &l.headers[2], false).unwrap(),
+            vec![tap(Some(3), 1, &[1, 2])]
+        );
+        assert!(group_taps(&multi, &l.headers[2], true).is_err());
+        assert_eq!(group_taps(&multi, &l.headers[1], true).unwrap().len(), 8);
+    }
+
+    #[test]
+    fn side_toggles() {
+        assert_eq!(toggled_side(&[], 1), vec![1]);
+        assert_eq!(toggled_side(&[2], 1), vec![1, 2]);
+        assert_eq!(toggled_side(&[1, 2], 1), vec![2]);
+        assert_eq!(toggled_side(&[2], 2), Vec::<u32>::new());
     }
 
     #[test]
@@ -1989,23 +2209,37 @@ mod tests {
         let c = DaemonConfig::from(&json!({
             "device_layout": "multi",
             "device": {"channels_from_net": 6},
+            "uncoupled_inputs": [2],
             "destinations": [
-                {"channel": 101, "device": 2, "device_channels": [1], "mix": "left"},
-                {"channel": 2204, "device": 1, "device_channels": [1, 2]}],
+                {"channel": 101, "taps": [{"device": 2, "channel": 1, "from": [1]}]},
+                {"channel": 2204, "taps": [{"device": 1, "channel": 1, "from": [1]},
+                                           {"device": 1, "channel": 2, "from": [2]}]},
+                {"channel": 300, "kind": "surround", "taps": (1..=8)
+                    .map(|k| json!({"device": 3, "channel": k, "from": [k]})).collect::<Vec<_>>()}],
         }));
-        let s = |ch| DiscoveredSource::manual(ch, "stereo");
-        // Mono source moves from In 2 to In 3: both change width.
         assert_eq!(
-            width_changes(&c, &s(101), 3, Some(1)),
-            vec![(2, 1, 2), (3, 2, 1)]
+            DaemonConfig::in_widths(&c.inputs, &c.uncoupled, 3),
+            vec![2, 1, 8]
         );
-        // Stereo on an empty device: geometry kept.
-        assert!(width_changes(&c, &s(2204), 3, Some(2)).is_empty());
-        // Releasing the mono patch: In 2 goes back to 2 channels.
-        assert_eq!(width_changes(&c, &s(101), 2, None), vec![(2, 1, 2)]);
-        // Surround replaces the stereo source on In 1.
-        let sur = DiscoveredSource::manual(300, "surround");
-        assert_eq!(width_changes(&c, &sur, 1, Some(8)), vec![(1, 2, 8)]);
+        // Stereo on a stereo device, or anything on an uncoupled device: geometry kept.
+        assert_eq!(width_change(&c, 1, Some(2)), None);
+        assert_eq!(width_change(&c, 2, Some(1)), None);
+        assert_eq!(width_change(&c, 2, None), None);
+        // Surround on In 1: 2 to 8 channels; stereo replacing the surround on In 3: 8 to 2.
+        assert_eq!(width_change(&c, 1, Some(8)), Some((1, 2, 8)));
+        assert_eq!(width_change(&c, 3, Some(2)), Some((3, 8, 2)));
+        assert_eq!(width_change(&c, 3, None), Some((3, 8, 2)));
+        // Fewer devices: sources left without crosspoints.
+        assert_eq!(lost_inputs(&c, 4), 1);
+        assert_eq!(lost_inputs(&c, 2), 2);
+        let duplex = DaemonConfig::from(&json!({
+            "device": {"channels_from_net": 8},
+            "destinations": [
+                {"channel": 1, "taps": [{"channel": 1, "from": [1]}, {"channel": 7, "from": [2]}]},
+                {"channel": 2, "taps": [{"channel": 5, "from": [1]}]},
+                {"channel": 3, "taps": []}],
+        }));
+        assert_eq!(lost_inputs(&duplex, 4), 1);
     }
 
     #[test]
@@ -2017,12 +2251,7 @@ mod tests {
             .chain(&FORMATS)
             .chain(&MANUAL_KINDS)
             .map(|(_, t)| *t)
-            .chain(DSCPS.iter().map(|(_, t)| *t))
-            .chain([
-                "Left only on input {n}",
-                "Right only on input {n}",
-                "L+R (mono) on input {n}",
-            ]);
+            .chain(DSCPS.iter().map(|(_, t)| *t));
         for t in texts {
             assert!(fr.contains_key(t), "missing in fr.po: {t:?}");
         }

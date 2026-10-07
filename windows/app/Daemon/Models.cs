@@ -69,9 +69,23 @@ public sealed record DiscoveredSource(int Channel, string Name, string Stream, s
     public string PatchKind => Kind is "stereo" or "backfeed" or "surround" ? Kind : "stereo";
 }
 
-/// Configured received stream (destination). `Mix`: mono patch of a stereo or backfeed stream
-/// onto one device channel (“left”, “right”, “sum”), null otherwise.
-public sealed record InputPatch(int? Channel, string? Group, string Kind, List<int> DeviceChannels, string? Mix);
+/// Crosspoint: one driver input (1-based `Channel`) fed by stream channels (1-based `From`:
+/// [1] left, [2] right, [1, 2] L+R, [k] surround channel k; empty in a request: release).
+public sealed record Tap(int Channel, List<int> From)
+{
+    public static Tap? Parse(JsonNode n) =>
+        Json.IntOrNull(n, "channel") is int ch ? new Tap(ch, Json.Ints(n, "from")) : null;
+
+    public JsonObject ToJson() => new()
+    {
+        ["channel"] = Channel,
+        ["from"] = new JsonArray(From.Select(f => (JsonNode?)JsonValue.Create(f)).ToArray()),
+    };
+}
+
+/// Configured received stream (destination) and its crosspoints (none: received for
+/// statistics only).
+public sealed record InputPatch(int? Channel, string? Group, string Kind, List<Tap> Taps);
 
 /// Configured transmitted stream (source).
 public sealed record OutputPatch(int Channel, string Name, string Format, List<int>? DeviceChannels);
@@ -87,6 +101,11 @@ public sealed class DaemonConfig
     public string TerminalName { get; init; } = "";
     public string Latency { get; init; } = "normal";
     public int Tos { get; init; } = 184;
+    /// Input pairs (pair n = inputs 2n − 1 and 2n) not coupled in stereo.
+    public HashSet<int> Uncoupled { get; init; } = [];
+
+    /// Pair `n` (1-based) coupled in stereo (the default).
+    public bool Coupled(int n) => !Uncoupled.Contains(n);
 
     /// Automatically selected interface.
     public bool AutoIface => Iface.Length == 0 || Iface == "auto";
@@ -104,8 +123,9 @@ public sealed class DaemonConfig
             ChannelsToNet = Json.Int(dev, "channels_to_net", 2),
             ChannelsFromNet = Json.Int(dev, "channels_from_net", 2),
             Inputs = Json.Objects(c, "destinations").Select(d => new InputPatch(Json.IntOrNull(d, "channel"),
-                Json.StrOrNull(d, "group"), Json.Str(d, "kind", "stereo"), Json.Ints(d, "device_channels"),
-                Json.StrOrNull(d, "mix"))).ToList(),
+                Json.StrOrNull(d, "group"), Json.Str(d, "kind", "stereo"),
+                Json.Objects(d, "taps").Select(Tap.Parse).OfType<Tap>().ToList())).ToList(),
+            Uncoupled = [.. Json.Ints(c, "uncoupled_inputs")],
             Outputs = Json.Objects(c, "sources").Where(s => Json.IntOrNull(s, "channel") is not null)
                 .Select(s => new OutputPatch(Json.Int(s, "channel"), Json.Str(s, "name"), Json.Str(s, "format", "standard"),
                     s["device_channels"] is JsonArray ? Json.Ints(s, "device_channels") : null)).ToList(),

@@ -203,6 +203,13 @@ enum CtlCmd {
     },
     /// Layout (macOS, Linux): duplex (one OpenLW device) or multi (OpenLW In n / OpenLW Out n).
     SetLayout { layout: String },
+    /// Couple input pair (multi layout: input device) N in stereo, or uncouple it.
+    SetCoupling {
+        #[arg(long)]
+        pair: u16,
+        #[arg(long, action = clap::ArgAction::Set)]
+        coupled: bool,
+    },
     /// Multi layout: name devices after their source (otherwise OpenLW In n).
     SetNaming {
         #[arg(action = clap::ArgAction::Set)]
@@ -548,6 +555,9 @@ fn run(cli: Cli) -> Res {
                 }
                 CtlCmd::SetLayout { layout } => {
                     serde_json::json!({ "cmd": "set_device_layout", "layout": layout })
+                }
+                CtlCmd::SetCoupling { pair, coupled } => {
+                    serde_json::json!({ "cmd": "set_coupling", "pair": pair, "coupled": coupled })
                 }
                 CtlCmd::SetNaming { enabled } => {
                     serde_json::json!({ "cmd": "set_device_naming", "enabled": enabled })

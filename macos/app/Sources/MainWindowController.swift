@@ -58,7 +58,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     private let outputsHint = NSTextField(wrappingLabelWithString: "")
     /// Width-change warning not to be shown again (UserDefaults).
     private static let widthWarningKey = "skipWidthWarning"
-    private let grid = InputGridView()
+    private let grid = InputMatrixView()
     private let manualChannel = NSTextField()
     private let manualKind = NSPopUpButton()
 
@@ -199,7 +199,9 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         hint.textColor = .secondaryLabelColor
 
         grid.translatesAutoresizingMaskIntoConstraints = false
-        grid.onToggle = { [weak self] row, col, point in self?.toggleInput(row: row, column: col, at: point) }
+        grid.onGroup = { [weak self] row, header in self?.toggleGroup(row: row, header: header) }
+        grid.onSide = { [weak self] row, col, left in self?.toggleSide(row: row, column: col, left: left) }
+        grid.onCoupling = { [weak self] header in self?.toggleCoupling(header: header) }
         grid.onListen = { [weak self] row in self?.toggleListen(row: row) }
         grid.onRemove = { [weak self] row in self?.removeRow(row) }
 
@@ -225,6 +227,7 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         embed(v, in: panel.content)
         hint.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
         countRow.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
+        grid.widthAnchor.constraint(equalTo: v.widthAnchor).isActive = true
         return panel
     }
 
@@ -435,8 +438,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             }
         }
         inputsHint.stringValue = multi
-            ? L("Click a cell to send the source to that device: stereo, left, right, or L+R in mono. Click again to release it. Applications record from “OpenLW In n”. The headphone button plays the source on the Mac's output without patching it.")
-            : L("Click a cell to send the source to the OpenLW device: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. Applications record from “OpenLW”. The headphone button plays the source on the Mac's output without patching it.")
+            ? L("Click a cell to send the source to that device in stereo; click again to release it. The link button above a device uncouples it: the device becomes mono and each cell offers the left (L) and right (R) sides of the source, both for L+R. Applications record from “OpenLW In n”. The headphone button plays the source on the Mac's output without patching it.")
+            : L("Click a cell to send the source in stereo to that pair of the OpenLW device; click again to release it. The link button above a pair uncouples it: each input then offers the left (L) and right (R) sides of the source, both for L+R, and a source can feed several inputs. Applications record from “OpenLW”. The headphone button plays the source on the Mac's output without patching it.")
         outputsHint.stringValue = multi
             ? L("Choose “OpenLW Out n” as the output of the Mac or of your application. Each device is transmitted on the Livewire channel of your choice, under the name entered. Changes apply while Transmit is checked.")
             : L("Choose “OpenLW” as the output of the Mac or of your application. Each output pair is transmitted on the Livewire channel of your choice, under the name entered. Changes apply while Transmit is checked.")
@@ -623,29 +626,63 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
     /// Matrix rows: discovered sources, configured unadvertised streams, then manual entries.
     private var gridRows: [GridRow] = []
 
-    /// Configured patch of a source, if any.
+    /// Configured received stream of a source, if any.
     private func inputPatch(channel: Int, kind: String) -> InputPatch? {
-        config.inputs.first { $0.channel == channel && $0.kind == kind && !$0.deviceChannels.isEmpty }
+        config.inputs.first { $0.channel == channel && $0.kind == kind }
     }
 
-    private static func mixTag(_ mix: String?) -> String? {
-        switch mix {
-        case "left": return "L"
-        case "right": return "R"
-        case "sum": return "L+R"
-        default: return nil
-        }
-    }
-
-    /// Grid patch: device column (multi layout) or channel span (duplex layout).
-    private func gridPatch(channel: Int, kind: String) -> GridPatch? {
-        guard let p = inputPatch(channel: channel, kind: kind), let first = p.deviceChannels.min() else { return nil }
-        let tag = Self.mixTag(p.mix) ?? (p.kind == "surround" ? "8" : "")
+    /// Header groups: pairs (duplex layout) or input devices (multi layout): columns, title,
+    /// concatenated device channels (meters, route state), pair or device number.
+    private func headerGroups() -> [(columns: Range<Int>, title: String, channels: [Int], number: Int)] {
         if config.multi {
-            guard let d = p.device else { return nil }
-            return GridPatch(column: d - 1, span: 1, tag: tag)
+            let widths = meters.inWidths.count == config.inDevices ? meters.inWidths
+                : DaemonConfig.inWidths(config.inputs, uncoupled: config.uncoupled, devices: config.inDevices)
+            return (1...max(1, config.inDevices)).map { n in
+                (n - 1..<n, L("In %@", "\(n)"), DeviceMeters.channels(device: n, widths: widths), n)
+            }
         }
-        return GridPatch(column: first - 1, span: p.deviceChannels.count, tag: p.mix == nil && p.kind != "surround" ? "" : tag)
+        return stride(from: 1, through: config.channelsFromNet, by: 2).map { a in
+            let b = min(a + 1, config.channelsFromNet)
+            return (a - 1..<b, a == b ? L("Input %@", "\(a)") : L("Inputs %@-%@", "\(a)", "\(b)"), Array(a...b), (a + 1) / 2)
+        }
+    }
+
+    private static func sideTag(_ from: [Int], stereo: Bool) -> String {
+        switch (stereo, from) {
+        case (true, [1]): return L("L")
+        case (true, [2]): return L("R")
+        case (true, [1, 2]): return L("L+R")
+        default: return from.map(String.init).joined(separator: "+")
+        }
+    }
+
+    /// Crosspoints of a source as drawn: coupled groups and uncoupled sides.
+    private func gridCells(_ s: DiscoveredSource) -> (groups: [Int: String], sides: [Int: GridSides]) {
+        guard let p = inputPatch(channel: s.channel, kind: s.patchKind), !p.taps.isEmpty else { return ([:], [:]) }
+        let stereo = p.kind != "surround"
+        var groups: [Int: String] = [:]
+        var sides: [Int: GridSides] = [:]
+        for (h, g) in headerGroups().enumerated() {
+            // Taps of this group, by column (multi: the device's channel 1 for the sides).
+            let taps = p.taps.filter { t in
+                config.multi ? t.device == g.number : g.columns.contains(t.channel - 1)
+            }
+            guard !taps.isEmpty else { continue }
+            if config.coupled(g.number) || !stereo {
+                let plain = stereo && taps.count == 2 && taps.allSatisfy { t in
+                    let first = config.multi ? 1 : g.columns.lowerBound + 1
+                    return t.from == [t.channel - first + 1]
+                }
+                groups[h] = plain ? "" : stereo ? taps.map { Self.sideTag($0.from, stereo: true) }.joined(separator: "·")
+                    : "\(taps.compactMap { $0.from.first }.min() ?? 1)-\(taps.compactMap { $0.from.first }.max() ?? 8)"
+            } else {
+                for t in taps {
+                    let col = config.multi ? g.columns.lowerBound : t.channel - 1
+                    sides[col] = GridSides(left: t.from.contains(1), right: t.from.contains(2))
+                }
+            }
+        }
+        return (groups, sides)
     }
 
     /// Configured transmitted stream of an output row.
@@ -660,7 +697,8 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
             let key = "\(s.channel)/\(s.patchKind)"
             guard !seen.contains(key) else { return }
             seen.insert(key)
-            rows.append(GridRow(source: s, patch: gridPatch(channel: s.channel, kind: s.patchKind),
+            let cells = gridCells(s)
+            rows.append(GridRow(source: s, groups: cells.groups, sides: cells.sides,
                                 origin: origin, removable: removable))
         }
         for s in discovered { add(s, origin: s.terminal, removable: false) }
@@ -677,25 +715,12 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
 
     private func updateMeters() {
         grid.listenLevel = listening == nil ? nil : listener.takePeak()
-        // Concatenated channels (meters, route state) of each header group.
-        let groups: [(Range<Int>, String, [Int])]
-        if config.multi {
-            let widths = meters.inWidths.count == config.inDevices ? meters.inWidths
-                : DaemonConfig.inWidths(config.inputs, devices: config.inDevices)
-            groups = (1...max(1, config.inDevices)).map { n in
-                (n - 1..<n, L("In %@", "\(n)"), DeviceMeters.channels(device: n, widths: widths))
-            }
-        } else {
-            groups = stride(from: 1, through: config.channelsFromNet, by: 2).map { a in
-                let b = min(a + 1, config.channelsFromNet)
-                return (a - 1..<b, a == b ? L("Input %@", "\(a)") : L("Inputs %@-%@", "\(a)", "\(b)"), Array(a...b))
-            }
-        }
-        grid.headers = groups.map { range, title, chs in
-            let primed = meters.inputsPrimed.first { !Set($0.key).isDisjoint(with: chs) }?.value
-            return GridHeader(columns: range, title: title,
-                              levels: chs.map { DeviceMeters.peak(meters.fromNet, channels: [$0]) },
-                              status: primed.map { $0 ? L("receiving audio") : L("waiting") } ?? L("free"))
+        grid.headers = headerGroups().map { g in
+            let primed = meters.inputsPrimed.first { !Set($0.key).isDisjoint(with: g.channels) }?.value
+            return GridHeader(columns: g.columns, title: g.title,
+                              levels: g.channels.map { DeviceMeters.peak(meters.fromNet, channels: [$0]) },
+                              status: primed.map { $0 ? L("receiving audio") : L("waiting") } ?? L("free"),
+                              coupled: config.coupled(g.number))
         }
         let outWidths = meters.outWidths.count == outputRows.count ? meters.outWidths : Array(repeating: 2, count: outputRows.count)
         for row in outputRows {
@@ -738,7 +763,9 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         guard toNet != config.channelsToNet || fromNet != config.channelsFromNet else { return }
         let multi = config.multi
         let lostOut = config.outputs.filter { multi ? ($0.device ?? 0) > (toNet + 1) / 2 : ($0.deviceChannels?.max() ?? 0) > toNet }.count
-        let lostIn = config.inputs.filter { multi ? ($0.device ?? 0) > (fromNet + 1) / 2 : ($0.deviceChannels.max() ?? 0) > fromNet }.count
+        let lostIn = config.inputs.filter { p in
+            !p.taps.isEmpty && p.taps.allSatisfy { multi ? ($0.device ?? 0) > (fromNet + 1) / 2 : $0.channel > fromNet }
+        }.count
         if lostOut + lostIn > 0, let window = window {
             let alert = NSAlert()
             alert.messageText = multi ? L("Reduce the number of devices?") : L("Reduce the number of channels?")
@@ -821,92 +848,130 @@ final class MainWindowController: NSWindowController, NSTextFieldDelegate, NSWin
         updateGrid()
     }
 
-    private func toggleInput(row: Int, column: Int, at point: NSPoint) {
-        guard row < gridRows.count, column < grid.columns else { return }
+    /// Stream fields of a patch request for source `s`.
+    private func streamFields(_ s: DiscoveredSource) -> [String: Any] {
+        ["channel": s.channel, "kind": s.patchKind]
+    }
+
+    /// Click on a coupled group (or on a surround source): patch the source in stereo (or its
+    /// 8 channels from the group start), or release it from the group.
+    private func toggleGroup(row: Int, header h: Int) {
+        let groups = headerGroups()
+        guard row < gridRows.count, h < groups.count else { return }
         let r = gridRows[row]
         let s = r.source
-        if let p = r.patch, p.covers(column), let cur = inputPatch(channel: s.channel, kind: s.patchKind) {
-            var req: [String: Any] = ["cmd": "unpatch_input", "device_channels": cur.deviceChannels]
-            if let d = cur.device { req["device"] = d }
-            patchInput(req, source: s, device: cur.device, width: nil)
+        let g = groups[h]
+        let surround = s.patchKind == "surround"
+        let n = g.number
+        if r.groups[h] != nil || r.sides.keys.contains(where: g.columns.contains) {
+            // Release: the group's inputs, or the whole surround block.
+            if config.multi {
+                let w = DaemonConfig.inWidths(config.inputs, uncoupled: config.uncoupled, devices: config.inDevices)[n - 1]
+                send(["cmd": "unpatch_input", "device": n, "device_channels": Array(1...w)], source: s, device: n, width: nil)
+            } else {
+                let block = surround ? (inputPatch(channel: s.channel, kind: s.patchKind)?.taps.map(\.channel) ?? [])
+                    : Array((g.columns.lowerBound + 1)...g.columns.upperBound)
+                mutate(["cmd": "unpatch_input", "device_channels": block])
+            }
             return
         }
-        let surround = s.patchKind == "surround"
+        var taps: [Tap]
         if config.multi {
-            let n = column + 1
-            if surround {
-                patchInput(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind, "device": n,
-                            "device_channels": Array(1...8)], source: s, device: n, width: 8)
+            if surround && !config.coupled(n) {
+                show(.refused(L("a surround source needs a coupled device. Couple “OpenLW In %@” first.", "\(n)")))
                 return
             }
-            let menu = NSMenu()
-            for (title, mix) in [(L("Stereo on In %@", "\(n)"), nil), (L("Left only (mono)"), "left"),
-                                 (L("Right only (mono)"), "right"), (L("L+R (mono)"), "sum")] as [(String, String?)] {
-                menu.addItem(ClosureItem(title) { [weak self] in
-                    var req: [String: Any] = ["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind, "device": n,
-                                              "device_channels": mix == nil ? [1, 2] : [1]]
-                    if let m = mix { req["mix"] = m }
-                    self?.patchInput(req, source: s, device: n, width: mix == nil ? 2 : 1)
-                })
-            }
-            menu.popUp(positioning: nil, at: point, in: grid)
-            return
-        }
-        let ch = column + 1
-        let pairFirst = ch % 2 == 0 ? ch - 1 : ch
-        if surround {
-            guard pairFirst + 7 <= config.channelsFromNet else {
+            taps = (1...(surround ? 8 : 2)).map { Tap(device: n, channel: $0, from: [$0]) }
+            if !config.coupled(n) { taps = [Tap(device: n, channel: 1, from: [1, 2])] }
+        } else {
+            let first = g.columns.lowerBound + 1
+            let width = surround ? 8 : min(2, g.columns.count)
+            guard first + width - 1 <= config.channelsFromNet else {
                 show(.refused(L("a surround source occupies 8 inputs. Choose a pair from 1-2 to %@-%@.", "\(config.channelsFromNet - 7)", "\(config.channelsFromNet - 6)")))
                 return
             }
-            mutate(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind,
-                    "device_channels": Array(pairFirst..<(pairFirst + 8))])
-            return
+            taps = (0..<width).map { Tap(device: nil, channel: first + $0, from: [$0 + 1]) }
         }
-        let menu = NSMenu()
-        if pairFirst + 1 <= config.channelsFromNet {
-            menu.addItem(ClosureItem(L("Stereo on inputs %@-%@", "\(pairFirst)", "\(pairFirst + 1)")) { [weak self] in
-                self?.mutate(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind,
-                              "device_channels": [pairFirst, pairFirst + 1]])
-            })
-        }
-        for (title, mix) in [(L("Left only on input %@", "\(ch)"), "left"), (L("Right only on input %@", "\(ch)"), "right"),
-                             (L("L+R (mono) on input %@", "\(ch)"), "sum")] {
-            menu.addItem(ClosureItem(title) { [weak self] in
-                self?.mutate(["cmd": "patch_input", "channel": s.channel, "kind": s.patchKind, "mix": mix,
-                              "device_channels": [ch]])
-            })
-        }
-        menu.popUp(positioning: nil, at: point, in: grid)
+        var req = streamFields(s)
+        req["cmd"] = "patch_input"
+        req["taps"] = taps.map(\.json)
+        send(req, source: s, device: config.multi ? n : nil, width: taps.count)
     }
 
-    /// Multi layout: send an input patch (`width` nil: unpatch), warning first if it changes
+    /// Click on one side of an uncoupled column: add or remove that side of the source on
+    /// this input (both sides: L+R).
+    private func toggleSide(row: Int, column c: Int, left: Bool) {
+        guard row < gridRows.count else { return }
+        let s = gridRows[row].source
+        let side = left ? 1 : 2
+        let device: Int? = config.multi ? c + 1 : nil
+        let channel = config.multi ? 1 : c + 1
+        let current = inputPatch(channel: s.channel, kind: s.patchKind)?.taps
+            .first { $0.device == device && $0.channel == channel }?.from ?? []
+        let from = current.contains(side) ? current.filter { $0 != side } : (current + [side]).sorted()
+        var req = streamFields(s)
+        req["cmd"] = "patch_input"
+        req["taps"] = [Tap(device: device, channel: channel, from: from).json]
+        mutate(req)
+    }
+
+    /// Link button: couple or uncouple a pair (multi layout: a device, whose width changes).
+    private func toggleCoupling(header h: Int) {
+        let groups = headerGroups()
+        guard h < groups.count else { return }
+        let n = groups[h].number
+        let coupled = config.coupled(n)
+        let request: [String: Any] = ["cmd": "set_coupling", "pair": n, "coupled": !coupled]
+        if config.multi {
+            let detail = coupled ? L("“OpenLW In %@” becomes a mono device.", "\(n)")
+                                 : L("“OpenLW In %@” becomes a stereo device.", "\(n)")
+            confirmCut(message: coupled ? L("Uncouple this device?") : L("Couple this device?"), detail: detail, always: true) { [weak self] in
+                self?.mutate(request)
+            }
+            return
+        }
+        // Coupling releases what does not fit a stereo patch of the first input's source.
+        let chs = Set(groups[h].channels)
+        let owners = config.inputs.filter { $0.taps.contains { chs.contains($0.channel) } }
+        if !coupled && owners.count > 1, let window = window {
+            let alert = NSAlert()
+            alert.messageText = L("Couple inputs %@-%@?", "\(groups[h].channels.first ?? 1)", "\(groups[h].channels.last ?? 2)")
+            alert.informativeText = L("The source of the first input becomes stereo on the pair; the other patches on these inputs are released.")
+            alert.addButton(withTitle: L("Couple"))
+            alert.addButton(withTitle: L("Cancel"))
+            alert.beginSheetModal(for: window) { [weak self] response in
+                if response == .alertFirstButtonReturn { self?.mutate(request) }
+            }
+            return
+        }
+        mutate(request)
+    }
+
+    /// Multi layout: send an input patch (`width` nil: release), warning first if it changes
     /// a device's width (the daemon then recreates the region).
-    private func patchInput(_ request: [String: Any], source s: DiscoveredSource, device: Int?, width: Int?) {
+    private func send(_ request: [String: Any], source s: DiscoveredSource, device: Int?, width: Int?) {
         guard config.multi, let n = device else {
             mutate(request)
             return
         }
-        let before = DaemonConfig.inWidths(config.inputs, devices: config.inDevices)
-        // After: the source leaves its device, the target device takes the new width (or empties).
-        var after = config.inputs.filter {
-            !($0.channel == s.channel && $0.kind == s.patchKind) && $0.device != n
+        let before = DaemonConfig.inWidths(config.inputs, uncoupled: config.uncoupled, devices: config.inDevices)
+        // After: the target device carries this source (or nothing); a surround makes it 8 wide.
+        var after = config.inputs.map { p in
+            InputPatch(channel: p.channel, group: p.group, kind: p.kind, taps: p.taps.filter { $0.device != n })
         }
-        if let w = width {
-            after.append(InputPatch(channel: s.channel, group: nil, kind: s.patchKind,
-                                    deviceChannels: Array(1...w), device: n, mix: w == 1 ? "sum" : nil))
+        if let w = width, w == 8 {
+            after.append(InputPatch(channel: s.channel, group: nil, kind: "surround",
+                                    taps: (1...8).map { Tap(device: n, channel: $0, from: [$0]) }))
         }
-        let widths = DaemonConfig.inWidths(after, devices: config.inDevices)
+        let widths = DaemonConfig.inWidths(after, uncoupled: config.uncoupled, devices: config.inDevices)
         let changed = zip(before, widths).enumerated().filter { $0.element.0 != $0.element.1 }
         guard let first = changed.first else {
             mutate(request)
             return
         }
         let (from, to) = first.element
-        let what = changed.count == 1
-            ? (to == 1 ? L("“OpenLW In %@” changes from %@ to 1 channel.", "\(first.offset + 1)", "\(from)")
-                       : L("“OpenLW In %@” changes from %@ to %@ channels.", "\(first.offset + 1)", "\(from)", "\(to)"))
-            : L("%@ OpenLW input devices change width.", "\(changed.count)")
+        let what = to == 1 ? L("“OpenLW In %@” changes from %@ to 1 channel.", "\(first.offset + 1)", "\(from)")
+            : L("“OpenLW In %@” changes from %@ to %@ channels.", "\(first.offset + 1)", "\(from)", "\(to)")
         confirmCut(message: width == nil ? L("Release this input?") : L("Patch this source?"), detail: what, always: true) { [weak self] in
             self?.mutate(request)
         }

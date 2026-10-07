@@ -1,7 +1,7 @@
 //! Patching: build buses between network streams and device from configuration.
 //!
 //! - Source with `device_channels`: device outputs → bus → transmitted stream.
-//! - Destination with `device_channels`: received stream → bus → device inputs.
+//! - Destination with taps: received stream → bus → device inputs (crosspoints).
 //!
 //! Jitter-buffer settings (48 kHz frames), according to latency preset:
 //! - transmit: target = two packets + reserve (256, 512, or 1024), high threshold = target + 2048;
@@ -10,8 +10,8 @@
 use std::net::Ipv4Addr;
 
 use crate::bus::{bus, BusWriter, JitterReader};
-use crate::config::Config;
-use crate::device::{InRoute, OutRoute, Routes};
+use crate::config::{Config, DestinationConfig};
+use crate::device::{InRoute, OutRoute, RouteTap, Routes};
 use crate::tx::TxStream;
 
 /// Bus capacity (frames): 170 ms.
@@ -47,6 +47,22 @@ impl Plan {
     }
 }
 
+/// Device crosspoints of a destination: ring (device), ring channel and stream channels, 0-based.
+pub fn route_taps(d: &DestinationConfig) -> Vec<RouteTap> {
+    d.taps
+        .iter()
+        .map(|t| RouteTap {
+            ring: crate::config::ring_of(t.device),
+            channel: usize::from(t.channel).saturating_sub(1),
+            from: t
+                .from
+                .iter()
+                .map(|&f| usize::from(f).saturating_sub(1))
+                .collect(),
+        })
+        .collect()
+}
+
 /// Build the plan from a validated configuration.
 pub fn build(cfg: &Config) -> Plan {
     let mut routes = Routes::default();
@@ -69,19 +85,14 @@ pub fn build(cfg: &Config) -> Plan {
     }
     let mut rx = Vec::new();
     for (d, (group, port)) in cfg.destinations.iter().zip(cfg.rx_groups()) {
-        let sink = d.device_channels.as_ref().map(|chs| {
+        let sink = d.patched().then(|| {
             let (writer, reader) = bus(d.stream_channels(), BUS_FRAMES);
-            routes.inputs.push(InRoute {
-                label: format!("{} → inputs {:?}", d.label(), chs),
-                ring: crate::config::ring_of(d.device),
-                device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
-                mix: d.mix,
-                reader: JitterReader::new(
-                    reader,
-                    cfg.latency.rx_target(),
-                    4 * cfg.latency.rx_target(),
-                ),
-            });
+            routes.inputs.push(InRoute::new(
+                format!("{} → {} input(s)", d.label(), d.taps.len()),
+                route_taps(d),
+                JitterReader::new(reader, cfg.latency.rx_target(), 4 * cfg.latency.rx_target()),
+                cfg.device_config().ring_frames as usize,
+            ));
             writer
         });
         rx.push(RxPlan {
@@ -115,7 +126,11 @@ mod tests {
         assert_eq!(plan.rx.len(), 2);
         assert!(plan.rx[0].sink.is_some() && plan.rx[1].sink.is_none());
         assert_eq!(plan.routes.outputs[0].device_channels, vec![0, 1]);
-        assert_eq!(plan.routes.inputs[0].device_channels, vec![2, 3]);
+        let t = &plan.routes.inputs[0].taps;
+        assert_eq!(
+            (t[0].channel, t[1].channel, t[1].from.clone()),
+            (2, 3, vec![1])
+        );
         assert_eq!(plan.patched(), 2);
     }
 
@@ -125,7 +140,7 @@ mod tests {
             r#"{"iface":"lo0","sources":[{"channel":4001,"name":"X","format":"standard","device_channels":[1]}]}"#,
             r#"{"iface":"lo0","sources":[{"channel":4001,"name":"X","format":"standard","device_channels":[1,9]}]}"#,
             r#"{"iface":"lo0","destinations":[{"channel":1,"device_channels":[1,2]},{"channel":2,"device_channels":[2,3]}]}"#,
-            r#"{"iface":"lo0","destinations":[{"channel":5,"kind":"surround","device_channels":[1,2]}]}"#,
+            r#"{"iface":"lo0","destinations":[{"channel":5,"kind":"surround","taps":[{"channel":1,"from":[9]}]}]}"#,
         ] {
             let cfg: Config = serde_json::from_str(bad).unwrap();
             assert!(cfg.validate().is_err(), "{bad}");

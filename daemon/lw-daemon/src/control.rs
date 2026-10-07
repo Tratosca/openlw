@@ -15,7 +15,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::config::{Config, Format, Kind, Layout, Mix};
+use crate::config::{Config, Format, Kind, Layout, Mix, Tap};
 use crate::editor::{self, Edit};
 use crate::rx::RxStats;
 use crate::tx::TxReport;
@@ -359,7 +359,7 @@ impl Shared {
     }
 }
 
-const MUTATING: [&str; 11] = [
+const MUTATING: [&str; 12] = [
     "patch_input",
     "unpatch_input",
     "remove_input",
@@ -371,6 +371,7 @@ const MUTATING: [&str; 11] = [
     "set_device_naming",
     "set_advanced",
     "set_device_layout",
+    "set_coupling",
 ];
 
 fn is_mutating(v: &Value) -> bool {
@@ -412,27 +413,66 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
             .unwrap_or_else(|| Value::String(default.into())))
     };
     match cmd {
-        "patch_input" => Ok(Edit::PatchInput {
-            channel: opt_u16(v, "channel")?,
-            group: match v.get("group").and_then(Value::as_str) {
-                Some(g) => Some(
-                    g.parse()
-                        .map_err(|_| "`group`: invalid IPv4 address".to_string())?,
+        "patch_input" => {
+            let channel = opt_u16(v, "channel")?;
+            let kind = serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
+                .map_err(|e| format!("`kind`: {e}"))?;
+            let device = opt_u16(v, "device")?;
+            // Crosspoints (`taps`, added to the stream's), or the former form: device
+            // channels in stream order, or one with `mix` (moves the stream).
+            let (taps, replace) = match v.get("taps") {
+                Some(t) => (
+                    serde_json::from_value::<Vec<Tap>>(t.clone())
+                        .map_err(|e| format!("`taps`: {e}"))?,
+                    false,
                 ),
-                None => None,
-            },
-            port: opt_u16(v, "port")?.unwrap_or(5004),
-            kind: serde_json::from_value::<Kind>(from_json("kind", "stereo")?)
-                .map_err(|e| format!("`kind`: {e}"))?,
-            device: opt_u16(v, "device")?,
-            mix: match v.get("mix") {
-                None | Some(Value::Null) => None,
-                Some(m) => Some(
-                    serde_json::from_value::<Mix>(m.clone())
-                        .map_err(|_| "`mix`: left, right, or sum".to_string())?,
-                ),
-            },
-            device_channels: channels_arg(v, "device_channels")?,
+                None => {
+                    let chs = channels_arg(v, "device_channels")?;
+                    let taps = match v.get("mix") {
+                        None | Some(Value::Null) => chs
+                            .iter()
+                            .zip(1u8..)
+                            .map(|(&c, i)| Tap {
+                                device,
+                                channel: c,
+                                from: vec![i],
+                            })
+                            .collect(),
+                        Some(m) => {
+                            let mix = serde_json::from_value::<Mix>(m.clone())
+                                .map_err(|_| "`mix`: left, right, or sum".to_string())?;
+                            let c = *chs.first().ok_or("`device_channels`: one input")?;
+                            vec![Tap {
+                                device,
+                                channel: c,
+                                from: mix.from_channels(),
+                            }]
+                        }
+                    };
+                    (taps, true)
+                }
+            };
+            Ok(Edit::PatchInput {
+                channel,
+                group: match v.get("group").and_then(Value::as_str) {
+                    Some(g) => Some(
+                        g.parse()
+                            .map_err(|_| "`group`: invalid IPv4 address".to_string())?,
+                    ),
+                    None => None,
+                },
+                port: opt_u16(v, "port")?.unwrap_or(5004),
+                kind,
+                taps,
+                replace,
+            })
+        }
+        "set_coupling" => Ok(Edit::SetCoupling {
+            pair: opt_u16(v, "pair")?.ok_or("missing `pair`")?,
+            coupled: v
+                .get("coupled")
+                .and_then(Value::as_bool)
+                .ok_or("missing `coupled` (boolean)")?,
         }),
         "unpatch_input" => Ok(Edit::UnpatchInput {
             device: opt_u16(v, "device")?,

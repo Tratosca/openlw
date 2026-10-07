@@ -120,7 +120,7 @@ pub enum Layout {
     Multi,
 }
 
-/// Mono patch of a stereo stream onto one device channel.
+/// Former mono-patch field (`mix`), read from older configurations and commands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mix {
@@ -128,23 +128,52 @@ pub enum Mix {
     Left,
     /// Right channel only.
     Right,
-    /// (L + R) / 2: −6 dB, no clipping on correlated material.
+    /// (L + R) / 2.
     Sum,
 }
 
 impl Mix {
-    /// Mono sample from a stereo frame (missing channels read as silence).
-    pub fn apply(self, frame: &[f32]) -> f32 {
-        let (l, r) = (
-            frame.first().copied().unwrap_or(0.0),
-            frame.get(1).copied().unwrap_or(0.0),
-        );
+    /// Stream channels (1-based) of this mix.
+    pub fn from_channels(self) -> Vec<u8> {
         match self {
-            Mix::Left => l,
-            Mix::Right => r,
-            Mix::Sum => (l + r) * 0.5,
+            Mix::Left => vec![1],
+            Mix::Right => vec![2],
+            Mix::Sum => vec![1, 2],
         }
     }
+}
+
+/// Crosspoint: one device input fed by one or two stream channels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tap {
+    /// `multi` layout: input device number (“OpenLW In n”, 1-based). Absent in duplex layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<u16>,
+    /// Device input, 1-based (within `device` in `multi` layout).
+    pub channel: u16,
+    /// Stream channels (1-based) feeding it: [1] left, [2] right, [1, 2] (L + R) / 2 (−6 dB,
+    /// no clipping on correlated material), [k] channel k of a surround stream.
+    pub from: Vec<u8>,
+}
+
+impl Tap {
+    /// Device slot (device number, or 0 in duplex layout; channel).
+    pub fn slot(&self) -> (u16, u16) {
+        (self.device.unwrap_or(0), self.channel)
+    }
+}
+
+/// Taps of a stream patched “as is”: stream channel i on device channel `first + i`.
+pub fn straight_taps(device: Option<u16>, first: u16, channels: usize) -> Vec<Tap> {
+    (0..channels)
+        .filter_map(|i| {
+            Some(Tap {
+                device,
+                channel: first.checked_add(u16::try_from(i).ok()?)?,
+                from: vec![u8::try_from(i + 1).ok()?],
+            })
+        })
+        .collect()
 }
 
 /// Maximum advertised-name length (`ATRN`, 32 ASCII bytes).
@@ -172,25 +201,68 @@ pub struct SourceConfig {
 
 /// Destination: a Livewire channel (and family) or an explicit group (imported SDP, third-party AES67).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(from = "DestinationRepr")]
 pub struct DestinationConfig {
-    #[serde(default)]
     pub channel: Option<u16>,
-    #[serde(default)]
     pub kind: Kind,
-    #[serde(default)]
     pub group: Option<Ipv4Addr>,
-    #[serde(default = "default_port")]
     pub port: u16,
-    /// Device inputs (1-based) fed by this stream, one per stream channel, or one with `mix`.
-    /// `multi` layout: channels within device `device`. Absent: receive for statistics only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device_channels: Option<Vec<u16>>,
-    /// `multi` layout: input device number (“OpenLW In n”, 1-based).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device: Option<u16>,
-    /// Mono patch (stereo or backfeed stream onto one channel).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mix: Option<Mix>,
+    /// Device inputs fed by this stream. Empty: received for statistics only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub taps: Vec<Tap>,
+}
+
+/// Destination as stored, including the former patch fields (`device_channels`, `device`,
+/// `mix`), converted to taps.
+#[derive(Deserialize)]
+struct DestinationRepr {
+    #[serde(default)]
+    channel: Option<u16>,
+    #[serde(default)]
+    kind: Kind,
+    #[serde(default)]
+    group: Option<Ipv4Addr>,
+    #[serde(default = "default_port")]
+    port: u16,
+    #[serde(default)]
+    taps: Vec<Tap>,
+    #[serde(default)]
+    device_channels: Option<Vec<u16>>,
+    #[serde(default)]
+    device: Option<u16>,
+    #[serde(default)]
+    mix: Option<Mix>,
+}
+
+impl From<DestinationRepr> for DestinationConfig {
+    fn from(r: DestinationRepr) -> Self {
+        let mut taps = r.taps;
+        if let (true, Some(chs)) = (taps.is_empty(), r.device_channels) {
+            taps = match (r.mix, chs.first()) {
+                (Some(m), Some(&c)) => vec![Tap {
+                    device: r.device,
+                    channel: c,
+                    from: m.from_channels(),
+                }],
+                _ => chs
+                    .iter()
+                    .zip(1u8..)
+                    .map(|(&c, i)| Tap {
+                        device: r.device,
+                        channel: c,
+                        from: vec![i],
+                    })
+                    .collect(),
+            };
+        }
+        Self {
+            channel: r.channel,
+            kind: r.kind,
+            group: r.group,
+            port: r.port,
+            taps,
+        }
+    }
 }
 
 impl DestinationConfig {
@@ -212,12 +284,23 @@ impl DestinationConfig {
         }
     }
 
-    /// Device channels fed by this stream: one with `mix`, otherwise the stream width.
-    pub fn patch_width(&self) -> usize {
-        if self.mix.is_some() {
-            1
-        } else {
-            self.stream_channels()
+    /// Patched to at least one device input?
+    pub fn patched(&self) -> bool {
+        !self.taps.is_empty()
+    }
+
+    /// Same stream (Livewire channel and kind, or group and port)?
+    pub fn same_stream(
+        &self,
+        channel: Option<u16>,
+        group: Option<Ipv4Addr>,
+        port: u16,
+        kind: Kind,
+    ) -> bool {
+        match (channel, group) {
+            (Some(ch), _) => self.channel == Some(ch) && self.kind == kind,
+            (None, Some(g)) => self.group == Some(g) && self.port == port,
+            _ => false,
         }
     }
 }
@@ -225,11 +308,6 @@ impl DestinationConfig {
 /// Device ring of a patch within its direction: device n → n − 1; duplex layout (no device) → 0.
 pub fn ring_of(device: Option<u16>) -> usize {
     device.map_or(0, |n| usize::from(n).saturating_sub(1))
-}
-
-/// Device slots (device number, 1-based channel) of a patch; device 0 in `duplex` layout.
-pub fn slots(device: Option<u16>, chs: &[u16]) -> Vec<(u16, u16)> {
-    chs.iter().map(|&c| (device.unwrap_or(0), c)).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +339,12 @@ pub struct Config {
     /// (see [`crate::labels`]).
     #[serde(default = "default_true")]
     pub custom_device_names: bool,
+    /// Input pairs (duplex layout: pair n = inputs 2n − 1 and 2n) or input devices (multi
+    /// layout: “OpenLW In n”) that are not coupled in stereo. A coupled pair takes a stereo
+    /// patch in one click; an uncoupled one takes left, right, or L + R per input. An
+    /// uncoupled input device is mono.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncoupled_inputs: Vec<u16>,
 }
 
 fn default_pt() -> u8 {
@@ -421,18 +505,30 @@ impl Config {
         u16::try_from(ch.div_ceil(2)).unwrap_or(u16::MAX)
     }
 
-    /// `multi` layout: width of each input device (index 0 = “OpenLW In 1”): its patched
-    /// stream's, 2 when empty. Duplex layout: one entry, the device input count.
+    /// Is input pair (or input device) `n` coupled in stereo?
+    pub fn coupled(&self, n: u16) -> bool {
+        !self.uncoupled_inputs.contains(&n)
+    }
+
+    /// `multi` layout: width of each input device (index 0 = “OpenLW In 1”): 1 when
+    /// uncoupled, 8 with a surround stream, otherwise 2. Duplex layout: one entry, the device
+    /// input count.
     pub fn in_widths(&self) -> Vec<u32> {
         if !self.multi() {
             return vec![self.device_config().channels_from_net];
         }
         (1..=self.device_count(false))
             .map(|n| {
-                self.destinations
-                    .iter()
-                    .find(|d| d.device == Some(n) && d.device_channels.is_some())
-                    .map_or(2, |d| d.patch_width() as u32)
+                let surround = self.destinations.iter().any(|d| {
+                    d.kind == Kind::Surround && d.taps.iter().any(|t| t.device == Some(n))
+                });
+                if !self.coupled(n) {
+                    1
+                } else if surround {
+                    8
+                } else {
+                    2
+                }
             })
             .collect()
     }
@@ -528,10 +624,9 @@ impl Config {
         self.validate_patch()
     }
 
-    /// Patch: existing device channels, count matching the stream, unshared inputs.
-    /// Duplex layout: one channel space per direction; a stereo patch occupies a pair (odd
-    /// first channel), a mono patch one channel. `multi` layout: one stream per device,
-    /// channels 1..width within the device.
+    /// Patch: existing device channels, unshared inputs. Outputs: one stream per pair (duplex
+    /// layout, odd first output) or per device (multi layout). Inputs: crosspoints (taps), at
+    /// most one per device input; multi layout: one stream per device, within its width.
     fn validate_patch(&self) -> Result<(), ConfigError> {
         let dev = self.device.clone().unwrap_or_default();
         let multi = self.multi();
@@ -598,38 +693,66 @@ impl Config {
                 )));
             }
         }
+        // Inputs: each device input takes at most one tap; a multi-layout device carries one
+        // stream, within its width.
+        let widths = self.in_widths();
         let mut used = std::collections::BTreeSet::new();
-        for d in &self.destinations {
-            if d.mix.is_some() && d.kind == Kind::Surround {
-                return Err(ConfigError(format!(
-                    "destination {}: mono patch of a surround stream",
-                    d.label()
-                )));
-            }
-            if let Some(chs) = &d.device_channels {
-                let what = format!("destination {}", d.label());
-                check(
-                    &what,
-                    d.device,
-                    chs,
-                    d.patch_width(),
-                    self.device_count(false),
-                    dev.channels_from_net,
-                )?;
-                for slot in slots(d.device, chs) {
-                    if !used.insert(slot) {
-                        return Err(ConfigError(if multi {
-                            format!("input device {} patched twice", slot.0)
-                        } else {
-                            format!("device input {} patched twice", slot.1)
-                        }));
+        let mut device_stream: std::collections::BTreeMap<u16, usize> = Default::default();
+        for (i, d) in self.destinations.iter().enumerate() {
+            let what = format!("destination {}", d.label());
+            let err = |m: String| Err(ConfigError(format!("{what}: {m}")));
+            for t in &d.taps {
+                let n = d.stream_channels();
+                if t.from.is_empty()
+                    || t.from.len() > 2
+                    || t.from.iter().any(|&f| f == 0 || usize::from(f) > n)
+                    || (t.from.len() == 2 && (n != 2 || t.from != [1, 2]))
+                {
+                    return err(format!(
+                        "input {} fed by stream channels {:?}",
+                        t.channel, t.from
+                    ));
+                }
+                match (multi, t.device) {
+                    (true, Some(dev_n)) => {
+                        let w = widths.get(usize::from(dev_n).wrapping_sub(1)).copied();
+                        let Some(w) = w else {
+                            return err(format!("device {dev_n} outside 1..{}", widths.len()));
+                        };
+                        if t.channel == 0 || u32::from(t.channel) > w {
+                            return err(format!(
+                                "channel {} outside device {dev_n} (1..{w})",
+                                t.channel
+                            ));
+                        }
+                        if *device_stream.entry(dev_n).or_insert(i) != i {
+                            return Err(ConfigError(format!(
+                                "input device {dev_n}: one stream per device"
+                            )));
+                        }
+                    }
+                    (true, None) => return err("device number missing (multi layout)".into()),
+                    (false, Some(_)) => return err("device number given in duplex layout".into()),
+                    (false, None) => {
+                        if t.channel == 0 || u32::from(t.channel) > dev.channels_from_net {
+                            return err(format!(
+                                "input {} outside device range 1..{}",
+                                t.channel, dev.channels_from_net
+                            ));
+                        }
                     }
                 }
-            } else if d.device.is_some() {
-                return Err(ConfigError(format!(
-                    "destination {}: device number without device channels",
-                    d.label()
-                )));
+                if !used.insert(t.slot()) {
+                    return Err(ConfigError(if multi {
+                        format!(
+                            "input device {} channel {} patched twice",
+                            t.slot().0,
+                            t.channel
+                        )
+                    } else {
+                        format!("device input {} patched twice", t.channel)
+                    }));
+                }
             }
         }
         Ok(())
@@ -735,34 +858,40 @@ mod tests {
     }
 
     #[test]
-    fn duplex_patch_shapes() {
+    fn duplex_taps() {
         let dev = r#""iface":"x","device":{"channels_to_net":4,"channels_from_net":4}"#;
         let ok = |d: &str| check(&format!(r#"{{{dev},"destinations":[{d}]}}"#));
-        assert!(ok(r#"{"channel":1,"device_channels":[3,4]}"#).is_ok());
+        // Former fields converted to taps.
+        let c = ok(r#"{"channel":1,"device_channels":[3,4]},{"channel":2,"mix":"sum","device_channels":[1]}"#).unwrap();
+        assert_eq!(c.destinations[0].taps, straight_taps(None, 3, 2));
+        assert_eq!(c.destinations[1].taps[0].from, [1, 2]);
+        let json = serde_json::to_string(&c.destinations[0]).unwrap();
         assert!(
-            ok(r#"{"channel":1,"device_channels":[2,3]}"#).is_err(),
-            "stereo off the pair"
+            json.contains("taps") && !json.contains("device_channels"),
+            "{json}"
+        );
+        // Free crosspoints: stereo on 2-3, the same left on two inputs.
+        assert!(
+            ok(r#"{"channel":1,"taps":[{"channel":2,"from":[1]},{"channel":3,"from":[2]}]}"#)
+                .is_ok()
         );
         assert!(
-            ok(r#"{"channel":1,"mix":"right","device_channels":[2]}"#).is_ok(),
-            "mono on any channel"
+            ok(r#"{"channel":1,"taps":[{"channel":1,"from":[1]},{"channel":2,"from":[1]}]}"#)
+                .is_ok()
+        );
+        assert!(ok(r#"{"channel":1,"taps":[{"channel":1,"from":[1]}]},{"channel":2,"taps":[{"channel":1,"from":[2]}]}"#).is_err(), "input 1 twice");
+        assert!(
+            ok(r#"{"channel":1,"taps":[{"channel":5,"from":[1]}]}"#).is_err(),
+            "4 inputs"
+        );
+        assert!(ok(r#"{"channel":1,"taps":[{"channel":1,"from":[]}]}"#).is_err());
+        assert!(
+            ok(r#"{"channel":1,"kind":"surround","taps":[{"channel":1,"from":[1,2]}]}"#).is_err()
         );
         assert!(
-            ok(r#"{"channel":1,"mix":"left","device_channels":[1,2]}"#).is_err(),
-            "mono: one channel"
-        );
-        assert!(
-            ok(r#"{"channel":1,"kind":"surround","mix":"sum","device_channels":[1]}"#).is_err()
-        );
-        assert!(
-            ok(r#"{"channel":1,"device":1,"device_channels":[1,2]}"#).is_err(),
+            ok(r#"{"channel":1,"taps":[{"device":1,"channel":1,"from":[1]}]}"#).is_err(),
             "device in duplex"
         );
-        assert!(
-            ok(r#"{"channel":1,"mix":"left","device_channels":[1]},{"channel":2,"device_channels":[1,2]}"#).is_err(),
-            "input 1 patched twice"
-        );
-        assert!(ok(r#"{"channel":1,"mix":"left","device_channels":[1]},{"channel":2,"mix":"sum","device_channels":[2]}"#).is_ok());
         // Former two-device layout: same channel space, read as duplex.
         let c = check(&format!(r#"{{{dev},"device_layout":"split"}}"#)).unwrap();
         assert_eq!(c.device_layout, Layout::Duplex);
@@ -771,32 +900,32 @@ mod tests {
     }
 
     #[test]
-    fn multi_patch_shapes_and_widths() {
-        let dev = r#""iface":"x","device_layout":"multi","device":{"channels_to_net":2,"channels_from_net":6}"#;
+    fn multi_taps_and_widths() {
+        let dev = r#""iface":"x","device_layout":"multi","device":{"channels_to_net":2,"channels_from_net":6},"uncoupled_inputs":[1]"#;
         let ok = |d: &str| check(&format!(r#"{{{dev},"destinations":[{d}]}}"#));
         let c = ok(
             r#"{"channel":1,"device":3,"kind":"surround","device_channels":[1,2,3,4,5,6,7,8]},
-                     {"channel":2,"device":1,"mix":"sum","device_channels":[1]},{"channel":3}"#,
+                     {"channel":2,"taps":[{"device":1,"channel":1,"from":[1,2]}]},{"channel":3}"#,
         )
         .unwrap();
         assert_eq!(c.device_count(false), 3);
-        assert_eq!(c.in_widths(), vec![1, 2, 8], "mono, empty, surround");
+        assert_eq!(c.in_widths(), vec![1, 2, 8], "uncoupled, empty, surround");
         assert_eq!(c.out_widths(), vec![2]);
         assert_eq!(c.rings().len(), 4);
         assert!(
-            ok(r#"{"channel":1,"device":4,"device_channels":[1,2]}"#).is_err(),
+            ok(r#"{"channel":1,"taps":[{"device":4,"channel":1,"from":[1]}]}"#).is_err(),
             "3 devices"
         );
         assert!(
-            ok(r#"{"channel":1,"device_channels":[1,2]}"#).is_err(),
+            ok(r#"{"channel":1,"taps":[{"channel":1,"from":[1]}]}"#).is_err(),
             "device missing"
         );
         assert!(
-            ok(r#"{"channel":1,"device":1,"device_channels":[2,3]}"#).is_err(),
-            "channels 1..w"
+            ok(r#"{"channel":1,"taps":[{"device":1,"channel":2,"from":[1]}]}"#).is_err(),
+            "mono device"
         );
         assert!(
-            ok(r#"{"channel":1,"device":2,"device_channels":[1,2]},{"channel":2,"device":2,"mix":"left","device_channels":[1]}"#).is_err(),
+            ok(r#"{"channel":1,"taps":[{"device":2,"channel":1,"from":[1]}]},{"channel":2,"taps":[{"device":2,"channel":2,"from":[2]}]}"#).is_err(),
             "one stream per device"
         );
         let out = |s: &str| check(&format!(r#"{{{dev},"sources":[{s}]}}"#));
@@ -808,18 +937,5 @@ mod tests {
             r#"{"channel":4001,"name":"A","format":"standard","device":2,"device_channels":[1,2]}"#
         )
         .is_err());
-    }
-
-    #[test]
-    fn mix_values() {
-        let f = [0.5, -0.25];
-        assert_eq!(
-            (
-                Mix::Left.apply(&f),
-                Mix::Right.apply(&f),
-                Mix::Sum.apply(&f)
-            ),
-            (0.5, -0.25, 0.125)
-        );
     }
 }

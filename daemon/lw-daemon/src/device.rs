@@ -19,7 +19,6 @@ use lw_sys::shm::{Dir, Region, RingSpec};
 use serde::{Deserialize, Serialize};
 
 use crate::bus::{BusCounters, BusWriter, JitterReader};
-use crate::config::Mix;
 use crate::Stop;
 
 /// Virtual-device parameters.
@@ -118,32 +117,54 @@ pub struct OutRoute {
     pub writer: BusWriter,
 }
 
+/// Crosspoint of a received stream: one input of one ring.
+pub struct RouteTap {
+    /// Input ring (0 in duplex layout, device number − 1 in `multi` layout).
+    pub ring: usize,
+    /// Ring channel (0-based).
+    pub channel: usize,
+    /// Stream channels (0-based), averaged: one, or two for (L + R) / 2.
+    pub from: Vec<usize>,
+}
+
+impl RouteTap {
+    /// Value of this input for one stream frame (missing channels read as silence).
+    fn value(&self, frame: &[f32]) -> f32 {
+        let sum: f32 = self
+            .from
+            .iter()
+            .map(|&c| frame.get(c).copied().unwrap_or(0.0))
+            .sum();
+        match self.from.len() {
+            0 | 1 => sum,
+            n => sum / n as f32,
+        }
+    }
+}
+
 /// Received stream to device inputs.
 pub struct InRoute {
     pub label: String,
-    /// Input ring (0 in duplex layout, device number − 1 in `multi` layout).
-    pub ring: usize,
-    /// Ring channels (0-based): one per stream channel, or one with `mix`.
-    pub device_channels: Vec<usize>,
-    /// Mono patch of a stereo stream.
-    pub mix: Option<Mix>,
+    pub taps: Vec<RouteTap>,
     pub reader: JitterReader,
+    /// Frames pulled this tick (stream width × ring frames, allocated with the route).
+    pub buffer: Vec<f32>,
 }
 
 impl InRoute {
-    /// Device samples of one stream frame: `(ring channel, value)`.
-    fn place(&self, frame: &[f32], mut put: impl FnMut(usize, f32)) {
-        match self.mix {
-            Some(m) => {
-                if let Some(&c) = self.device_channels.first() {
-                    put(c, m.apply(frame));
-                }
-            }
-            None => {
-                for (v, &c) in frame.iter().zip(&self.device_channels) {
-                    put(c, *v);
-                }
-            }
+    /// Route for `taps`; `ring_frames`: device ring size (largest pull per tick).
+    pub fn new(
+        label: String,
+        taps: Vec<RouteTap>,
+        reader: JitterReader,
+        ring_frames: usize,
+    ) -> Self {
+        let buffer = vec![0f32; reader.channels() * ring_frames];
+        Self {
+            label,
+            taps,
+            reader,
+            buffer,
         }
     }
 }
@@ -366,55 +387,59 @@ pub fn start(
                     continue;
                 }
                 let frames = due.min(ring);
+                // Each stream once per tick, whatever the number of inputs it feeds.
+                for route in &mut routes.inputs {
+                    let sc = route.reader.channels();
+                    if let Some(src) = route.buffer.get_mut(..frames * sc) {
+                        route.reader.pull(src);
+                    }
+                }
                 for (j, (lane, ring_out)) in in_lanes.iter().zip(to_apps.iter_mut()).enumerate() {
                     let w = lane.channels;
-                    if w == 0 || !routes.inputs.iter().any(|r| r.ring == j) {
+                    let fed = routes
+                        .inputs
+                        .iter()
+                        .any(|r| r.taps.iter().any(|t| t.ring == j));
+                    if w == 0 || !fed {
                         continue;
                     }
                     let lp = in_peaks
                         .get_mut(lane.offset..lane.offset + w)
                         .unwrap_or_default();
-                    if reg.writable(lane.ring) as usize >= frames {
-                        if let Some(dst) = out.get_mut(..frames * w) {
-                            dst.iter_mut().for_each(|v| *v = 0.0);
-                            for route in routes.inputs.iter_mut().filter(|r| r.ring == j) {
-                                let sc = route.reader.channels();
-                                if let Some(src) = scratch.get_mut(..frames * sc) {
-                                    route.reader.pull(src);
-                                    for (i, o) in src.chunks_exact(sc).zip(dst.chunks_exact_mut(w))
-                                    {
-                                        route.place(i, |c, v| {
-                                            if let Some(slot) = o.get_mut(c) {
-                                                *slot = v;
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-                            for frame in dst.chunks_exact(w) {
-                                for (p, s) in lp.iter_mut().zip(frame) {
-                                    *p = p.max(s.abs());
-                                }
-                            }
-                            let _ = ring_out.write(dst);
-                        }
+                    // Ring full: nobody is reading (plugin I/O stopped). Streams are still
+                    // pulled (no accumulated delay) and peaks measured: the app displays
+                    // received audio before any recording.
+                    let writable = reg.writable(lane.ring) as usize >= frames;
+                    let mut dst = if writable {
+                        out.get_mut(..frames * w)
                     } else {
-                        // Ring full: nobody is reading (plugin I/O stopped). Still consume
-                        // jitter buffers to avoid accumulating delay. Peaks remain
-                        // measured: the app displays received audio before any recording.
-                        for route in routes.inputs.iter_mut().filter(|r| r.ring == j) {
-                            let sc = route.reader.channels();
-                            if let Some(src) = scratch.get_mut(..frames * sc) {
-                                route.reader.pull(src);
-                                for i in src.chunks_exact(sc) {
-                                    route.place(i, |c, v| {
-                                        if let Some(p) = lp.get_mut(c) {
-                                            *p = p.max(v.abs());
-                                        }
-                                    });
+                        None
+                    };
+                    if let Some(d) = dst.as_deref_mut() {
+                        d.iter_mut().for_each(|v| *v = 0.0);
+                    }
+                    for route in &routes.inputs {
+                        let sc = route.reader.channels();
+                        let Some(src) = route.buffer.get(..frames * sc) else {
+                            continue;
+                        };
+                        for t in route.taps.iter().filter(|t| t.ring == j) {
+                            for (f, frame) in src.chunks_exact(sc).enumerate() {
+                                let v = t.value(frame);
+                                if let Some(p) = lp.get_mut(t.channel) {
+                                    *p = p.max(v.abs());
+                                }
+                                if let Some(slot) = dst
+                                    .as_deref_mut()
+                                    .and_then(|d| d.get_mut(f * w + t.channel))
+                                {
+                                    *slot = v;
                                 }
                             }
                         }
+                    }
+                    if let Some(d) = dst {
+                        let _ = ring_out.write(d);
                     }
                 }
                 continue_status(
@@ -503,7 +528,11 @@ fn continue_status(
             }
             None => s.inputs.push(RouteStatus {
                 label: r.label.clone(),
-                device_channels: flat(in_lanes, r.ring, &r.device_channels),
+                device_channels: r
+                    .taps
+                    .iter()
+                    .flat_map(|t| flat(in_lanes, t.ring, &[t.channel]))
+                    .collect(),
                 primed: r.reader.primed(),
                 bus: r.reader.counters(),
             }),

@@ -215,7 +215,7 @@ impl Session {
                 port: port_no,
                 channels: d.stream_channels(),
                 target: cfg.latency.rx_target(),
-                with_sink: d.device_channels.is_some(),
+                with_sink: d.patched(),
             };
             let entry = match old_rx.iter().position(|e| e.key == key) {
                 Some(i) => old_rx.swap_remove(i),
@@ -247,15 +247,14 @@ impl Session {
                     }
                 }
             };
-            if let (Some(chs), Some(port)) = (&d.device_channels, &entry.port) {
+            if let (true, Some(port)) = (d.patched(), &entry.port) {
                 let t = key.target;
-                table.inputs.push(device::InRoute {
-                    label: format!("{} → inputs {:?}", d.label(), chs),
-                    ring: crate::config::ring_of(d.device),
-                    device_channels: chs.iter().map(|&c| usize::from(c) - 1).collect(),
-                    mix: d.mix,
-                    reader: bus::JitterReader::new(port.reader(), t, 4 * t),
-                });
+                table.inputs.push(device::InRoute::new(
+                    format!("{} → {} input(s)", d.label(), d.taps.len()),
+                    patch::route_taps(d),
+                    bus::JitterReader::new(port.reader(), t, 4 * t),
+                    cfg.device_config().ring_frames as usize,
+                ));
             }
             self.rx.push(entry);
         }

@@ -57,20 +57,41 @@ struct DiscoveredSource: Equatable {
     var patchKind: String { ["stereo", "backfeed", "surround"].contains(kind) ? kind : "stereo" }
 }
 
+/// Crosspoint: one device input fed by stream channels (1-based: [1] left, [2] right,
+/// [1, 2] L+R, [k] surround channel k).
+struct Tap: Equatable {
+    /// Multi layout: input device number (“OpenLW In n”).
+    let device: Int?
+    /// Device input (within `device` in multi layout).
+    let channel: Int
+    let from: [Int]
+
+    init(device: Int?, channel: Int, from: [Int]) {
+        self.device = device
+        self.channel = channel
+        self.from = from
+    }
+
+    init?(_ d: [String: Any]) {
+        guard let ch = d["channel"] as? Int else { return nil }
+        device = d["device"] as? Int
+        channel = ch
+        from = d["from"] as? [Int] ?? []
+    }
+
+    var json: [String: Any] {
+        var d: [String: Any] = ["channel": channel, "from": from]
+        if let n = device { d["device"] = n }
+        return d
+    }
+}
+
 /// Configured received stream (destination).
 struct InputPatch: Equatable {
     let channel: Int?
     let group: String?
     let kind: String
-    /// Duplex layout: channels of the OpenLW device; multi layout: channels within `device`.
-    let deviceChannels: [Int]
-    /// Multi layout: input device number (“OpenLW In n”).
-    let device: Int?
-    /// Mono patch: "left", "right", or "sum".
-    let mix: String?
-
-    /// Device width this patch needs (multi layout).
-    var width: Int { mix != nil ? 1 : (kind == "surround" ? 8 : 2) }
+    let taps: [Tap]
 }
 
 /// Configured transmitted stream (source).
@@ -108,11 +129,17 @@ struct DaemonConfig {
     var inDevices: Int { (channelsFromNet + 1) / 2 }
     var outDevices: Int { (channelsToNet + 1) / 2 }
 
-    /// Multi layout: width of each input device after `inputs` (2 when empty), as computed by
-    /// the daemon (daemon/lw-daemon/src/config.rs, `in_widths`).
-    static func inWidths(_ inputs: [InputPatch], devices: Int) -> [Int] {
+    /// Input pairs (duplex) or input devices (multi) not coupled in stereo.
+    var uncoupled: Set<Int> = []
+
+    func coupled(_ n: Int) -> Bool { !uncoupled.contains(n) }
+
+    /// Multi layout: width of each input device, as computed by the daemon
+    /// (daemon/lw-daemon/src/config.rs, `in_widths`): 1 uncoupled, 8 surround, otherwise 2.
+    static func inWidths(_ inputs: [InputPatch], uncoupled: Set<Int>, devices: Int) -> [Int] {
         (1...max(1, devices)).map { n in
-            inputs.first { $0.device == n && !$0.deviceChannels.isEmpty }?.width ?? 2
+            if uncoupled.contains(n) { return 1 }
+            return inputs.contains { $0.kind == "surround" && $0.taps.contains { $0.device == n } } ? 8 : 2
         }
     }
 
@@ -132,9 +159,10 @@ struct DaemonConfig {
         }
         inputs = (d["destinations"] as? [[String: Any]] ?? []).map {
             InputPatch(channel: $0["channel"] as? Int, group: $0["group"] as? String,
-                       kind: $0["kind"] as? String ?? "stereo", deviceChannels: $0["device_channels"] as? [Int] ?? [],
-                       device: $0["device"] as? Int, mix: $0["mix"] as? String)
+                       kind: $0["kind"] as? String ?? "stereo",
+                       taps: ($0["taps"] as? [[String: Any]] ?? []).compactMap(Tap.init))
         }
+        uncoupled = Set(d["uncoupled_inputs"] as? [Int] ?? [])
         outputs = (d["sources"] as? [[String: Any]] ?? []).compactMap {
             guard let ch = $0["channel"] as? Int else { return nil }
             return OutputPatch(channel: ch, name: $0["name"] as? String ?? "", format: $0["format"] as? String ?? "standard",

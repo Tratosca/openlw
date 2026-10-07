@@ -278,7 +278,7 @@ fn mono_and_multi_device_patches() {
 
     // Multi: Out 1 → channel 4006; channel 23 left channel → In 2 (one channel).
     let multi: Config = serde_json::from_value(serde_json::json!({
-        "iface": lo.name, "advertise": false, "device_layout": "multi",
+        "iface": lo.name, "advertise": false, "device_layout": "multi", "uncoupled_inputs": [2],
         "device": {"channels_to_net": 2, "channels_from_net": 4},
         "sources": [{"channel": 4006, "name": "MAC", "format": "standard", "device": 1, "device_channels": [1, 2]}],
         "destinations": [{"channel": 23, "mix": "left", "device": 2, "device_channels": [1]}]

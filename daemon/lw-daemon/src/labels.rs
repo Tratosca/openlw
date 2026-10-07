@@ -1,8 +1,8 @@
 //! Names published by the device: device names and each channel's name.
 //!
-//! - Channels: “2 - Studio A L” / “… R” for an input patched to Livewire channel 2 (name
-//!   advertised on the network, falling back to the number); “2 - Studio A (L+R)” for a mono
-//!   patch (also “(L)”, “(R)”); “4005 - STUDIO MAC L” for a transmitted output. Surround:
+//! - Channels: “2 - Studio A L” / “… R” for an input fed by the left / right channel of Livewire
+//!   channel 2 (name advertised on the network, falling back to the number); “2 - Studio A
+//!   (L+R)” for the sum of both; “4005 - STUDIO MAC L” for a transmitted output. Surround:
 //!   suffixes 1–8. Unpatched channel: empty name (CoreAudio displays its default name).
 //! - Devices, `duplex` layout: “OpenLW” (fixed name).
 //! - Devices, `multi` layout: “OpenLW In n” / “OpenLW Out n”, or with `custom_device_names`
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::config::{Config, Mix};
+use crate::config::Config;
 
 /// Base device names (macos/plugin/src/OpenLWPlugIn.c, daemon/lw-pw).
 pub const DEVICE_NAME: &str = "OpenLW";
@@ -69,12 +69,16 @@ fn suffixes(n: usize) -> Vec<String> {
     }
 }
 
-fn mix_tag(m: Mix) -> &'static str {
-    match m {
-        Mix::Left => "L",
-        Mix::Right => "R",
-        Mix::Sum => "L+R",
-    }
+/// Side of a tap: “L”, “R”, “L+R” (stereo stream; in parentheses for a channel name when
+/// `paren`), or the surround channel number.
+fn tap_tag(from: &[u8], stereo: bool, paren: bool) -> String {
+    let side = match (stereo, from) {
+        (true, [1]) => "L".to_string(),
+        (true, [2]) => "R".to_string(),
+        (true, [1, 2]) => return if paren { "(L+R)".into() } else { "L+R".into() },
+        _ => from.iter().map(u8::to_string).collect::<Vec<_>>().join("+"),
+    };
+    side
 }
 
 fn label(channel: u16, name: Option<&str>) -> String {
@@ -132,32 +136,42 @@ pub fn compute(cfg: &Config, announced: &BTreeMap<u32, Announced>) -> Labels {
         Some(start.get(d)? + usize::from(dc).checked_sub(1)?)
     };
     for d in &cfg.destinations {
-        let (Some(ch), Some(chs)) = (d.channel, &d.device_channels) else {
+        let Some(ch) = d.channel else {
             continue;
         };
         let a = announced.get(&u32::from(ch));
         let base = label(ch, a.map(|a| a.name.as_str()));
-        let names: Vec<String> = match d.mix {
-            Some(m) => vec![format!("{base} ({})", mix_tag(m))],
-            None => suffixes(chs.len())
-                .into_iter()
-                .map(|sfx| format!("{base} {sfx}"))
-                .collect(),
-        };
-        for (dc, n) in chs.iter().zip(names) {
-            if let Some(slot) = flat(&in_start, d.device, *dc).and_then(|i| input_names.get_mut(i))
+        let stereo = d.stream_channels() == 2;
+        for t in &d.taps {
+            let name = format!("{base} {}", tap_tag(&t.from, stereo, true));
+            if let Some(slot) =
+                flat(&in_start, t.device, t.channel).and_then(|i| input_names.get_mut(i))
             {
-                *slot = n;
+                *slot = name;
             }
         }
-        if let (true, true, Some(slot)) = (
-            multi,
-            cfg.custom_device_names,
-            d.device
-                .and_then(|n| usize::from(n).checked_sub(1))
-                .and_then(|i| input_device_names.get_mut(i)),
-        ) {
-            *slot = custom(INPUT_DEVICE_NAME, ch, a, d.mix.map(mix_tag));
+        // Device named after its stream; a mono device also says which side.
+        if !(multi && cfg.custom_device_names) {
+            continue;
+        }
+        for n in d
+            .taps
+            .iter()
+            .filter_map(|t| t.device)
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            let mono = !cfg.coupled(n);
+            let tag = d
+                .taps
+                .iter()
+                .find(|t| t.device == Some(n) && mono)
+                .map(|t| tap_tag(&t.from, stereo, false));
+            if let Some(slot) = usize::from(n)
+                .checked_sub(1)
+                .and_then(|i| input_device_names.get_mut(i))
+            {
+                *slot = custom(INPUT_DEVICE_NAME, ch, a, tag.as_deref());
+            }
         }
     }
     for s in &cfg.sources {
@@ -253,7 +267,7 @@ mod tests {
             None => String::new(),
         };
         let c: Config = serde_json::from_str(&format!(
-            r#"{{"iface":"lo0","device_layout":"multi","device":{{"channels_to_net":4,"channels_from_net":8}}{naming},
+            r#"{{"iface":"lo0","device_layout":"multi","device":{{"channels_to_net":4,"channels_from_net":8}}{naming},"uncoupled_inputs":[2],
                 "destinations":[{{"channel":2,"device":1,"device_channels":[1,2]}},
                                 {{"channel":21,"device":2,"mix":"left","device_channels":[1]}},
                                 {{"channel":5,"kind":"surround","device":4,"device_channels":[1,2,3,4,5,6,7,8]}}],
@@ -286,7 +300,7 @@ mod tests {
         assert_eq!(l.input_names.len(), 13);
         assert_eq!(
             &l.input_names[..3],
-            ["2 - Studio A L", "2 - Studio A R", "21 (L)"]
+            ["2 - Studio A L", "2 - Studio A R", "21 L"]
         );
         assert_eq!(l.input_names[5], "5 1");
         assert_eq!(l.output_names[2], "4005 - MAC 1-2 L");

@@ -57,6 +57,14 @@ fn device_geometry_follows_configuration() {
     .unwrap();
     let stop = Stop::new();
     std::thread::scope(|s| {
+        // A failed assertion stops the supervisor too (otherwise the scope waits forever).
+        struct StopOnDrop<'a>(&'a Stop);
+        impl Drop for StopOnDrop<'_> {
+            fn drop(&mut self) {
+                self.0.request();
+            }
+        }
+        let _guard = StopOnDrop(&stop);
         let h = s.spawn(|| {
             supervisor::supervise(&shared, Some(&server), cfg, None, &stop, true)
                 .map_err(|e| e.to_string())
@@ -150,9 +158,18 @@ fn device_geometry_follows_configuration() {
             assert_eq!(r["ok"], true, "{r}");
             std::thread::sleep(Duration::from_millis(500));
             assert_eq!(call(&client, json!({"cmd":"geometry"}))["generation"], 3);
+            // L + R on a coupled device: no width change.
             let r = call(
                 &client,
-                json!({"cmd":"patch_input","channel":22,"device":2,"mix":"sum","device_channels":[1]}),
+                json!({"cmd":"patch_input","channel":22,"taps":[{"device":2,"channel":1,"from":[1,2]}]}),
+            );
+            assert_eq!(r["ok"], true, "{r}");
+            std::thread::sleep(Duration::from_millis(500));
+            assert_eq!(call(&client, json!({"cmd":"geometry"}))["generation"], 3);
+            // Uncoupled device: mono, new region.
+            let r = call(
+                &client,
+                json!({"cmd":"set_coupling","pair":2,"coupled":false}),
             );
             assert_eq!(r["ok"], true, "{r}");
             assert!(wait(|| call(&client, json!({"cmd":"geometry"}))

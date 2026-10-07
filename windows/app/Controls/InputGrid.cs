@@ -1,19 +1,28 @@
 // Input patch matrix: rows = sources (discovered, configured, manual), columns = device input
-// pairs. A cell sends the source to that pair (click again to release); the headphone button
-// previews the source; ✕ removes a manual or unadvertised row. Same behavior as the macOS grid.
+// channels, headed per pair (meters and state). A free cell asks the window for a patch (stereo on
+// the pair, or one channel in mono); a patch is drawn as one block over its channels, with its
+// tag, and a click on it releases it. The headphone button previews the source; ✕ removes a
+// manual or unadvertised row. Same behavior as the macOS grid (duplex layout).
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using OpenLW.Daemon;
 
 namespace OpenLW.Controls;
 
-public sealed record GridRow(DiscoveredSource Source, int? PatchedColumn, string Origin, bool Removable);
+/// Patch drawn on a row: first column (0-based device channel), column count, tag (“L”, “R”,
+/// “L+R”, “8”, or empty for a stereo patch).
+public sealed record GridPatch(int Column, int Span, string Tag)
+{
+    public bool Covers(int column) => column >= Column && column < Column + Span;
+}
+
+public sealed record GridRow(DiscoveredSource Source, GridPatch? Patch, string Origin, bool Removable);
 
 public sealed class InputGrid : Grid
 {
-    private const double ColumnWidth = 96;
+    private const double ColumnWidth = 48;
+    private const double Spacing = 4;
     private List<GridRow> rows = [];
     private List<List<int>> pairs = [];
     private int? listeningRow;
@@ -21,17 +30,19 @@ public sealed class InputGrid : Grid
     private readonly List<TextBlock> columnStatus = [];
     private Meter? listenMeter;
 
-    public event Action<int, int>? Toggle;   // row, column
+    /// Cell click: row, column (0-based device channel), clicked element (menu anchor).
+    public event Action<int, int, FrameworkElement>? Toggle;
     public event Action<int>? Listen;        // row
     public event Action<int>? Remove;        // row
 
     public InputGrid()
     {
-        ColumnSpacing = 6;
+        ColumnSpacing = Spacing;
         RowSpacing = 4;
     }
 
-    /// Replaces rows, pairs and preview row; rebuilds only when something changed.
+    /// Replaces rows, header pairs (1-based device channels) and preview row; rebuilds only
+    /// when something changed.
     public void Update(List<GridRow> newRows, List<List<int>> newPairs, int? listening)
     {
         bool same = listening == listeningRow && newRows.SequenceEqual(rows) &&
@@ -45,11 +56,12 @@ public sealed class InputGrid : Grid
         }
     }
 
-    public void ShowLevels(List<IReadOnlyList<double?>> columns, List<string> status, double? listenLevel)
+    /// Levels and state per header pair.
+    public void ShowLevels(List<IReadOnlyList<double?>> groups, List<string> status, double? listenLevel)
     {
-        for (int i = 0; i < columnMeters.Count && i < columns.Count; i++)
+        for (int i = 0; i < columnMeters.Count && i < groups.Count; i++)
         {
-            columnMeters[i].Show(columns[i]);
+            columnMeters[i].Show(groups[i]);
         }
         for (int i = 0; i < columnStatus.Count && i < status.Count; i++)
         {
@@ -66,37 +78,36 @@ public sealed class InputGrid : Grid
         columnMeters.Clear();
         columnStatus.Clear();
         listenMeter = null;
-        // Columns: preview, channel, name, origin, one per pair, removal.
-        foreach (double w in new double[] { 36, 60, 150, 170 })
+        int columns = pairs.Sum(p => p.Count);
+        // Columns: preview, channel, name, origin, one per device channel, removal.
+        foreach (double w in new double[] { 36, 60, 150, 150 })
         {
             ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w) });
         }
-        foreach (var _ in pairs)
+        for (int c = 0; c < columns; c++)
         {
             ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ColumnWidth) });
         }
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
 
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        for (int c = 0; c < pairs.Count; c++)
+        foreach (List<int> pair in pairs)
         {
-            List<int> pair = pairs[c];
+            double width = pair.Count * ColumnWidth + (pair.Count - 1) * Spacing;
             var head = new StackPanel { Spacing = 3, HorizontalAlignment = HorizontalAlignment.Center };
-            head.Children.Add(Caption($"Inputs {pair[0]}-{pair[^1]}", center: true));
-            var meter = new Meter(2, ColumnWidth - 16);
+            head.Children.Add(Caption(pair.Count == 1 ? Loc.F("InputSingle", pair[0]) : Loc.F("InputsRange", pair[0], pair[^1]), center: true));
+            var meter = new Meter(pair.Count, width - 16) { HorizontalAlignment = HorizontalAlignment.Center };
             columnMeters.Add(meter);
             head.Children.Add(meter);
-            var st = Caption("free", center: true);
+            var st = Caption(Loc.S("StatusFree"), center: true);
             columnStatus.Add(st);
             head.Children.Add(st);
-            Place(head, 0, 4 + c);
+            Place(head, 0, 4 + pair[0] - 1, pair.Count);
         }
         if (rows.Count == 0)
         {
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var empty = Caption("No sources discovered. Choose the interface, or enter a channel below.");
-            Place(empty, 1, 0);
-            SetColumnSpan(empty, 4 + pairs.Count);
+            Place(Caption(Loc.S("NoSources")), 1, 0, 4 + columns);
             return;
         }
         for (int r = 0; r < rows.Count; r++)
@@ -111,7 +122,7 @@ public sealed class InputGrid : Grid
                 Content = new FontIcon { Glyph = "", FontSize = 14 }, // headphones
                 Padding = new Thickness(6, 4, 6, 4),
             };
-            ToolTipService.SetToolTip(listen, listeningRow == r ? "Stop listening" : "Listen on the Windows output");
+            ToolTipService.SetToolTip(listen, Loc.S(listeningRow == r ? "StopListening" : "ListenTooltip"));
             if (listeningRow == r)
             {
                 listen.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
@@ -128,32 +139,55 @@ public sealed class InputGrid : Grid
                 name.Children.Add(listenMeter);
             }
             Place(name, y, 2);
-            string kind = g.Source.PatchKind == "surround" ? " · surround" : g.Source.PatchKind == "backfeed" ? " · backfeed" : "";
+            string kind = g.Source.PatchKind switch
+            {
+                "surround" => $" · {Loc.S("KindTagSurround")}",
+                "backfeed" => $" · {Loc.S("KindTagBackfeed")}",
+                _ => "",
+            };
             Place(Caption(g.Origin + kind), y, 3);
 
-            for (int c = 0; c < pairs.Count; c++)
+            for (int c = 0; c < columns; c++)
             {
-                int column = c;
-                bool on = g.PatchedColumn == c;
-                var cell = new ToggleButton
+                if (g.Patch?.Covers(c) == true)
                 {
-                    IsChecked = on,
-                    Content = on ? new FontIcon { Glyph = "", FontSize = 12 } : null, // check mark
+                    continue;
+                }
+                int column = c;
+                var cell = new Button { HorizontalAlignment = HorizontalAlignment.Stretch, Height = 30, Padding = new Thickness(0) };
+                int ch = c + 1, pairFirst = ch % 2 == 0 ? ch - 1 : ch;
+                ToolTipService.SetToolTip(cell, g.Source.PatchKind == "surround"
+                    ? Loc.F("SendToInputs", g.Source.Channel, pairFirst, pairFirst + 7)
+                    : Loc.F("SendToInput", g.Source.Channel, ch));
+                cell.Click += (s, _) => Toggle?.Invoke(row, column, (FrameworkElement)s);
+                Place(cell, y, 4 + c);
+            }
+            // Patch: one block over its channels, with its tag (a check mark for stereo).
+            if (g.Patch is { } p && p.Column >= 0 && p.Column < columns)
+            {
+                int span = Math.Min(p.Span, columns - p.Column);
+                var block = new Button
+                {
+                    Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+                    Content = p.Tag.Length == 0
+                        ? new FontIcon { Glyph = "", FontSize = 12 } // check mark
+                        : new TextBlock { Text = p.Tag, FontSize = 12 },
                     HorizontalAlignment = HorizontalAlignment.Stretch,
                     Height = 30,
+                    Padding = new Thickness(0),
                 };
-                ToolTipService.SetToolTip(cell, on
-                    ? $"Release inputs {pairs[c][0]}-{pairs[c][^1]}"
-                    : $"Send channel {g.Source.Channel} to inputs {pairs[c][0]}-{pairs[c][^1]}");
-                cell.Click += (_, _) => Toggle?.Invoke(row, column);
-                Place(cell, y, 4 + c);
+                ToolTipService.SetToolTip(block, span == 1
+                    ? Loc.F("ReleaseInput", p.Column + 1)
+                    : Loc.F("ReleaseInputs", p.Column + 1, p.Column + span));
+                block.Click += (s, _) => Toggle?.Invoke(row, p.Column, (FrameworkElement)s);
+                Place(block, y, 4 + p.Column, span);
             }
             if (g.Removable)
             {
                 var remove = new Button { Content = "✕", Padding = new Thickness(6, 2, 6, 2) };
-                ToolTipService.SetToolTip(remove, "Remove from grid");
+                ToolTipService.SetToolTip(remove, Loc.S("RemoveFromGrid"));
                 remove.Click += (_, _) => Remove?.Invoke(row);
-                Place(remove, y, 4 + pairs.Count);
+                Place(remove, y, 4 + columns);
             }
         }
     }
@@ -168,10 +202,14 @@ public sealed class InputGrid : Grid
         TextTrimming = TextTrimming.CharacterEllipsis,
     };
 
-    private void Place(FrameworkElement e, int row, int column)
+    private void Place(FrameworkElement e, int row, int column, int span = 1)
     {
         SetRow(e, row);
         SetColumn(e, column);
+        if (span > 1)
+        {
+            SetColumnSpan(e, span);
+        }
         Children.Add(e);
     }
 }

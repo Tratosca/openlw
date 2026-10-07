@@ -5,6 +5,7 @@
   <project_license>Apache-2.0</project_license>
   <name>OpenLW</name>
   <summary>Livewire and AES67 audio on the computer</summary>
+  <summary xml:lang="fr">Audio Livewire et AES67 sur l’ordinateur</summary>
   <developer id="fr.francois-brille">
     <name>François Brille</name>
   </developer>

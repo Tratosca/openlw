@@ -502,10 +502,10 @@ fn parse_edit(v: &Value) -> Result<Edit, String> {
             let layout: Layout =
                 serde_json::from_value(v.get("layout").cloned().unwrap_or(Value::Null))
                     .map_err(|_| "`layout`: duplex or multi".to_string())?;
-            // Numbered devices exist only in the macOS HAL plugin (ASIO: one driver;
-            // PipeWire: one source and one sink).
-            if layout == Layout::Multi && !cfg!(target_os = "macos") {
-                return Err("multi layout is available on macOS only".into());
+            // Numbered devices: macOS HAL plugin and Linux PipeWire nodes. ASIO has a single
+            // driver per application.
+            if layout == Layout::Multi && cfg!(windows) {
+                return Err("multi layout is not available on Windows (ASIO: one device)".into());
             }
             Ok(Edit::SetDeviceLayout(layout))
         }

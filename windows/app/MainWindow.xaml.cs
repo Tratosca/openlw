@@ -22,15 +22,15 @@ public sealed partial class MainWindow : Window
     private const int MaxPairs = 16;
     private static readonly (string Value, string Title)[] Latencies =
     [
-        ("low", "Low: ≈ 8 ms added, dedicated network"),
-        ("normal", "Normal: ≈ 17 ms added"),
-        ("safe", "Safe: ≈ 35 ms added, shared network or busy computer"),
+        ("low", Loc.S("LatencyLow")),
+        ("normal", Loc.S("LatencyNormal")),
+        ("safe", Loc.S("LatencySafe")),
     ];
     private static readonly (int Dscp, string Title)[] Dscps =
     [
-        (46, "EF (46): Livewire default"),
-        (34, "AF41 (34): recommended for AES67"),
-        (0, "None (0)"),
+        (46, Loc.S("DscpEf")),
+        (34, Loc.S("DscpAf41")),
+        (0, Loc.S("DscpNone")),
     ];
 
     private readonly DaemonClient client = new();
@@ -66,10 +66,10 @@ public sealed partial class MainWindow : Window
         updating = true;
         foreach (ComboBox c in new[] { InCount, OutCount })
         {
-            string unit = c == InCount ? "inputs" : "outputs";
+            string key = c == InCount ? "InCount" : "OutCount";
             for (int n = 1; n <= MaxPairs; n++)
             {
-                c.Items.Add($"{n} {(n == 1 ? "channel" : "channels")} ({2 * n} {unit})");
+                c.Items.Add(n == 1 ? Loc.S(key + "One") : Loc.F(key + "Many", n, 2 * n));
             }
         }
         foreach (var l in Latencies)
@@ -199,15 +199,12 @@ public sealed partial class MainWindow : Window
         if (link.Searching)
         {
             StateDot.Fill = Brush(0xFF, 0x9F, 0x0A);
-            StateText.Text = link.Auto
-                ? "Searching for the Livewire network. Connect the computer to the Livewire network, or choose the interface."
-                : $"Interface “{config.Iface}” unavailable. Connect it, or choose Automatic.";
+            StateText.Text = link.Auto ? Loc.S("StateSearching") : Loc.F("StateIfaceUnavailable", config.Iface);
             return;
         }
         StateDot.Fill = Brush(0x34, 0xC7, 0x59);
         string name = link.Friendly == link.Iface ? link.Iface : $"{link.Friendly} ({link.Iface})";
-        StateText.Text = $"Connected to the Livewire network via {name} · {link.Ipv4}" +
-                         (link.Auto ? " · interface chosen automatically" : "");
+        StateText.Text = Loc.F("StateConnected", name, link.Ipv4) + (link.Auto ? $" · {Loc.S("StateAutoIface")}" : "");
     }
 
     // ---------- Display updates ----------
@@ -232,7 +229,9 @@ public sealed partial class MainWindow : Window
         {
             RebuildOutputRows(Math.Max(1, c.ChannelsToNet / 2));
         }
-        pairs = Enumerable.Range(0, c.ChannelsFromNet / 2).Select(i => new List<int> { 2 * i + 1, 2 * i + 2 }).ToList();
+        // Header pairs of device channels (an odd count ends with a single channel).
+        pairs = Enumerable.Range(0, (c.ChannelsFromNet + 1) / 2)
+            .Select(i => Enumerable.Range(2 * i + 1, Math.Min(2, c.ChannelsFromNet - 2 * i)).ToList()).ToList();
         foreach (OutputRowView row in outputRows)
         {
             row.Show(c.Outputs.FirstOrDefault(o => o.DeviceChannels is not null && o.DeviceChannels.SequenceEqual(row.Pair)));
@@ -245,13 +244,13 @@ public sealed partial class MainWindow : Window
     private void UpdateIfaceCombo()
     {
         bool auto = config.AutoIface;
-        string autoTitle = !auto ? "Automatic" : link.Searching ? "Automatic · searching" : $"Automatic · {link.Friendly}";
+        string autoTitle = !auto ? Loc.S("IfaceAuto") : link.Searching ? Loc.S("IfaceAutoSearching") : Loc.F("IfaceAutoNamed", link.Friendly);
         var items = new List<(string Title, string Name)> { (autoTitle, "auto") };
         items.AddRange(ifaces.Where(i => i.Candidate || (!auto && i.Name == config.Iface))
             .OrderBy(i => i.Livewire ? 0 : 1).ThenBy(i => i.Name).Select(i => (i.Title, i.Name)));
         if (!auto && ifaces.All(i => i.Name != config.Iface))
         {
-            items.Add(($"{config.Iface} (unavailable)", config.Iface));
+            items.Add((Loc.F("IfaceUnavailable", config.Iface), config.Iface));
         }
         updating = true;
         var existing = IfaceCombo.Items.OfType<ComboBoxItem>().Select(i => $"{i.Content}|{i.Tag}").ToList();
@@ -268,10 +267,25 @@ public sealed partial class MainWindow : Window
         updating = false;
     }
 
-    private int? PatchedColumn(int channel, string kind)
+    /// Configured patch of a source, if any.
+    private InputPatch? PatchOf(int channel, string kind) =>
+        config.Inputs.FirstOrDefault(i => i.Channel == channel && i.Kind == kind && i.DeviceChannels.Count > 0);
+
+    /// Grid patch: channel span and tag (mono mix, surround width, nothing for stereo).
+    private GridPatch? GridPatchOf(int channel, string kind)
     {
-        InputPatch? p = config.Inputs.FirstOrDefault(i => i.Channel == channel && i.Kind == kind && i.DeviceChannels.Count > 0);
-        return p is null ? null : (p.DeviceChannels[0] - 1) / 2;
+        if (PatchOf(channel, kind) is not { } p)
+        {
+            return null;
+        }
+        string tag = p.Mix switch
+        {
+            "left" => Loc.S("TagLeft"),
+            "right" => Loc.S("TagRight"),
+            "sum" => Loc.S("TagSum"),
+            _ => p.Kind == "surround" ? "8" : "",
+        };
+        return new GridPatch(p.DeviceChannels.Min() - 1, p.DeviceChannels.Count, tag);
     }
 
     /// Matrix rows: discovered sources, then manual entries, then configured unadvertised streams.
@@ -283,7 +297,7 @@ public sealed partial class MainWindow : Window
         {
             if (seen.Add($"{s.Channel}/{s.PatchKind}"))
             {
-                rows.Add(new GridRow(s, PatchedColumn(s.Channel, s.PatchKind), origin, removable));
+                rows.Add(new GridRow(s, GridPatchOf(s.Channel, s.PatchKind), origin, removable));
             }
         }
         foreach (DiscoveredSource s in discovered)
@@ -292,11 +306,11 @@ public sealed partial class MainWindow : Window
         }
         foreach (ManualSource m in settings.Manual)
         {
-            Add(new DiscoveredSource(m.Channel, "", "", m.Kind, ""), "manual", true);
+            Add(new DiscoveredSource(m.Channel, "", "", m.Kind, ""), Loc.S("OriginManual"), true);
         }
         foreach (InputPatch p in config.Inputs.Where(p => p.Channel is not null))
         {
-            Add(new DiscoveredSource(p.Channel!.Value, "", "", p.Kind, ""), "not advertised", true);
+            Add(new DiscoveredSource(p.Channel!.Value, "", "", p.Kind, ""), Loc.S("OriginNotAdvertised"), true);
         }
         gridRows = rows;
         int idx = listening is { } l ? rows.FindIndex(r => r.Source.Channel == l.Channel && r.Source.PatchKind == l.Kind) : -1;
@@ -309,8 +323,9 @@ public sealed partial class MainWindow : Window
         var columns = pairs.Select(p => (IReadOnlyList<double?>)p.Select(c => DeviceMeters.Peak(meters.FromNet, [c])).ToList()).ToList();
         var status = pairs.Select(p =>
         {
-            var route = meters.Inputs.FirstOrDefault(r => r.Channels.Contains(p[0]));
-            return route.Channels is null ? "free" : route.Primed ? "receiving audio" : "waiting";
+            // A mono patch occupies one channel of the pair.
+            var route = meters.Inputs.FirstOrDefault(r => r.Channels.Intersect(p).Any());
+            return Loc.S(route.Channels is null ? "StatusFree" : route.Primed ? "StatusReceiving" : "StatusWaiting");
         }).ToList();
         grid.ShowLevels(columns, status, listening is null ? null : listener.TakePeak());
         foreach (OutputRowView row in outputRows)
@@ -396,19 +411,19 @@ public sealed partial class MainWindow : Window
             var lost = new List<string>();
             if (lostOut > 0)
             {
-                lost.Add($"{lostOut} transmission{(lostOut > 1 ? "s" : "")} stopped");
+                lost.Add(lostOut == 1 ? Loc.S("LostOutputsOne") : Loc.F("LostOutputsMany", lostOut));
             }
             if (lostIn > 0)
             {
-                lost.Add($"{lostIn} source{(lostIn > 1 ? "s" : "")} removed from the inputs");
+                lost.Add(lostIn == 1 ? Loc.S("LostInputsOne") : Loc.F("LostInputsMany", lostIn));
             }
             var dialog = new ContentDialog
             {
                 XamlRoot = Content.XamlRoot,
-                Title = "Reduce the number of channels?",
-                Content = string.Join(", ", lost) + ". The software using the OpenLW driver must reset it.",
-                PrimaryButtonText = "Reduce",
-                CloseButtonText = "Cancel",
+                Title = Loc.S("ReduceTitle"),
+                Content = Loc.F("ReduceText", string.Join(", ", lost)),
+                PrimaryButtonText = Loc.S("ReduceButton"),
+                CloseButtonText = Loc.S("CancelButton"),
                 DefaultButton = ContentDialogButton.Close,
             };
             if (await dialog.ShowAsync() != ContentDialogResult.Primary)
@@ -432,7 +447,7 @@ public sealed partial class MainWindow : Window
     {
         if (!int.TryParse(ManualChannel.Text.Trim(), out int ch) || ch < 1 || ch > 32766)
         {
-            ShowError(new DaemonError(DaemonErrorKind.Refused, "invalid channel. Enter a number from 1 to 32766."));
+            ShowError(new DaemonError(DaemonErrorKind.Refused, Loc.S("ReasonInvalidChannel")));
             return;
         }
         string kind = new[] { "stereo", "backfeed", "surround" }[Math.Max(0, ManualKind.SelectedIndex)];
@@ -446,29 +461,59 @@ public sealed partial class MainWindow : Window
         UpdateGrid();
     }
 
-    private void ToggleInput(int row, int column)
+    /// Cell click: releases the patch under it, patches a surround source on 8 channels from the
+    /// pair start, or offers stereo on the pair and the three mono mixes on the channel.
+    private void ToggleInput(int row, int column, FrameworkElement anchor)
     {
-        if (row >= gridRows.Count || column >= pairs.Count)
+        if (row >= gridRows.Count || column >= config.ChannelsFromNet)
         {
             return;
         }
         GridRow r = gridRows[row];
-        List<int> pair = pairs[column];
-        if (r.PatchedColumn == column)
+        DiscoveredSource s = r.Source;
+        if (r.Patch is { } patch && patch.Covers(column) && PatchOf(s.Channel, s.PatchKind) is { } current)
         {
-            Mutate(Cmd("unpatch_input", ("device_channels", Ints(pair))));
+            Mutate(Cmd("unpatch_input", ("device_channels", Ints(current.DeviceChannels))));
             return;
         }
-        int width = r.Source.PatchKind == "surround" ? 8 : 2, first = pair[0];
-        if (first + width - 1 > config.ChannelsFromNet)
+        int ch = column + 1, pairFirst = ch % 2 == 0 ? ch - 1 : ch;
+        if (s.PatchKind == "surround")
         {
-            ShowError(new DaemonError(DaemonErrorKind.Refused,
-                $"a surround source occupies 8 inputs. Choose a pair from 1-2 to {config.ChannelsFromNet - 7}-{config.ChannelsFromNet - 6}."));
-            UpdateGrid();
+            if (pairFirst + 7 > config.ChannelsFromNet)
+            {
+                ShowError(new DaemonError(DaemonErrorKind.Refused,
+                    Loc.F("ReasonSurroundWidth", config.ChannelsFromNet - 7, config.ChannelsFromNet - 6)));
+                return;
+            }
+            PatchInput(s, null, Enumerable.Range(pairFirst, 8));
             return;
         }
-        Mutate(Cmd("patch_input", ("channel", r.Source.Channel), ("kind", r.Source.PatchKind),
-            ("device_channels", Ints(Enumerable.Range(first, width)))));
+        var menu = new MenuFlyout();
+        void Item(string title, string? mix, IEnumerable<int> channels)
+        {
+            var item = new MenuFlyoutItem { Text = title };
+            item.Click += (_, _) => PatchInput(s, mix, channels);
+            menu.Items.Add(item);
+        }
+        if (pairFirst + 1 <= config.ChannelsFromNet)
+        {
+            Item(Loc.F("MenuStereo", pairFirst, pairFirst + 1), null, [pairFirst, pairFirst + 1]);
+        }
+        Item(Loc.F("MenuLeft", ch), "left", [ch]);
+        Item(Loc.F("MenuRight", ch), "right", [ch]);
+        Item(Loc.F("MenuSum", ch), "sum", [ch]);
+        menu.ShowAt(anchor);
+    }
+
+    /// Patches source `s` on device channels `channels`; `mix`: mono mix of a single channel.
+    private void PatchInput(DiscoveredSource s, string? mix, IEnumerable<int> channels)
+    {
+        JsonObject request = Cmd("patch_input", ("channel", s.Channel), ("kind", s.PatchKind), ("device_channels", Ints(channels)));
+        if (mix is not null)
+        {
+            request["mix"] = mix;
+        }
+        Mutate(request);
     }
 
     /// Removes a manual or unadvertised row; releases its inputs if patched.
@@ -511,8 +556,7 @@ public sealed partial class MainWindow : Window
         }
         if (link.Searching || link.Ipv4.Length == 0)
         {
-            ShowError(new DaemonError(DaemonErrorKind.Refused,
-                "the computer isn't connected to the Livewire network yet. Choose the interface, then try again."));
+            ShowError(new DaemonError(DaemonErrorKind.Refused, Loc.S("ReasonNotConnected")));
             return;
         }
         string group = s.Stream.Length == 0 ? Livewire.Group(s.Channel, s.PatchKind) : s.Stream;
@@ -550,7 +594,7 @@ public sealed partial class MainWindow : Window
         }
         if (row.Channel is not int ch)
         {
-            ShowError(new DaemonError(DaemonErrorKind.Refused, "invalid channel. Enter a number from 1 to 32766."));
+            ShowError(new DaemonError(DaemonErrorKind.Refused, Loc.S("ReasonInvalidChannel")));
             row.Show(previous);
             return;
         }
@@ -647,15 +691,15 @@ public sealed class OutputRowView : StackPanel
 {
     private static readonly (string Value, string Title)[] Formats =
     [
-        ("standard", "Standard (5 ms)"),
-        ("aes67", "AES67 (1 ms)"),
-        ("livestream", "Livestream (0.25 ms)"),
+        ("standard", Loc.S("FormatStandard")),
+        ("aes67", Loc.S("FormatAes67")),
+        ("livestream", Loc.S("FormatLivestream")),
     ];
 
-    private readonly TextBox channelBox = new() { PlaceholderText = "channel", Width = 90 };
-    private readonly TextBox nameBox = new() { PlaceholderText = "advertised name", Width = 200 };
+    private readonly TextBox channelBox = new() { PlaceholderText = Loc.S("OutputChannelPlaceholder"), Width = 90 };
+    private readonly TextBox nameBox = new() { PlaceholderText = Loc.S("OutputNamePlaceholder"), Width = 200 };
     private readonly ComboBox formatCombo = new() { MinWidth = 180 };
-    private readonly CheckBox emitCheck = new() { Content = "Transmit" };
+    private readonly CheckBox emitCheck = new() { Content = Loc.S("TransmitCheck") };
     private bool showing;
 
     public List<int> Pair { get; }
@@ -667,7 +711,7 @@ public sealed class OutputRowView : StackPanel
         Pair = pair;
         Orientation = Orientation.Horizontal;
         Spacing = 10;
-        Children.Add(new TextBlock { Text = $"Outputs {pair[0]}-{pair[1]}", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+        Children.Add(new TextBlock { Text = Loc.F("OutputsRange", pair[0], pair[1]), Width = 90, VerticalAlignment = VerticalAlignment.Center });
         Children.Add(Meter);
         foreach (var f in Formats)
         {

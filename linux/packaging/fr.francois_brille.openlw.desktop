@@ -2,10 +2,13 @@
 Type=Application
 Name=OpenLW
 GenericName=Livewire and AES67 Audio over IP
+GenericName[fr]=Audio sur IP Livewire et AES67
 Comment=Receive and transmit Livewire and AES67 audio on the computer
+Comment[fr]=Recevoir et émettre de l’audio Livewire et AES67 sur l’ordinateur
 Exec=openlw
 Icon=fr.francois_brille.openlw
 Terminal=false
 Categories=AudioVideo;Audio;
 Keywords=Livewire;AES67;AoIP;RTP;PipeWire;network;radio;
+Keywords[fr]=Livewire;AES67;AoIP;RTP;PipeWire;réseau;radio;
 StartupNotify=true

@@ -42,14 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func uninstall(_ sender: Any) {
         guard FileManager.default.isExecutableFile(atPath: Self.uninstaller) else {
-            alert("Uninstaller Not Found", "\(Self.uninstaller) is missing. OpenLW was not installed by its installer.")
+            alert(L("Uninstaller Not Found"), L("%@ is missing. OpenLW was not installed by its installer.", Self.uninstaller))
             return
         }
         let confirm = NSAlert()
-        confirm.messageText = "Uninstall OpenLW?"
-        confirm.informativeText = "The “OpenLW” device, the network service, and this app are removed. Settings are deleted. Mac audio stops for a few seconds."
-        confirm.addButton(withTitle: "Uninstall")
-        confirm.addButton(withTitle: "Cancel")
+        confirm.messageText = L("Uninstall OpenLW?")
+        confirm.informativeText = L("The OpenLW devices, the network service, and this app are removed. Settings are deleted. Mac audio stops for a few seconds.")
+        confirm.addButton(withTitle: L("Uninstall"))
+        confirm.addButton(withTitle: L("Cancel"))
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
         // Administrator privileges requested by macOS (standard authentication dialog).
         let script = "do shell script quoted form of \"\(Self.uninstaller)\" with administrator privileges"
@@ -57,10 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let e = error {
             if (e[NSAppleScript.errorNumber] as? Int) == -128 { return } // Authentication canceled
-            alert("Uninstallation Incomplete", e[NSAppleScript.errorMessage] as? String ?? "Unknown error.")
+            alert(L("Uninstallation Incomplete"), e[NSAppleScript.errorMessage] as? String ?? L("Unknown error."))
             return
         }
-        alert("OpenLW has been uninstalled.", "This app will now quit.")
+        alert(L("OpenLW has been uninstalled."), L("This app will now quit."))
         NSApp.terminate(nil)
     }
 
@@ -71,8 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         a.runModal()
     }
 
+    /// Render the whole scrollable content (all panels), not only the visible part.
     private static func snapshot(_ window: NSWindow?, to path: String) {
-        guard let view = window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        let doc = (window?.contentView?.subviews.first as? NSScrollView)?.documentView
+        guard let view = doc ?? window?.contentView,
+              let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
     }
@@ -82,21 +85,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         bar.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About OpenLW", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L("About OpenLW"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Uninstall OpenLW…", action: #selector(uninstall(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: L("Uninstall OpenLW…"), action: #selector(uninstall(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide OpenLW", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(withTitle: "Quit OpenLW", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: L("Hide OpenLW"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: L("Quit OpenLW"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         // Edit menu: copy/paste in text fields.
         let editItem = NSMenuItem()
         bar.addItem(editItem)
-        let edit = NSMenu(title: "Edit")
-        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let edit = NSMenu(title: L("Edit"))
+        edit.addItem(withTitle: L("Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: L("Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: L("Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: L("Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = edit
         NSApp.mainMenu = bar
     }

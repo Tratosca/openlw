@@ -10,7 +10,7 @@
 //!   terminal), “OpenLW In - Studio A@Omnia One (ch. 2, L+R)” for a mono patch, “OpenLW In
 //!   (ch. 2)” when the source is not advertised, “OpenLW Out - MAC 1-2 (ch. 4005)”. An empty
 //!   device keeps its number.
-//! - Linux PipeWire nodes: always “OpenLW In” and “OpenLW Out”.
+//! - Linux PipeWire nodes: same names (duplex: “OpenLW In” and “OpenLW Out”).
 
 use std::collections::BTreeMap;
 

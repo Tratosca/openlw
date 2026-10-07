@@ -25,7 +25,7 @@ struct Iface {
     /// Menu label: friendly name, BSD name, address.
     var title: String {
         let base = friendly == name ? "\(name) · \(ipv4)" : "\(friendly) (\(name)) · \(ipv4)"
-        return livewire ? base + " · Livewire network" : base
+        return livewire ? base + L(" · Livewire network") : base
     }
 }
 

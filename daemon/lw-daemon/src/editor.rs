@@ -61,7 +61,7 @@ pub enum Edit {
     SetAdvertise(bool),
     /// `multi` layout: devices named after their source.
     SetDeviceNaming(bool),
-    /// macOS layout: one device or numbered devices.
+    /// Layout: one device or numbered devices (macOS, Linux).
     SetDeviceLayout(Layout),
     /// Advanced settings (only supplied fields change).
     SetAdvanced {

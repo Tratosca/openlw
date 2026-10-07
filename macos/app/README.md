@@ -14,6 +14,10 @@ Prerequisite: Xcode (macOS 26 SDK or later for `NSGlassEffectView`). Before macO
 
 `macos/scripts/build-all.sh` builds the app with the other components; `sudo macos/scripts/install-dev.sh` copies it to `/Applications`.
 
+## Languages
+
+English by default, French when the system language is French (`Resources/fr.lproj/Localizable.strings`; keys are the English text, wrapped in `L()` in the sources, placeholders `%@` only). `make check-l10n` checks that every string is translated with the same placeholders (also run by CI). Daemon error messages and the channel names published to Core Audio stay in English. Test another language without changing the system: `OpenLW.app/Contents/MacOS/OpenLW -AppleLanguages '(en)'`.
+
 ## Window
 
 | Area | Contents | XPC commands |

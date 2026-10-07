@@ -90,7 +90,7 @@ impl Iface {
             format!("{} ({}) · {}", self.friendly, self.name, self.ipv4)
         };
         if self.livewire {
-            base + " · Livewire network"
+            base + " · " + crate::i18n::tr("Livewire network")
         } else {
             base
         }
@@ -167,7 +167,25 @@ pub fn group(channel: u16, kind: &str) -> Option<Ipv4Addr> {
 pub struct InputPatch {
     pub channel: Option<u16>,
     pub kind: String,
+    /// Duplex layout: channels of the input device; multi layout: channels within `device`.
     pub device_channels: Vec<u32>,
+    /// Multi layout: input device number (“OpenLW In n”, 1-based).
+    pub device: Option<u32>,
+    /// Mono patch: "left", "right" or "sum".
+    pub mix: Option<String>,
+}
+
+impl InputPatch {
+    /// Device width this patch needs (multi layout).
+    pub fn width(&self) -> u32 {
+        if self.mix.is_some() {
+            1
+        } else if self.kind == "surround" {
+            8
+        } else {
+            2
+        }
+    }
 }
 
 /// Configured transmitted stream (source).
@@ -177,6 +195,8 @@ pub struct OutputPatch {
     pub name: String,
     pub format: String,
     pub device_channels: Option<Vec<u32>>,
+    /// Multi layout: output device number (“OpenLW Out n”, 1-based).
+    pub device: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +210,10 @@ pub struct DaemonConfig {
     pub terminal_name: String,
     pub latency: String,
     pub tos: u32,
+    /// "duplex" (“OpenLW In” and “OpenLW Out”) or "multi" (“OpenLW In n” / “OpenLW Out n”).
+    pub layout: String,
+    /// Multi layout: devices named after their source (default), otherwise “OpenLW In n”.
+    pub custom_names: bool,
 }
 
 impl Default for DaemonConfig {
@@ -204,6 +228,8 @@ impl Default for DaemonConfig {
             terminal_name: String::new(),
             latency: "normal".into(),
             tos: 184,
+            layout: "duplex".into(),
+            custom_names: true,
         }
     }
 }
@@ -212,6 +238,32 @@ impl DaemonConfig {
     /// Automatically selected interface.
     pub fn auto_iface(&self) -> bool {
         self.iface.is_empty() || self.iface == "auto"
+    }
+
+    pub fn multi(&self) -> bool {
+        self.layout == "multi"
+    }
+
+    /// Multi layout: device count per direction (one per configured pair).
+    pub fn in_devices(&self) -> u32 {
+        self.channels_from_net.div_ceil(2)
+    }
+
+    pub fn out_devices(&self) -> u32 {
+        self.channels_to_net.div_ceil(2)
+    }
+
+    /// Multi layout: width of each input device after `inputs` (2 when empty), as computed by
+    /// the daemon (daemon/lw-daemon/src/config.rs, `in_widths`).
+    pub fn in_widths(inputs: &[InputPatch], devices: u32) -> Vec<u32> {
+        (1..=devices.max(1))
+            .map(|n| {
+                inputs
+                    .iter()
+                    .find(|i| i.device == Some(n) && !i.device_channels.is_empty())
+                    .map_or(2, InputPatch::width)
+            })
+            .collect()
     }
 
     pub fn from(c: &Value) -> Self {
@@ -225,6 +277,11 @@ impl DaemonConfig {
                 .filter(|l| !l.is_empty())
                 .unwrap_or(d.latency),
             tos: u(c, "tos").unwrap_or(d.tos),
+            layout: match s(c, "device_layout").as_str() {
+                "multi" => "multi".into(),
+                _ => d.layout,
+            },
+            custom_names: b(c, "custom_device_names", true),
             channels_to_net: u(&dev, "channels_to_net").unwrap_or(2),
             channels_from_net: u(&dev, "channels_from_net").unwrap_or(2),
             inputs: objects(c, "destinations")
@@ -234,6 +291,8 @@ impl DaemonConfig {
                         .filter(|k| !k.is_empty())
                         .unwrap_or_else(|| "stereo".into()),
                     device_channels: ints(v, "device_channels"),
+                    device: u(v, "device"),
+                    mix: Some(s(v, "mix")).filter(|m| !m.is_empty()),
                 })
                 .collect(),
             outputs: objects(c, "sources")
@@ -248,6 +307,7 @@ impl DaemonConfig {
                             .get("device_channels")
                             .and_then(Value::as_array)
                             .map(|_| ints(v, "device_channels")),
+                        device: u(v, "device"),
                     })
                 })
                 .collect(),
@@ -258,9 +318,13 @@ impl DaemonConfig {
 /// Device meters and input route state, from `status.device`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DeviceMeters {
+    /// Peaks per channel, devices concatenated in order (one device in duplex layout).
     pub to_net: Vec<Option<f64>>,
     pub from_net: Vec<Option<f64>>,
-    /// Received routes (1-based device channels) → jitter buffer primed.
+    /// Channels of each output / input device of the running region.
+    pub out_widths: Vec<u32>,
+    pub in_widths: Vec<u32>,
+    /// Received routes (1-based channels, devices concatenated) → jitter buffer primed.
     pub inputs: Vec<(Vec<u32>, bool)>,
 }
 
@@ -272,11 +336,25 @@ impl DeviceMeters {
         Self {
             to_net: peaks(dev, "to_net_peak_dbfs"),
             from_net: peaks(dev, "from_net_peak_dbfs"),
+            out_widths: ints(dev, "out_widths"),
+            in_widths: ints(dev, "in_widths"),
             inputs: objects(dev, "inputs")
                 .map(|r| (ints(r, "device_channels"), b(r, "primed", false)))
                 .collect(),
         }
     }
+}
+
+/// Concatenated 1-based channels of device `n` (1-based) given device widths.
+pub fn device_channels(n: u32, widths: &[u32]) -> Vec<u32> {
+    let Some(i) = (n as usize).checked_sub(1) else {
+        return Vec::new();
+    };
+    let Some(&w) = widths.get(i) else {
+        return Vec::new();
+    };
+    let start: u32 = widths.iter().take(i).sum();
+    (start + 1..=start + w).collect()
 }
 
 /// Peak (dBFS) of a 1-based channel, or `None` for silence.
@@ -347,15 +425,34 @@ mod tests {
         assert_eq!(c.outputs[0].device_channels, Some(vec![1, 2]));
         assert_eq!(c.outputs[1].device_channels, None);
         assert_eq!(c.outputs[1].format, "standard");
+        assert!(!c.multi() && c.custom_names);
+
+        let m = DaemonConfig::from(&json!({
+            "device_layout": "multi", "custom_device_names": false,
+            "device": {"channels_to_net": 4, "channels_from_net": 6},
+            "destinations": [
+                {"channel": 1, "device": 1, "device_channels": [1], "mix": "sum"},
+                {"channel": 2, "kind": "surround", "device": 3, "device_channels": [1,2,3,4,5,6,7,8]}],
+            "sources": [{"channel": 2001, "device": 2, "device_channels": [1,2]}],
+        }));
+        assert!(m.multi() && !m.custom_names);
+        assert_eq!((m.in_devices(), m.out_devices()), (3, 2));
+        assert_eq!(m.inputs[0].mix.as_deref(), Some("sum"));
+        assert_eq!(m.outputs[0].device, Some(2));
+        assert_eq!(DaemonConfig::in_widths(&m.inputs, 3), vec![1, 2, 8]);
+        assert_eq!(device_channels(3, &[1, 2, 8]), (4..=11).collect::<Vec<_>>());
+        assert_eq!(device_channels(1, &[1, 2, 8]), vec![1]);
+        assert!(device_channels(0, &[2]).is_empty() && device_channels(2, &[2]).is_empty());
 
         let st = json!({"iface": "eth0", "ipv4": "10.0.0.2", "iface_auto": true, "searching": false,
-            "device": {"from_net_peak_dbfs": [-12.0, null], "to_net_peak_dbfs": [],
+            "device": {"from_net_peak_dbfs": [-12.0, null], "to_net_peak_dbfs": [], "in_widths": [2],
                        "inputs": [{"device_channels": [1,2], "primed": true}]}});
         let m = DeviceMeters::from(&st);
         assert_eq!(peak(&m.from_net, 1), Some(-12.0));
         assert_eq!(peak(&m.from_net, 2), None);
         assert_eq!(peak(&m.from_net, 0), None);
         assert_eq!(m.inputs, vec![(vec![1, 2], true)]);
+        assert_eq!((m.in_widths, m.out_widths), (vec![2], vec![]));
         let l = LinkStatus::from(&st);
         assert!(l.auto && !l.searching && l.friendly == "eth0");
     }

@@ -141,6 +141,8 @@ jobs:
           targets: x86_64-apple-darwin, aarch64-apple-darwin
       - name: HAL plugin harness
         run: make -C macos/plugin test
+      - name: App localization (French catalog complete, placeholders intact)
+        run: make -C macos/app check-l10n
       - name: Universal binaries and package
         run: |
           macos/scripts/build-all.sh

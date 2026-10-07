@@ -201,7 +201,7 @@ enum CtlCmd {
         #[arg(long)]
         from_net: u32,
     },
-    /// macOS layout: duplex (one OpenLW device) or multi (OpenLW In n / OpenLW Out n).
+    /// Layout (macOS, Linux): duplex (one OpenLW device) or multi (OpenLW In n / OpenLW Out n).
     SetLayout { layout: String },
     /// Multi layout: name devices after their source (otherwise OpenLW In n).
     SetNaming {

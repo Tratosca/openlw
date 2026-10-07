@@ -9,7 +9,7 @@ OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-
 
 ## Features
 
-- **Virtual audio device:** one multichannel “OpenLW” device (1–16 stereo channels in each direction), or on macOS numbered devices “OpenLW In n” and “OpenLW Out n”, one per source, named after it ([ADR 0010](docs/adr/0010-macos-device-layouts.md)).
+- **Virtual audio device:** one multichannel “OpenLW” device (1–16 stereo channels in each direction), or on macOS and Linux numbered devices “OpenLW In n” and “OpenLW Out n”, one per source, named after it ([ADR 0010](docs/adr/0010-macos-device-layouts.md)).
 - **Receive:** discover advertised network sources, patch a Livewire channel to an input pair or, in mono (left, right, or L+R), to a single input, and preview sources through the Mac's audio output.
 - **Transmit:** send each output pair on the selected Livewire channel, using the selected source name, and advertise it to other devices.
 - **Network selection:** automatically use the interface receiving Livewire advertisements; apply changes without interrupting unrelated streams.

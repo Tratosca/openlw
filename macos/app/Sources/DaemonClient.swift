@@ -77,11 +77,11 @@ enum DaemonError: Error {
     var message: String {
         switch self {
         case .unreachable:
-            return "The OpenLW service is not responding. If the problem persists, reinstall OpenLW."
+            return L("The OpenLW service is not responding. If the problem persists, reinstall OpenLW.")
         case .encoding, .decoding:
-            return "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version."
+            return L("Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version.")
         case .refused(let reason):
-            return "Could not apply the change: \(reason)"
+            return L("Could not apply the change: %@", reason)
         }
     }
 }

@@ -5,12 +5,18 @@ GTK 4 and libadwaita configuration app (Rust, gtk4-rs and libadwaita-rs), x86_64
 | Section | Contents |
 |---|---|
 | Livewire network | Connection state, interface (automatic or forced), source advertisement |
-| Audio device | State of the PipeWire nodes “OpenLW Out” and “OpenLW In” published by the service |
-| Inputs | Patch matrix (discovered, manual and unadvertised sources × input pairs), per-pair meters and state, headphone preview |
-| Outputs | One row per output pair: meter, Livewire channel, advertised name, format, transmission |
+| Audio device | Layout ([ADR 0010](../../docs/adr/0010-macos-device-layouts.md)): two multichannel nodes “OpenLW In” and “OpenLW Out”, or one node per source, “OpenLW In n” and “OpenLW Out n” (optionally named after their source); state of the PipeWire nodes |
+| Inputs | Patch matrix (discovered, manual and unadvertised sources × input channels or input devices): stereo, left, right or L+R in mono, surround on 8 channels; per-pair or per-device meters and state, headphone preview |
+| Outputs | One row per output pair or output device: meter, Livewire channel, advertised name, format, transmission |
 | Advanced settings | Advertised name, receive latency, DSCP |
 
-User-facing strings are in English, like the other apps. Application ID: `fr.francois_brille.openlw` (GTK and D-Bus IDs do not accept the hyphen of `francois-brille`).
+In the several-devices layout, a patch that changes a device's width (1 channel for a mono patch, 2 for stereo, 8 for surround) recreates the shared region: the app warns first, as all OpenLW nodes stop for a moment (“Do not ask again” is stored in the app preferences).
+
+## Languages
+
+The interface is in English, or in French when the system language is French (`LC_ALL`, then `LC_MESSAGES`, then `LANG`, as gettext reads them). Source strings stay in the code, wrapped in `tr("…")` or `trf("…", …)` (named placeholders `{name}`); the French catalog [po/fr.po](po/fr.po) uses the gettext syntax and is embedded in the binary at build time: no `.mo` file to install, no gettext dependency. Messages of the service and the channel and device names it publishes stay in English. `cargo test` checks that the catalog parses, that every translation keeps its placeholders and French spacing, and that every `tr` string of the code is translated. French follows the Microsoft French Style Guide (formal “vous”, U+00A0 before `: ; ! ?` and inside « »); left and right are G and D in French texts.
+
+Application ID: `fr.francois_brille.openlw` (GTK and D-Bus IDs do not accept the hyphen of `francois-brille`).
 
 Floor: GTK 4.12 and libadwaita 1.4 (Ubuntu 24.04, Debian 13, Fedora 39 and later). On Debian 12, only the service is supported (package `openlw-daemon`).
 
@@ -22,9 +28,9 @@ Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock`, one JSON request per line ([
 
 The headphone button joins the source multicast group on the Livewire interface (shared port 5004, socket bound to the group address), decodes RTP L24/L16 and plays the first two channels through a PipeWire playback stream: 30 ms buffer before playback, excess above 200 ms discarded.
 
-The preview never plays to “OpenLW Out”, which would send it back to the network: it targets the default output, or the first other output when the default is “OpenLW Out”. Without any other output, the preview is refused with an explicit message.
+The preview never plays to an OpenLW output (“OpenLW Out”, or “OpenLW Out n”: nodes `openlw_out` and `openlw_out_n`), which would send it back to the network: it targets the default output, or the first other output when the default is an OpenLW output. Without any other output, the preview is refused with an explicit message.
 
-App-only preferences (manual channels, advanced section expanded) are stored in `~/.config/openlw/app.json`.
+App-only preferences (manual channels, advanced section expanded, dismissed width warning) are stored in `~/.config/openlw/app.json`.
 
 ## Build
 

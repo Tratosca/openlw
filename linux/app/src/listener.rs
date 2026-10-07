@@ -17,6 +17,8 @@ use pw::spa;
 use pw::spa::pod::Pod;
 use socket2::{Domain, Protocol, Socket, Type};
 
+use crate::i18n::{tr, trf};
+
 const RATE: u32 = 48_000;
 const PORT: u16 = lw_proto::channel::AUDIO_PORT;
 /// Stereo samples (interleaved) buffered before playback, and maximum kept.
@@ -74,13 +76,18 @@ impl Listener {
                     let _ = ready_tx.send(Err(e));
                 }
             })
-            .map_err(|e| format!("Cannot listen to the source: {e}."))?;
+            .map_err(|e| trf("Cannot listen to the source: {error}.", &[("error", &e)]))?;
         match ready_rx.recv_timeout(Duration::from_secs(3)) {
             Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(format!("Cannot listen to the source: {e}.")),
+            Ok(Err(e)) => {
+                return Err(trf(
+                    "Cannot listen to the source: {error}.",
+                    &[("error", &e)],
+                ))
+            }
             Err(_) => {
                 let _ = quit.send(());
-                return Err("Cannot listen to the source: PipeWire is not responding.".into());
+                return Err(tr("Cannot listen to the source: PipeWire is not responding.").into());
             }
         }
         let ring = self.ring.clone();
@@ -89,7 +96,7 @@ impl Listener {
         std::thread::Builder::new()
             .name("preview network".into())
             .spawn(move || receive(&sock, channels.max(1), width, &ring, &st))
-            .map_err(|e| format!("Cannot listen to the source: {e}."))?;
+            .map_err(|e| trf("Cannot listen to the source: {error}.", &[("error", &e)]))?;
         self.running = Some(Running { stop, quit });
         Ok(())
     }
@@ -112,7 +119,10 @@ impl Drop for Listener {
 /// kernel delivers only this group's datagrams to the socket.
 fn open(group: Ipv4Addr, iface: Ipv4Addr) -> Result<UdpSocket, String> {
     let fail = |step: &str, e: std::io::Error| {
-        format!("Cannot listen to the source ({step}: {e}). Check the selected Livewire interface.")
+        trf(
+            "Cannot listen to the source ({step}: {error}). Check the selected Livewire interface.",
+            &[("step", &step), ("error", &e)],
+        )
     };
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
         .map_err(|e| fail("socket", e))?;
@@ -335,8 +345,13 @@ fn play(
     Ok(())
 }
 
-/// Sink node name of the daemon (lw-pw).
-const OPENLW_OUT: &str = "openlw_out";
+/// Sink node names of the daemon (lw-pw): `openlw_out`, or `openlw_out_n` in multi layout.
+fn openlw_out(node: &str) -> bool {
+    node == "openlw_out"
+        || node
+            .strip_prefix("openlw_out_")
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
 
 /// `{"name":"…"}` value of the `default.audio.sink` metadata key.
 fn metadata_name(value: &str) -> Option<String> {
@@ -347,17 +362,17 @@ fn metadata_name(value: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Preview output: the default output, or the first other one when the default is OpenLW Out
-/// (or unknown).
+/// Preview output: the default output, or the first other one when the default is an OpenLW
+/// output (or unknown).
 fn preview_target(sinks: &[String], default: Option<&str>) -> Result<String, String> {
-    if let Some(d) = default.filter(|d| *d != OPENLW_OUT && sinks.iter().any(|s| s == d)) {
+    if let Some(d) = default.filter(|d| !openlw_out(d) && sinks.iter().any(|s| s == d)) {
         return Ok(d.to_string());
     }
     sinks
         .iter()
-        .find(|s| *s != OPENLW_OUT)
+        .find(|s| !openlw_out(s))
         .cloned()
-        .ok_or_else(|| "no audio output on this computer other than OpenLW Out".to_string())
+        .ok_or_else(|| tr("no audio output on this computer other than the OpenLW outputs").into())
 }
 
 /// Interleaved 32-bit float, 48 kHz, stereo.
@@ -404,6 +419,12 @@ mod tests {
         assert_eq!(preview_target(&both, Some("gone")), Ok("speakers".into()));
         assert!(preview_target(&sinks(&["openlw_out"]), Some("openlw_out")).is_err());
         assert!(preview_target(&[], None).is_err());
+        let multi = sinks(&["openlw_out_1", "openlw_out_12", "openlw_outer"]);
+        assert_eq!(
+            preview_target(&multi, Some("openlw_out_1")),
+            Ok("openlw_outer".into())
+        );
+        assert!(preview_target(multi.get(..2).unwrap(), None).is_err());
         assert_eq!(
             metadata_name(r#"{"name":"speakers"}"#),
             Some("speakers".into())

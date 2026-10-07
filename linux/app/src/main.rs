@@ -3,6 +3,7 @@
 
 mod client;
 mod grid;
+mod i18n;
 mod listener;
 mod meter;
 mod models;

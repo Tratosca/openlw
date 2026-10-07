@@ -34,7 +34,7 @@ enum MacAudio {
     }
 
     static func name(_ id: AudioObjectID) -> String {
-        string(id, kAudioObjectPropertyName) ?? "device \(id)"
+        string(id, kAudioObjectPropertyName) ?? L("device %@", "\(id)")
     }
 
     private static func uid(_ id: AudioObjectID) -> String {

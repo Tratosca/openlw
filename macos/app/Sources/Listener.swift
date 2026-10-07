@@ -236,9 +236,9 @@ enum ListenError: Error {
     var message: String {
         switch self {
         case .socket(let step, let code):
-            return "Cannot listen to the source (\(step): \(String(cString: strerror(code)))). Check the selected Livewire interface."
+            return L("Cannot listen to the source (%@: %@). Check the selected Livewire interface.", step, String(cString: strerror(code)))
         case .audio(let status):
-            return "Cannot listen to the source: the Mac's audio output is unavailable (error \(status))."
+            return L("Cannot listen to the source: the Mac's audio output is unavailable (error %@).", "\(status)")
         }
     }
 }

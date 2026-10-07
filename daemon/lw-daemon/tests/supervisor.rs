@@ -127,10 +127,10 @@ fn device_geometry_follows_configuration() {
         std::thread::sleep(Duration::from_millis(500));
         assert_eq!(call(&client, json!({"cmd":"geometry"}))["generation"], 2);
 
-        // Multi layout (macOS only): one ring per device; a patch changing a device's width
+        // Multi layout (macOS and Linux): one ring per device; a patch changing a device's width
         // recreates the region, a stereo patch on an empty device does not.
         let r = call(&client, json!({"cmd":"set_device_layout","layout":"multi"}));
-        if cfg!(target_os = "macos") {
+        if !cfg!(windows) {
             assert_eq!(r["ok"], true, "{r}");
             assert!(wait(|| call(&client, json!({"cmd":"geometry"}))
                 ["generation"]
@@ -162,7 +162,7 @@ fn device_geometry_follows_configuration() {
             assert_eq!(g["in_widths"], json!([2, 1, 2]));
             assert_eq!(g["channels_from_net"], 5);
         } else {
-            assert_eq!(r["ok"], false, "multi layout refused outside macOS");
+            assert_eq!(r["ok"], false, "multi layout refused on Windows");
         }
 
         stop.request();

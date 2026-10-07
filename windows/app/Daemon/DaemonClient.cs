@@ -16,9 +16,9 @@ public sealed record DaemonError(DaemonErrorKind Kind, string Reason = "")
     /// Displayed message: what happened, then what the user can do.
     public string Message => Kind switch
     {
-        DaemonErrorKind.Unreachable => "The OpenLW service isn't responding. If the problem persists, reinstall OpenLW.",
-        DaemonErrorKind.Decoding => "Unreadable response from the OpenLW service. Reinstall OpenLW so the app and the service are the same version.",
-        _ => $"Could not apply the change: {Reason}",
+        DaemonErrorKind.Unreachable => Loc.S("ErrorUnreachable"),
+        DaemonErrorKind.Decoding => Loc.S("ErrorDecoding"),
+        _ => Loc.F("ErrorRefused", Reason),
     };
 }
 
@@ -93,7 +93,8 @@ public sealed partial class DaemonClient : IDisposable
         {
             return new DaemonResult(obj, null);
         }
-        string reason = obj["error"]?.GetValue<string>() ?? "unknown error";
+        // Service reasons are English (shared with the other platforms and the logs).
+        string reason = obj["error"]?.GetValue<string>() ?? Loc.S("UnknownError");
         return new DaemonResult(obj, new DaemonError(DaemonErrorKind.Refused, reason));
     }
 

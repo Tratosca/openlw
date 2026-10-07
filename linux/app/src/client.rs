@@ -10,6 +10,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crate::i18n::{tr, trf};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DaemonError {
     Unreachable,
@@ -21,15 +23,23 @@ impl DaemonError {
     /// Displayed message: what happened, then what the user can do.
     pub fn message(&self) -> String {
         match self {
-            DaemonError::Unreachable => {
-                "The OpenLW service is not responding. Start it, or reinstall OpenLW if the problem persists."
-                    .into()
+            DaemonError::Unreachable => tr(
+                "The OpenLW service is not responding. Start it, or reinstall OpenLW if the problem persists.",
+            )
+            .into(),
+            DaemonError::Decoding => tr(
+                "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version.",
+            )
+            .into(),
+            // `reason`: daemon message (English) or app reason (translated by the caller).
+            // Daemon reasons may lack the final period of an error message.
+            DaemonError::Refused(reason) => {
+                let mut m = trf("Could not apply the change: {reason}", &[("reason", reason)]);
+                if !m.ends_with(['.', '!', '?']) {
+                    m.push('.');
+                }
+                m
             }
-            DaemonError::Decoding => {
-                "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version."
-                    .into()
-            }
-            DaemonError::Refused(reason) => format!("Could not apply the change: {reason}"),
         }
     }
 }

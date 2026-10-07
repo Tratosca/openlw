@@ -106,7 +106,7 @@ impl Latency {
     }
 }
 
-/// Device layout (macOS only; other systems always use `duplex`).
+/// Device layout (macOS and Linux; Windows always uses `duplex`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Layout {
@@ -254,7 +254,7 @@ pub struct Config {
     /// Virtual device shared with the audio client (enabled by default with `--control`).
     #[serde(default)]
     pub device: Option<crate::device::DeviceConfig>,
-    /// Device layout in macOS.
+    /// Device layout (macOS and Linux).
     #[serde(default)]
     pub device_layout: Layout,
     /// `multi` layout: name devices after their source (default), otherwise “OpenLW In n”

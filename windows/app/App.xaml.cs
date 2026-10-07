@@ -9,6 +9,7 @@ public partial class App : Application
 
     public App()
     {
+        Loc.SelectLanguage();
         InitializeComponent();
         // Unhandled exceptions: written to %LOCALAPPDATA%\OpenLW\crash.log for diagnosis.
         UnhandledException += (_, e) => LogCrash(e.Exception);

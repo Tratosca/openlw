@@ -345,6 +345,19 @@ fn join_error(w: Worker) -> Option<String> {
     }
 }
 
+/// PipeWire nodes for `cfg`: “OpenLW Out” / “OpenLW In”, or one node per numbered device,
+/// named like the macOS devices (multi layout).
+#[cfg(all(target_os = "linux", feature = "pipewire"))]
+fn bridge_config(shared: &Shared, cfg: &Config) -> lw_pw::BridgeConfig {
+    let margin = cfg.latency.input_margin();
+    if cfg.multi() {
+        let l = shared.labels();
+        lw_pw::BridgeConfig::numbered(&l.output_device_names, &l.input_device_names, true, margin)
+    } else {
+        lw_pw::BridgeConfig::duplex(margin)
+    }
+}
+
 /// Daemon startup error.
 pub type Error = Box<dyn std::error::Error>;
 
@@ -395,7 +408,7 @@ pub fn supervise(
     let mut dev: Option<((DeviceConfig, Vec<RingSpec>), Stop, device::Device)> = None;
     // Linux: PipeWire nodes connected to device region (ADR 0009).
     #[cfg(all(target_os = "linux", feature = "pipewire"))]
-    let mut nodes: Option<lw_pw::Bridge> = None;
+    let mut nodes: Option<(lw_pw::BridgeConfig, lw_pw::Bridge)> = None;
     let mut generation = 0u64;
     let mut session: Option<Session> = None;
     let mut restart = true;
@@ -428,25 +441,6 @@ pub fn supervise(
                         s.set_region(&d.region);
                     }
                     shared.set_device(d.status.clone());
-                    #[cfg(all(target_os = "linux", feature = "pipewire"))]
-                    {
-                        let cfg = lw_pw::BridgeConfig {
-                            sink_description: crate::labels::OUTPUT_DEVICE_NAME.into(),
-                            source_description: crate::labels::INPUT_DEVICE_NAME.into(),
-                            input_margin: current.latency.input_margin(),
-                        };
-                        let report: lw_pw::Report = |is_error, message| {
-                            if is_error {
-                                error!("{message}");
-                            } else {
-                                info!("{message}");
-                            }
-                        };
-                        match lw_pw::start(d.region.clone(), cfg, report) {
-                            Ok(b) => nodes = Some(b),
-                            Err(e) => error!("PipeWire nodes: {e}"),
-                        }
-                    }
                     let widths = |dir| -> Vec<u32> {
                         dc.1.iter()
                             .filter(|r| r.dir == dir)
@@ -546,8 +540,38 @@ pub fn supervise(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
+        // Linux: PipeWire nodes follow the device region and its names (multi layout: a
+        // patch can rename a node without recreating the region); restarted on change.
         #[cfg(all(target_os = "linux", feature = "pipewire"))]
-        shared.set_audio_nodes(Some(nodes.as_ref().is_some_and(lw_pw::Bridge::published)));
+        if let Some((_, _, d)) = &dev {
+            let want = bridge_config(&shared, &current);
+            // Same nodes, other names (multi layout: patch on an empty device): rename live,
+            // applications keep their streams.
+            if let Some((c, b)) = nodes
+                .as_mut()
+                .filter(|(c, _)| *c != want && c.same_nodes(&want))
+            {
+                info!("PipeWire nodes renamed: {}", want.descriptions().join(", "));
+                b.rename(want.descriptions());
+                *c = want.clone();
+            }
+            if nodes.as_ref().is_none_or(|(c, _)| *c != want) {
+                drop(nodes.take()); // Releases the ring endpoints before the new bridge takes them
+                let report: lw_pw::Report = |is_error, message| {
+                    if is_error {
+                        error!("{message}");
+                    } else {
+                        info!("{message}");
+                    }
+                };
+                match lw_pw::start(d.region.clone(), want.clone(), report) {
+                    Ok(b) => nodes = Some((want, b)),
+                    Err(e) => error!("PipeWire nodes: {e}"),
+                }
+            }
+        }
+        #[cfg(all(target_os = "linux", feature = "pipewire"))]
+        shared.set_audio_nodes(Some(nodes.as_ref().is_some_and(|(_, b)| b.published())));
         // Log thread errors (lost interface, occupied port, etc.); daemon continues.
         if let Some(s) = session.as_mut() {
             while let Some(e) = s.failed() {

@@ -1,10 +1,13 @@
 //! OpenLW device PipeWire nodes (Linux, ADR 0009).
 //!
-//! Daemon publishes two nodes in its own process, connected to the shared region:
-//! - “OpenLW Out” sink (`Audio/Sink`): application playback goes to the network
-//!   (TO_NET ring producer);
-//! - “OpenLW In” source (`Audio/Source`): applications record network audio
-//!   (FROM_NET ring consumer), with the service latency margin.
+//! Daemon publishes one node per shared-region ring, in its own process:
+//! - sink (`Audio/Sink`) per TO_NET ring: application playback goes to the network (ring
+//!   producer); duplex layout: “OpenLW Out” (`openlw_out`);
+//! - source (`Audio/Source`) per FROM_NET ring: applications record network audio (ring
+//!   consumer), with the service latency margin; duplex layout: “OpenLW In” (`openlw_in`).
+//!
+//! Multi layout (ADR 0010): one sink per output device (`openlw_out_n`) and one source per
+//! input device (`openlw_in_n`), named like the macOS devices.
 //!
 //! Nodes follow the graph driver (sound card or dummy driver); differences from the daemon
 //! clock are compensated through buffer slips, like the HAL plugin (ADR 0003). Outside Linux,
@@ -16,24 +19,99 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{start, Bridge, Report};
 
+/// One node: region ring, direction, PipeWire names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeConfig {
+    /// Shared-region ring index.
+    pub ring: usize,
+    /// Sink (TO_NET ring, applications play) or source (FROM_NET ring, applications record).
+    pub sink: bool,
+    /// `node.name` (stable identifier, e.g. `openlw_in_2`).
+    pub name: String,
+    /// `node.description` (displayed name).
+    pub description: String,
+}
+
 /// Node parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeConfig {
-    /// Displayed sink name (application outputs to network).
-    pub sink_description: String,
-    /// Displayed source name (application inputs from network).
-    pub source_description: String,
+    /// Nodes to publish, in region ring order.
+    pub nodes: Vec<NodeConfig>,
     /// Input latency margin, in frames (64–2048).
     pub input_margin: u32,
 }
 
+impl BridgeConfig {
+    /// Duplex layout: “OpenLW Out” sink on ring 0, “OpenLW In” source on ring 1.
+    pub fn duplex(input_margin: u32) -> Self {
+        Self::numbered(
+            &["OpenLW Out".into()],
+            &["OpenLW In".into()],
+            false,
+            input_margin,
+        )
+    }
+
+    /// Sinks for `outputs` then sources for `inputs` (display names), in ring order.
+    /// `numbered`: node names `openlw_out_n` / `openlw_in_n`, otherwise `openlw_out` /
+    /// `openlw_in` (one of each).
+    pub fn numbered(
+        outputs: &[String],
+        inputs: &[String],
+        numbered: bool,
+        input_margin: u32,
+    ) -> Self {
+        let node = |ring: usize, sink: bool, n: usize, description: &String| NodeConfig {
+            ring,
+            sink,
+            name: match (sink, numbered) {
+                (true, true) => format!("openlw_out_{n}"),
+                (false, true) => format!("openlw_in_{n}"),
+                (true, false) => "openlw_out".into(),
+                (false, false) => "openlw_in".into(),
+            },
+            description: description.clone(),
+        };
+        let mut nodes: Vec<NodeConfig> = outputs
+            .iter()
+            .enumerate()
+            .map(|(i, d)| node(i, true, i + 1, d))
+            .collect();
+        nodes.extend(
+            inputs
+                .iter()
+                .enumerate()
+                .map(|(i, d)| node(outputs.len() + i, false, i + 1, d)),
+        );
+        Self {
+            nodes,
+            input_margin,
+        }
+    }
+}
+
+impl BridgeConfig {
+    /// Same nodes (rings, directions, `node.name`, margin), possibly other descriptions:
+    /// a rename is enough, no need to recreate the nodes.
+    pub fn same_nodes(&self, other: &Self) -> bool {
+        self.input_margin == other.input_margin
+            && self.nodes.len() == other.nodes.len()
+            && self
+                .nodes
+                .iter()
+                .zip(&other.nodes)
+                .all(|(a, b)| a.ring == b.ring && a.sink == b.sink && a.name == b.name)
+    }
+
+    /// Node descriptions, in node order.
+    pub fn descriptions(&self) -> Vec<String> {
+        self.nodes.iter().map(|n| n.description.clone()).collect()
+    }
+}
+
 impl Default for BridgeConfig {
     fn default() -> Self {
-        Self {
-            sink_description: "OpenLW Out".into(),
-            source_description: "OpenLW In".into(),
-            input_margin: 256,
-        }
+        Self::duplex(256)
     }
 }
 
@@ -93,8 +171,33 @@ pub fn plan_input(readable: u32, frames: u32, margin: u32, primed: &mut bool) ->
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_names() {
+        let d = BridgeConfig::default();
+        assert_eq!(
+            d.nodes
+                .iter()
+                .map(|n| (n.ring, n.sink, n.name.as_str(), n.description.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (0, true, "openlw_out", "OpenLW Out"),
+                (1, false, "openlw_in", "OpenLW In")
+            ]
+        );
+        let m = BridgeConfig::numbered(
+            &["OpenLW Out 1".into()],
+            &["OpenLW In - A (ch. 2)".into(), "OpenLW In 2".into()],
+            true,
+            256,
+        );
+        assert_eq!(m.nodes[2].ring, 2);
+        assert_eq!(m.nodes[2].name, "openlw_in_2");
+        assert_eq!(m.nodes[0].name, "openlw_out_1");
+    }
 
     #[test]
     fn positions() {

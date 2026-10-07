@@ -1,7 +1,7 @@
 [package]
 name = "lw-pw"
 version = "0.5.0"
-description = "PipeWire nodes for the OpenLW device (Linux): “OpenLW Out” sink and “OpenLW In” source on the shared region."
+description = "PipeWire nodes for the OpenLW device (Linux): one sink or source per shared-region ring."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,5 +14,12 @@ lw-sys = { version = "0.5.0", path = "../lw-sys" }
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = { version = "0.10", features = ["v0_3_49"] }
 
-[lints]
-workspace = true
+# No `[lints] workspace = true`: workspace forbids `unsafe`, needed for one PipeWire call that
+# pipewire-rs does not wrap (`pw_stream_update_properties`, live node rename). Every unsafe
+# block has a SAFETY justification comment.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+indexing_slicing = "warn"

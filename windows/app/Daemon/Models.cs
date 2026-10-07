@@ -12,6 +12,9 @@ internal static class Json
     public static int Int(JsonNode? n, string key, int fallback = 0) =>
         n?[key] is JsonValue v && v.TryGetValue(out int i) ? i : fallback;
 
+    public static string? StrOrNull(JsonNode? n, string key) =>
+        n?[key] is JsonValue v && v.TryGetValue(out string? s) ? s : null;
+
     public static int? IntOrNull(JsonNode? n, string key) =>
         n?[key] is JsonValue v && v.TryGetValue(out int i) ? i : null;
 
@@ -48,7 +51,7 @@ public sealed record Iface(string Name, string Friendly, string Ipv4, bool Loopb
         get
         {
             string b = Friendly == Name ? $"{Name} · {Ipv4}" : $"{Friendly} ({Name}) · {Ipv4}";
-            return Livewire ? b + " · Livewire network" : b;
+            return Livewire ? $"{b} · {Loc.S("LivewireNetworkTag")}" : b;
         }
     }
 }
@@ -66,8 +69,9 @@ public sealed record DiscoveredSource(int Channel, string Name, string Stream, s
     public string PatchKind => Kind is "stereo" or "backfeed" or "surround" ? Kind : "stereo";
 }
 
-/// Configured received stream (destination).
-public sealed record InputPatch(int? Channel, string? Group, string Kind, List<int> DeviceChannels);
+/// Configured received stream (destination). `Mix`: mono patch of a stereo or backfeed stream
+/// onto one device channel (“left”, “right”, “sum”), null otherwise.
+public sealed record InputPatch(int? Channel, string? Group, string Kind, List<int> DeviceChannels, string? Mix);
 
 /// Configured transmitted stream (source).
 public sealed record OutputPatch(int Channel, string Name, string Format, List<int>? DeviceChannels);
@@ -100,8 +104,8 @@ public sealed class DaemonConfig
             ChannelsToNet = Json.Int(dev, "channels_to_net", 2),
             ChannelsFromNet = Json.Int(dev, "channels_from_net", 2),
             Inputs = Json.Objects(c, "destinations").Select(d => new InputPatch(Json.IntOrNull(d, "channel"),
-                d["group"] is JsonValue g && g.TryGetValue(out string? gs) ? gs : null, Json.Str(d, "kind", "stereo"),
-                Json.Ints(d, "device_channels"))).ToList(),
+                Json.StrOrNull(d, "group"), Json.Str(d, "kind", "stereo"), Json.Ints(d, "device_channels"),
+                Json.StrOrNull(d, "mix"))).ToList(),
             Outputs = Json.Objects(c, "sources").Where(s => Json.IntOrNull(s, "channel") is not null)
                 .Select(s => new OutputPatch(Json.Int(s, "channel"), Json.Str(s, "name"), Json.Str(s, "format", "standard"),
                     s["device_channels"] is JsonArray ? Json.Ints(s, "device_channels") : null)).ToList(),

@@ -55,7 +55,7 @@ public sealed class Listener : IDisposable
         catch (Exception e)
         {
             sock.Dispose();
-            throw new ListenError($"Cannot listen to the source: Windows audio output unavailable ({e.Message}).");
+            throw new ListenError(Loc.F("ErrorListenOutput", e.Message));
         }
         int gen;
         lock (gate)
@@ -105,7 +105,7 @@ public sealed class Listener : IDisposable
         catch (SocketException e)
         {
             s.Dispose();
-            throw new ListenError($"Cannot listen to the source ({step}: {e.Message}). Check the selected Livewire interface.");
+            throw new ListenError(Loc.F("ErrorListenSocket", step, e.Message));
         }
     }
 

@@ -1,5 +1,6 @@
-//! App-only preferences (manually entered channels, advanced settings visibility), stored in
-//! `~/.config/openlw/app.json`. Network settings live in the service configuration.
+//! App-only preferences (manually entered channels, advanced settings visibility, dismissed
+//! warning), stored in `~/.config/openlw/app.json`. Network settings live in the service
+//! configuration.
 
 use std::path::PathBuf;
 
@@ -22,6 +23,9 @@ pub struct Settings {
     pub manual: Vec<ManualSource>,
     #[serde(default)]
     pub advanced_visible: bool,
+    /// Warning before a device width change (brief audio cut) not to be shown again.
+    #[serde(default)]
+    pub skip_width_warning: bool,
 }
 
 fn path() -> PathBuf {

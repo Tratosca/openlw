@@ -1,7 +1,7 @@
 //! Main window, ported from macos/app/Sources/MainWindowController.swift and
-//! windows/app/MainWindow.xaml.cs: Livewire network, audio device, input patch matrix,
+//! windows/app/MainWindow.xaml.cs: Livewire network, audio device (layout), input patch matrix,
 //! transmitted outputs, advanced settings. The network service itself is never shown: the app
-//! talks about network, channels and device. Polls status at 5 Hz; configuration, sources and
+//! talks about network, channels and devices. Polls status at 5 Hz; configuration, sources and
 //! interfaces every 2 s.
 
 use std::cell::{Cell, RefCell};
@@ -16,15 +16,24 @@ use gtk::{gio, glib};
 use serde_json::{json, Value};
 
 use crate::client::{Client, DaemonError};
-use crate::grid::{pair_label, GridActions, GridRow, InputGrid};
+use crate::grid::{GridActions, GridHeader, GridLayout, GridPatch, GridRow, InputGrid, MenuItem};
+use crate::i18n::{tr, trf};
 use crate::listener::Listener;
 use crate::meter::Meter;
 use crate::models::{
-    patch_kind, peak, DaemonConfig, DeviceMeters, DiscoveredSource, Iface, LinkStatus, OutputPatch,
+    device_channels, patch_kind, peak, DaemonConfig, DeviceMeters, DiscoveredSource, Iface,
+    InputPatch, LinkStatus, OutputPatch,
 };
 use crate::settings::{ManualSource, Settings};
 
 const MAX_PAIRS: u32 = 16;
+const LAYOUTS: [(&str, &str); 2] = [
+    (
+        "duplex",
+        "Two multichannel devices, “OpenLW In” and “OpenLW Out”",
+    ),
+    ("multi", "Several devices, “OpenLW In n” and “OpenLW Out n”"),
+];
 const LATENCIES: [(&str, &str); 3] = [
     ("low", "Low: ≈ 8 ms added, dedicated network"),
     ("normal", "Normal: ≈ 17 ms added"),
@@ -60,7 +69,7 @@ struct State {
     reachable: Option<bool>,
     audio_nodes: Option<bool>,
     grid_rows: Vec<GridRow>,
-    pairs: Vec<Vec<u32>>,
+    grid_layout: GridLayout,
     /// Previewed source: channel, patch kind.
     listening: Option<(u16, String)>,
 }
@@ -76,10 +85,18 @@ pub struct Window {
     iface_model: gtk::StringList,
     iface_names: RefCell<Vec<String>>,
     advertise_row: adw::SwitchRow,
+    /// Layout choice, in `LAYOUTS` order.
+    layout_checks: Vec<gtk::CheckButton>,
+    naming_row: adw::SwitchRow,
     nodes_row: adw::ActionRow,
     nodes_icon: gtk::Image,
+    out_device_row: adw::ActionRow,
+    in_device_row: adw::ActionRow,
+    inputs_group: adw::PreferencesGroup,
     in_count: adw::ComboRow,
+    in_count_model: gtk::StringList,
     out_count: adw::ComboRow,
+    out_count_model: gtk::StringList,
     grid: InputGrid,
     manual_entry: adw::EntryRow,
     manual_kind: gtk::DropDown,
@@ -146,23 +163,25 @@ impl Window {
 
         // ---------- Livewire network ----------
         let network = group(
-            "Livewire Network",
-            "Clock: the computer's own. Drift relative to other devices is compensated automatically.",
+            tr("Livewire Network"),
+            tr("Clock: the computer's own. Drift relative to other devices is compensated automatically."),
         );
         let state_dot = gtk::Label::new(Some("●"));
         state_dot.add_css_class("dim-label");
         let state_row = adw::ActionRow::builder()
-            .title("Connecting to the OpenLW service…")
+            .title(tr("Connecting to the OpenLW service…"))
             .build();
         state_row.add_prefix(&state_dot);
         let iface_model = gtk::StringList::new(&[]);
         let iface_row = adw::ComboRow::builder()
-            .title("Interface")
+            .title(tr("Interface"))
             .model(&iface_model)
             .build();
         let advertise_row = adw::SwitchRow::builder()
-            .title("Advertise Outputs on the Network")
-            .subtitle("Other Livewire devices see the transmitted channels and their names.")
+            .title(tr("Advertise Outputs on the Network"))
+            .subtitle(tr(
+                "Other Livewire devices see the transmitted channels and their names.",
+            ))
             .build();
         network.add(&state_row);
         network.add(&iface_row);
@@ -170,35 +189,59 @@ impl Window {
 
         // ---------- Audio device (PipeWire nodes) ----------
         let device = group(
-            "Audio Device",
-            "PipeWire, PulseAudio and JACK applications see the same devices.",
+            tr("Audio Device"),
+            tr("Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel for a mono patch, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."),
         );
-        let nodes_icon = gtk::Image::from_icon_name("content-loading-symbolic");
-        let nodes_row = adw::ActionRow::builder().title("Audio Devices").build();
-        nodes_row.add_prefix(&nodes_icon);
-        device.add(&nodes_row);
-        for (title, subtitle) in [
-            (
-                "OpenLW Out",
-                "Choose it as the output: what applications play to it is transmitted to the network, according to the outputs set below.",
-            ),
-            (
-                "OpenLW In",
-                "Choose it as the input: it receives audio from the network, according to the input grid.",
-            ),
-        ] {
-            device.add(&adw::ActionRow::builder().title(title).subtitle(subtitle).build());
+        // Layout: one radio row per choice (the titles are too long for a drop-down).
+        let mut layout_checks: Vec<gtk::CheckButton> = Vec::new();
+        let mut layout_rows = Vec::new();
+        for (_, title) in LAYOUTS {
+            let check = gtk::CheckButton::new();
+            check.set_valign(gtk::Align::Center);
+            if let Some(first) = layout_checks.first() {
+                check.set_group(Some(first));
+            }
+            let row = adw::ActionRow::builder()
+                .title(tr(title))
+                .activatable_widget(&check)
+                .build();
+            row.add_prefix(&check);
+            layout_rows.push(row);
+            layout_checks.push(check);
         }
+        let naming_row = adw::SwitchRow::builder()
+            .title(tr("Name Devices After Their Source"))
+            .subtitle(tr(
+                "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Several devices only.",
+            ))
+            .build();
+        let nodes_icon = gtk::Image::from_icon_name("content-loading-symbolic");
+        let nodes_row = adw::ActionRow::builder().title(tr("Audio Devices")).build();
+        nodes_row.add_prefix(&nodes_icon);
+        let out_device_row = adw::ActionRow::new();
+        let in_device_row = adw::ActionRow::new();
+        for row in &layout_rows {
+            device.add(row);
+        }
+        device.add(&naming_row);
+        device.add(&nodes_row);
+        device.add(&out_device_row);
+        device.add(&in_device_row);
 
         // ---------- Inputs ----------
-        let inputs = group(
-            "Inputs (Network to Computer)",
-            "Click a cell to send the source to that pair of OpenLW In inputs. Click again to release it. The headphone button plays the source on the computer's audio output, without patching it.",
-        );
-        let in_count = count_row("Received Livewire Channels", "inputs");
-        inputs.add(&in_count);
+        let inputs_group = group(tr("Inputs (Network to Computer)"), "");
+        let in_count_model = gtk::StringList::new(&[]);
+        let in_count = adw::ComboRow::builder().model(&in_count_model).build();
+        inputs_group.add(&in_count);
         let grid = InputGrid::new(GridActions {
-            toggle: Box::new(on!(weak, |w, r, c| w.toggle_input(r, c))),
+            toggle: {
+                let weak = weak.clone();
+                Box::new(move |r, c, anchor: &gtk::Widget| {
+                    if let Some(w) = weak.upgrade() {
+                        w.toggle_input(r, c, anchor);
+                    }
+                })
+            },
             listen: Box::new(on!(weak, |w, r| w.toggle_listen(r))),
             remove: Box::new(on!(weak, |w, r| w.remove_row(r))),
         });
@@ -213,12 +256,12 @@ impl Window {
         grid_card.append(&grid_scroll);
         let manual = adw::PreferencesGroup::new();
         let manual_entry = adw::EntryRow::builder()
-            .title("Unadvertised source, channel (1 to 32766)")
+            .title(tr("Unadvertised source, channel (1 to 32766)"))
             .input_purpose(gtk::InputPurpose::Digits)
             .build();
-        let manual_kind = gtk::DropDown::from_strings(&MANUAL_KINDS.map(|(_, t)| t));
+        let manual_kind = gtk::DropDown::from_strings(&MANUAL_KINDS.map(|(_, t)| tr(t)));
         manual_kind.set_valign(gtk::Align::Center);
-        let add = gtk::Button::with_label("Add to Grid");
+        let add = gtk::Button::with_label(tr("Add to Grid"));
         add.set_valign(gtk::Align::Center);
         manual_entry.add_suffix(&manual_kind);
         manual_entry.add_suffix(&add);
@@ -227,36 +270,34 @@ impl Window {
         manual_entry.connect_entry_activated(on!(weak, |w, _| w.add_manual()));
 
         // ---------- Outputs ----------
-        let outputs_group = group(
-            "Outputs (Computer to Network)",
-            "Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.",
-        );
-        let out_count = count_row("Transmitted Livewire Channels", "outputs");
+        let outputs_group = group(tr("Outputs (Computer to Network)"), "");
+        let out_count_model = gtk::StringList::new(&[]);
+        let out_count = adw::ComboRow::builder().model(&out_count_model).build();
         outputs_group.add(&out_count);
 
         // ---------- Advanced settings ----------
         let advanced_group = adw::PreferencesGroup::new();
         let advanced = adw::ExpanderRow::builder()
-            .title("Advanced Settings")
-            .subtitle("Advertised name, receive latency, network priority")
+            .title(tr("Advanced Settings"))
+            .subtitle(tr("Advertised name, receive latency, network priority"))
             .expanded(settings.advanced_visible)
             .build();
         let terminal_row = adw::EntryRow::builder()
-            .title("Advertised name (empty: computer name)")
+            .title(tr("Advertised name (empty: computer name)"))
             .show_apply_button(true)
-            .tooltip_text("Name shown by other Livewire devices: 32 characters at most, accented letters replaced.")
+            .tooltip_text(tr("Name shown by other Livewire devices: 32 characters at most, accented letters replaced."))
             .build();
         let latency_row = adw::ComboRow::builder()
-            .title("Receive Latency")
-            .subtitle("Added to the recording software's own latency")
-            .tooltip_text("Buffers added to the recording software's own buffer. The lower the latency, the more likely a network or computer delay causes a brief dropout.")
-            .model(&gtk::StringList::new(&LATENCIES.map(|(_, t)| t)))
+            .title(tr("Receive Latency"))
+            .subtitle(tr("Added to the recording software's own latency"))
+            .tooltip_text(tr("Buffers added to the recording software's own buffer. The lower the latency, the more likely a network or computer delay causes a brief dropout."))
+            .model(&gtk::StringList::new(&LATENCIES.map(|(_, t)| tr(t))))
             .build();
         let dscp_row = adw::ComboRow::builder()
-            .title("Network Priority (DSCP)")
-            .subtitle("Depends on the switches' QoS")
-            .tooltip_text("Marking of transmitted audio streams. Choose the value expected by your switches' QoS policy.")
-            .model(&gtk::StringList::new(&DSCPS.map(|(_, t)| t)))
+            .title(tr("Network Priority (DSCP)"))
+            .subtitle(tr("Depends on the switches' QoS"))
+            .tooltip_text(tr("Marking of transmitted audio streams. Choose the value expected by your switches' QoS policy."))
+            .model(&gtk::StringList::new(&DSCPS.map(|(_, t)| tr(t))))
             .build();
         advanced.add_row(&terminal_row);
         advanced.add_row(&latency_row);
@@ -275,7 +316,7 @@ impl Window {
         content.append(&network);
         content.append(&device);
         let input_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        input_box.append(&inputs);
+        input_box.append(&inputs_group);
         input_box.append(&grid_card);
         input_box.append(&manual);
         content.append(&input_box);
@@ -295,14 +336,14 @@ impl Window {
         toasts.set_child(Some(&scroll));
         let banner = adw::Banner::builder()
             .title(DaemonError::Unreachable.message())
-            .button_label("Start Service")
+            .button_label(tr("Start Service"))
             .build();
         let menu = gio::Menu::new();
-        menu.append(Some("About OpenLW"), Some("app.about"));
+        menu.append(Some(tr("About OpenLW")), Some("app.about"));
         let menu_button = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .menu_model(&menu)
-            .tooltip_text("Main Menu")
+            .tooltip_text(tr("Main Menu"))
             .primary(true)
             .build();
         let header = adw::HeaderBar::new();
@@ -331,10 +372,17 @@ impl Window {
             iface_model,
             iface_names: RefCell::default(),
             advertise_row,
+            layout_checks,
+            naming_row,
             nodes_row,
             nodes_icon,
+            out_device_row,
+            in_device_row,
+            inputs_group,
             in_count,
+            in_count_model,
             out_count,
+            out_count_model,
             grid,
             manual_entry,
             manual_kind,
@@ -356,10 +404,21 @@ impl Window {
     /// Signals needing the finished window.
     fn connect(self: &Rc<Self>, app: &adw::Application) {
         let weak = Rc::downgrade(self);
+        self.updating.set(true);
+        self.update_layout_texts(false);
+        self.naming_row.set_sensitive(false);
+        self.updating.set(false);
         self.iface_row
             .connect_selected_notify(on!(weak, |w, _| w.iface_changed()));
         self.advertise_row
             .connect_active_notify(on!(weak, |w, _| w.advertise_changed()));
+        for (check, (value, _)) in self.layout_checks.iter().zip(LAYOUTS) {
+            check.connect_toggled(on!(weak, |w, c| if c.is_active() {
+                w.layout_changed(value)
+            }));
+        }
+        self.naming_row
+            .connect_active_notify(on!(weak, |w, _| w.naming_changed()));
         self.in_count
             .connect_selected_notify(on!(weak, |w, _| w.channel_count_changed()));
         self.out_count
@@ -386,7 +445,7 @@ impl Window {
             }
             glib::Propagation::Proceed
         });
-        self.rebuild_output_rows(1);
+        self.rebuild_output_rows(1, false);
 
         let about = gio::SimpleAction::new("about", None);
         about.connect_activate(on!(weak, |w, _, _| w.show_about()));
@@ -504,7 +563,7 @@ impl Window {
         self.banner.set_revealed(!ok);
         if !ok {
             set_dot(&self.state_dot, "error");
-            self.state_row.set_title("OpenLW service unreachable");
+            self.state_row.set_title(tr("OpenLW service unreachable"));
             self.state_row.set_subtitle("");
             self.st.borrow_mut().audio_nodes = None;
             self.show_nodes();
@@ -519,15 +578,17 @@ impl Window {
             set_dot(&self.state_dot, "warning");
             if link.auto {
                 self.state_row
-                    .set_title("Searching for the Livewire network");
-                self.state_row.set_subtitle(
+                    .set_title(tr("Searching for the Livewire network"));
+                self.state_row.set_subtitle(tr(
                     "Connect the computer to the Livewire network, or choose the interface.",
-                );
+                ));
             } else {
+                self.state_row.set_title(&trf(
+                    "Interface “{name}” unavailable",
+                    &[("name", &st.config.iface)],
+                ));
                 self.state_row
-                    .set_title(&format!("Interface “{}” unavailable", st.config.iface));
-                self.state_row
-                    .set_subtitle("Plug it in, or choose Automatic.");
+                    .set_subtitle(tr("Plug it in, or choose Automatic."));
             }
             return;
         }
@@ -537,10 +598,15 @@ impl Window {
         } else {
             format!("{} ({})", link.friendly, link.iface)
         };
-        self.state_row
-            .set_title(&format!("Connected to the Livewire network via {name}"));
+        self.state_row.set_title(&trf(
+            "Connected to the Livewire network via {name}",
+            &[("name", &name)],
+        ));
         self.state_row.set_subtitle(&if link.auto {
-            format!("{} · interface chosen automatically", link.ipv4)
+            trf(
+                "{address} · interface chosen automatically",
+                &[("address", &link.ipv4)],
+            )
         } else {
             link.ipv4.clone()
         });
@@ -552,23 +618,23 @@ impl Window {
         let (icon, title, subtitle) = match (st.reachable, st.audio_nodes) {
             (Some(true), Some(true)) => (
                 "object-select-symbolic",
-                "Devices published in PipeWire",
-                "OpenLW Out and OpenLW In appear in the sound settings and in audio software.",
+                tr("Devices published in PipeWire"),
+                tr("OpenLW devices appear in the sound settings and in audio software."),
             ),
             (Some(true), Some(false)) => (
                 "dialog-warning-symbolic",
-                "PipeWire unreachable",
-                "OpenLW devices will appear as soon as PipeWire responds (retrying every 5 s).",
+                tr("PipeWire unreachable"),
+                tr("OpenLW devices will appear as soon as PipeWire responds (retrying every 5 s)."),
             ),
             (Some(true), None) => (
                 "dialog-warning-symbolic",
-                "No audio devices",
-                "This OpenLW service was built without PipeWire. Install your distribution's OpenLW package.",
+                tr("No audio devices"),
+                tr("This OpenLW service was built without PipeWire. Install your distribution's OpenLW package."),
             ),
             _ => (
                 "content-loading-symbolic",
-                "Audio Devices",
-                "Available when the OpenLW service is running.",
+                tr("Audio Devices"),
+                tr("Available when the OpenLW service is running."),
             ),
         };
         self.nodes_icon.set_icon_name(Some(icon));
@@ -578,16 +644,63 @@ impl Window {
 
     // ---------- Display updates ----------
 
-    fn apply_config(self: &Rc<Self>, c: DaemonConfig) {
-        let (pairs_changed, editing_name) = {
-            let st = self.st.borrow();
+    /// Texts that depend on the layout: count menus, hints, device rows. Call with `updating`
+    /// set (the count menus lose their selection).
+    fn update_layout_texts(&self, multi: bool) {
+        for (model, inputs) in [(&self.in_count_model, true), (&self.out_count_model, false)] {
+            let items = count_titles(multi, inputs);
+            let refs: Vec<&str> = items.iter().map(String::as_str).collect();
+            model.splice(0, model.n_items(), &refs);
+        }
+        let (in_title, out_title) = if multi {
+            (tr("Input Devices"), tr("Output Devices"))
+        } else {
             (
-                !st.config_loaded || c.channels_to_net != st.config.channels_to_net,
+                tr("Received Livewire Channels"),
+                tr("Transmitted Livewire Channels"),
+            )
+        };
+        self.in_count.set_title(in_title);
+        self.out_count.set_title(out_title);
+        if multi {
+            self.inputs_group.set_description(Some(tr("Click a cell to send the source to that device: stereo, left, right, or L+R in mono. Click again to release it. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it.")));
+            self.outputs_group.set_description(Some(tr("Each “OpenLW Out n” device is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.")));
+            self.out_device_row.set_title(tr("OpenLW Out n"));
+            self.out_device_row.set_subtitle(tr("Choose one as the output: what applications play to it is transmitted to the network, according to the outputs set below."));
+            self.in_device_row.set_title(tr("OpenLW In n"));
+            self.in_device_row.set_subtitle(tr("Choose one as the input: each device receives the source patched to it in the input grid."));
+        } else {
+            self.inputs_group.set_description(Some(tr("Click a cell to send the source to “OpenLW In”: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. The headphone button plays the source on the computer's audio output, without patching it.")));
+            self.outputs_group.set_description(Some(tr("Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.")));
+            self.out_device_row.set_title(tr("OpenLW Out"));
+            self.out_device_row.set_subtitle(tr("Choose it as the output: what applications play to it is transmitted to the network, according to the outputs set below."));
+            self.in_device_row.set_title(tr("OpenLW In"));
+            self.in_device_row.set_subtitle(tr(
+                "Choose it as the input: it receives audio from the network, according to the input grid.",
+            ));
+        }
+    }
+
+    fn apply_config(self: &Rc<Self>, c: DaemonConfig) {
+        let (rows_changed, layout_changed, editing_name) = {
+            let st = self.st.borrow();
+            let layout_changed = !st.config_loaded || c.layout != st.config.layout;
+            (
+                layout_changed || c.channels_to_net != st.config.channels_to_net,
+                layout_changed,
                 self.editing(&self.terminal_row),
             )
         };
         self.updating.set(true);
         self.advertise_row.set_active(c.advertise);
+        if layout_changed {
+            self.update_layout_texts(c.multi());
+        }
+        for (check, (value, _)) in self.layout_checks.iter().zip(LAYOUTS) {
+            check.set_active(value == c.layout);
+        }
+        self.naming_row.set_active(c.custom_names);
+        self.naming_row.set_sensitive(c.multi());
         if !editing_name && self.terminal_row.text() != c.terminal_name {
             self.terminal_row.set_text(&c.terminal_name);
         }
@@ -609,22 +722,20 @@ impl Window {
         self.out_count
             .set_selected((c.channels_to_net / 2).clamp(1, MAX_PAIRS) - 1);
         self.updating.set(false);
-        if pairs_changed {
-            self.rebuild_output_rows((c.channels_to_net / 2).max(1));
+        if rows_changed {
+            let count = if c.multi() {
+                c.out_devices()
+            } else {
+                c.channels_to_net / 2
+            };
+            self.rebuild_output_rows(count.max(1), c.multi());
         }
         for row in self.output_rows.borrow().iter() {
-            row.show(
-                c.outputs
-                    .iter()
-                    .find(|o| o.device_channels.as_deref() == Some(&row.pair[..])),
-                self,
-            );
+            row.show(output_patch(&c, row), self);
         }
         {
             let mut st = self.st.borrow_mut();
-            st.pairs = (0..c.channels_from_net / 2)
-                .map(|i| vec![2 * i + 1, 2 * i + 2])
-                .collect();
+            st.grid_layout = grid_layout(&c);
             st.config = c;
             st.config_loaded = true;
         }
@@ -640,11 +751,11 @@ impl Window {
             let (config, link) = (&st.config, &st.link);
             let auto = config.auto_iface();
             let auto_title = if !auto {
-                "Automatic".to_string()
+                tr("Automatic").to_string()
             } else if link.searching {
-                "Automatic · searching".to_string()
+                tr("Automatic · searching").to_string()
             } else {
-                format!("Automatic · {}", link.friendly)
+                trf("Automatic · {name}", &[("name", &link.friendly)])
             };
             let mut items = vec![(auto_title, "auto".to_string())];
             let mut found: Vec<&Iface> = st
@@ -656,7 +767,7 @@ impl Window {
             items.extend(found.iter().map(|i| (i.title(), i.name.clone())));
             if !auto && st.ifaces.iter().all(|i| i.name != config.iface) {
                 items.push((
-                    format!("{} (unavailable)", config.iface),
+                    trf("{name} (unavailable)", &[("name", &config.iface)]),
                     config.iface.clone(),
                 ));
             }
@@ -687,23 +798,15 @@ impl Window {
     /// Matrix rows: discovered sources, then manual entries, then configured unadvertised
     /// streams.
     fn update_grid(&self) {
-        let (rows, pairs, listening) = {
+        let (rows, layout, listening) = {
             let st = self.st.borrow();
             let settings = self.settings.borrow();
-            let patched = |channel: u16, kind: &str| {
-                st.config
-                    .inputs
-                    .iter()
-                    .find(|i| i.channel == Some(channel) && i.kind == kind)
-                    .and_then(|i| i.device_channels.first())
-                    .map(|first| (first.saturating_sub(1) / 2) as usize)
-            };
             let mut rows: Vec<GridRow> = Vec::new();
             let mut seen = HashSet::new();
             let mut add = |s: DiscoveredSource, origin: &str, removable: bool| {
                 if seen.insert((s.channel, s.patch_kind().to_string())) {
                     rows.push(GridRow {
-                        patched_column: patched(s.channel, s.patch_kind()),
+                        patch: grid_patch(&st.config, s.channel, s.patch_kind()),
                         source: s,
                         origin: origin.into(),
                         removable,
@@ -714,13 +817,17 @@ impl Window {
                 add(s.clone(), &s.terminal.clone(), false);
             }
             for m in &settings.manual {
-                add(DiscoveredSource::manual(m.channel, &m.kind), "manual", true);
+                add(
+                    DiscoveredSource::manual(m.channel, &m.kind),
+                    tr("manual"),
+                    true,
+                );
             }
             for p in &st.config.inputs {
                 if let Some(ch) = p.channel {
                     add(
                         DiscoveredSource::manual(ch, &p.kind),
-                        "not advertised",
+                        tr("not advertised"),
                         true,
                     );
                 }
@@ -729,34 +836,54 @@ impl Window {
                 rows.iter()
                     .position(|r| r.source.channel == *ch && r.source.patch_kind() == kind)
             });
-            (rows, st.pairs.clone(), listening)
+            (rows, st.grid_layout.clone(), listening)
         };
         self.st.borrow_mut().grid_rows = rows.clone();
-        self.grid.update(rows, pairs, listening);
+        self.grid.update(rows, layout, listening);
         self.update_meters();
     }
 
     fn update_meters(&self) {
         let st = self.st.borrow();
-        let columns: Vec<Vec<Option<f64>>> = st
-            .pairs
+        let c = &st.config;
+        // Concatenated channels (meters, route state) of each header group.
+        let groups: Vec<Vec<u32>> = if c.multi() {
+            let widths = if st.meters.in_widths.len() == c.in_devices() as usize {
+                st.meters.in_widths.clone()
+            } else {
+                DaemonConfig::in_widths(&c.inputs, c.in_devices())
+            };
+            (1..=c.in_devices().max(1))
+                .map(|n| device_channels(n, &widths))
+                .collect()
+        } else {
+            st.grid_layout
+                .headers
+                .iter()
+                .map(|h| (h.columns.start as u32 + 1..=h.columns.end as u32).collect())
+                .collect()
+        };
+        let levels: Vec<Vec<Option<f64>>> = groups
             .iter()
-            .map(|p| p.iter().map(|&c| peak(&st.meters.from_net, c)).collect())
+            .map(|chs| {
+                chs.iter()
+                    .take(2)
+                    .map(|&ch| peak(&st.meters.from_net, ch))
+                    .collect()
+            })
             .collect();
-        let status: Vec<&str> = st
-            .pairs
+        let status: Vec<&str> = groups
             .iter()
-            .map(|p| {
-                let first = p.first().copied().unwrap_or(0);
+            .map(|chs| {
                 match st
                     .meters
                     .inputs
                     .iter()
-                    .find(|(chs, _)| chs.contains(&first))
+                    .find(|(routed, _)| routed.iter().any(|r| chs.contains(r)))
                 {
-                    None => "free",
-                    Some((_, true)) => "receiving audio",
-                    Some((_, false)) => "waiting",
+                    None => tr("free"),
+                    Some((_, true)) => tr("receiving audio"),
+                    Some((_, false)) => tr("waiting"),
                 }
             })
             .collect();
@@ -765,12 +892,21 @@ impl Window {
         } else {
             None
         };
-        self.grid.show_levels(&columns, &status, listen);
-        for row in self.output_rows.borrow().iter() {
-            let levels: Vec<Option<f64>> = row
-                .pair
+        self.grid.show_levels(&levels, &status, listen);
+        let rows = self.output_rows.borrow();
+        let out_widths = if st.meters.out_widths.len() == rows.len() {
+            st.meters.out_widths.clone()
+        } else {
+            vec![2; rows.len()]
+        };
+        for row in rows.iter() {
+            let chs = row
+                .device
+                .map_or_else(|| row.pair.clone(), |d| device_channels(d, &out_widths));
+            let levels: Vec<Option<f64>> = chs
                 .iter()
-                .map(|&c| peak(&st.meters.to_net, c))
+                .take(2)
+                .map(|&ch| peak(&st.meters.to_net, ch))
                 .collect();
             row.meter.show(&levels);
         }
@@ -787,13 +923,18 @@ impl Window {
         }
     }
 
-    fn rebuild_output_rows(self: &Rc<Self>, count: u32) {
+    /// Output rows: one per pair (duplex layout) or per output device (multi layout).
+    fn rebuild_output_rows(self: &Rc<Self>, count: u32, multi: bool) {
         for row in self.output_rows.borrow_mut().drain(..) {
             self.outputs_group.remove(&row.row);
         }
         let weak = Rc::downgrade(self);
         for i in 0..count {
-            let row = OutputRow::new(vec![2 * i + 1, 2 * i + 2], &weak);
+            let row = if multi {
+                OutputRow::new(vec![1, 2], Some(i + 1), &weak)
+            } else {
+                OutputRow::new(vec![2 * i + 1, 2 * i + 2], None, &weak)
+            };
             self.outputs_group.add(&row.row);
             self.output_rows.borrow_mut().push(row);
         }
@@ -819,6 +960,53 @@ impl Window {
             Err(e) => {
                 w.show_error(Some(e.message()));
                 w.refresh_slow();
+            }
+        });
+    }
+
+    /// Two-button confirmation; `proceed` runs on `accept`, otherwise the configured state is
+    /// shown again. `dismissable`: “Do not ask again” check box (width warning).
+    fn confirm(
+        self: &Rc<Self>,
+        heading: &str,
+        body: &str,
+        accept: &str,
+        destructive: bool,
+        dismissable: bool,
+        proceed: impl FnOnce(&Rc<Self>) + 'static,
+    ) {
+        let dialog = adw::MessageDialog::new(Some(&self.win), Some(heading), Some(body));
+        dialog.add_responses(&[("cancel", tr("Cancel")), ("accept", accept)]);
+        dialog.set_response_appearance(
+            "accept",
+            if destructive {
+                adw::ResponseAppearance::Destructive
+            } else {
+                adw::ResponseAppearance::Suggested
+            },
+        );
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        let skip = dismissable.then(|| {
+            let check = gtk::CheckButton::with_label(tr("Do not ask again"));
+            check.set_halign(gtk::Align::Center);
+            dialog.set_extra_child(Some(&check));
+            check
+        });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let answer = dialog.choose_future().await;
+            let Some(w) = weak.upgrade() else { return };
+            if skip.is_some_and(|c| c.is_active()) {
+                let mut s = w.settings.borrow_mut();
+                s.skip_width_warning = true;
+                s.save();
+            }
+            if answer == "accept" {
+                proceed(&w);
+            } else {
+                let c = w.st.borrow().config.clone();
+                w.apply_config(c);
             }
         });
     }
@@ -851,38 +1039,80 @@ impl Window {
         self.mutate(json!({"cmd": "set_advertise", "advertise": self.advertise_row.is_active()}));
     }
 
+    fn layout_changed(self: &Rc<Self>, value: &'static str) {
+        if self.updating.get() || !self.st.borrow().config_loaded {
+            return;
+        }
+        if value == self.st.borrow().config.layout {
+            return;
+        }
+        let heading = if value == "multi" {
+            tr("Switch to Several Devices?")
+        } else {
+            tr("Switch to “OpenLW In” and “OpenLW Out”?")
+        };
+        let request = json!({"cmd": "set_device_layout", "layout": value});
+        self.confirm(
+            heading,
+            tr("Patches move between input pair n and device n (a mono patch on input c goes to device ⌈c/2⌉); those that no longer fit are released. Audio on OpenLW devices stops for a moment while PipeWire publishes them again."),
+            tr("Switch"),
+            false,
+            false,
+            move |w| w.mutate(request),
+        );
+    }
+
+    fn naming_changed(self: &Rc<Self>) {
+        if self.updating.get() {
+            return;
+        }
+        let on = self.naming_row.is_active();
+        if on != self.st.borrow().config.custom_names {
+            self.mutate(json!({"cmd": "set_device_naming", "enabled": on}));
+        }
+    }
+
     fn channel_count_changed(self: &Rc<Self>) {
         if self.updating.get() || !self.st.borrow().config_loaded {
             return;
         }
         let to_net = 2 * (self.out_count.selected() + 1);
         let from_net = 2 * (self.in_count.selected() + 1);
-        let (lost_out, lost_in) = {
+        let (lost_out, lost_in, multi) = {
             let c = &self.st.borrow().config;
             if to_net == c.channels_to_net && from_net == c.channels_from_net {
                 return;
             }
+            let multi = c.multi();
             let lost_out = c
                 .outputs
                 .iter()
                 .filter(|o| {
-                    o.device_channels
-                        .as_ref()
-                        .and_then(|d| d.iter().max())
-                        .is_some_and(|&m| m > to_net)
+                    if multi {
+                        o.device.unwrap_or(0) > to_net.div_ceil(2)
+                    } else {
+                        o.device_channels
+                            .as_ref()
+                            .and_then(|d| d.iter().max())
+                            .is_some_and(|&m| m > to_net)
+                    }
                 })
                 .count();
             let lost_in = c
                 .inputs
                 .iter()
                 .filter(|i| {
-                    i.device_channels
-                        .iter()
-                        .max()
-                        .is_some_and(|&m| m > from_net)
+                    if multi {
+                        i.device.unwrap_or(0) > from_net.div_ceil(2)
+                    } else {
+                        i.device_channels
+                            .iter()
+                            .max()
+                            .is_some_and(|&m| m > from_net)
+                    }
                 })
                 .count();
-            (lost_out, lost_in)
+            (lost_out, lost_in, multi)
         };
         let request = json!({"cmd": "set_device_channels", "to_net": to_net, "from_net": from_net});
         if lost_out + lost_in == 0 {
@@ -890,36 +1120,30 @@ impl Window {
             return;
         }
         let mut lost = Vec::new();
-        if lost_out > 0 {
-            let s = if lost_out > 1 { "s" } else { "" };
-            lost.push(format!("{lost_out} transmission{s} stopped"));
+        if lost_out == 1 {
+            lost.push(tr("1 transmission stopped").to_string());
+        } else if lost_out > 1 {
+            lost.push(trf("{n} transmissions stopped", &[("n", &lost_out)]));
         }
-        if lost_in > 0 {
-            let s = if lost_in > 1 { "s" } else { "" };
-            lost.push(format!("{lost_in} source{s} removed from the inputs"));
+        if lost_in == 1 {
+            lost.push(tr("1 source removed from the inputs").to_string());
+        } else if lost_in > 1 {
+            lost.push(trf(
+                "{n} sources removed from the inputs",
+                &[("n", &lost_in)],
+            ));
         }
-        let dialog = adw::MessageDialog::new(
-            Some(&self.win),
-            Some("Reduce the Number of Channels?"),
-            Some(&format!(
-                "{}. Software using OpenLW In or OpenLW Out finds the devices again after a few seconds.",
-                capitalize(&lost.join(", "))
-            )),
+        let body = trf(
+            "{lost}. Software using OpenLW devices finds them again after a few seconds.",
+            &[("lost", &capitalize(&lost.join(", ")))],
         );
-        dialog.add_responses(&[("cancel", "Cancel"), ("reduce", "Reduce")]);
-        dialog.set_response_appearance("reduce", adw::ResponseAppearance::Destructive);
-        dialog.set_default_response(Some("cancel"));
-        dialog.set_close_response("cancel");
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let answer = dialog.choose_future().await;
-            let Some(w) = weak.upgrade() else { return };
-            if answer == "reduce" {
-                w.mutate(request);
-            } else {
-                let c = w.st.borrow().config.clone();
-                w.apply_config(c);
-            }
+        let heading = if multi {
+            tr("Reduce the Number of Devices?")
+        } else {
+            tr("Reduce the Number of Channels?")
+        };
+        self.confirm(heading, &body, tr("Reduce"), true, false, move |w| {
+            w.mutate(request)
         });
     }
 
@@ -931,10 +1155,7 @@ impl Window {
             .ok()
             .filter(|c| (1..=32766).contains(c))
         else {
-            self.show_error(Some(
-                DaemonError::Refused("invalid channel. Enter a number from 1 to 32766.".into())
-                    .message(),
-            ));
+            self.show_error(Some(invalid_channel()));
             return;
         };
         let kind = MANUAL_KINDS
@@ -955,41 +1176,183 @@ impl Window {
         self.update_grid();
     }
 
-    fn toggle_input(self: &Rc<Self>, row: usize, column: usize) {
-        let (r, pair, from_net) = {
+    /// Cell click: releases the patch under it, or offers the patch menu (stereo, left, right,
+    /// L+R); a surround source is patched on 8 channels at once.
+    fn toggle_input(self: &Rc<Self>, row: usize, column: usize, anchor: &gtk::Widget) {
+        let (r, c, columns) = {
             let st = self.st.borrow();
-            match (st.grid_rows.get(row), st.pairs.get(column)) {
-                (Some(r), Some(p)) => (r.clone(), p.clone(), st.config.channels_from_net),
-                _ => return,
+            match st.grid_rows.get(row) {
+                Some(r) => (r.clone(), st.config.clone(), st.grid_layout.columns),
+                None => return,
             }
         };
-        if r.patched_column == Some(column) {
-            self.mutate(json!({"cmd": "unpatch_input", "device_channels": pair}));
+        if column >= columns {
             return;
         }
-        let width = if r.source.patch_kind() == "surround" {
-            8
-        } else {
-            2
+        let s = r.source.clone();
+        let kind = s.patch_kind().to_string();
+        let current = input_patch(&c, s.channel, &kind).cloned();
+        if let (Some(p), Some(cur)) = (&r.patch, current) {
+            if p.covers(column) {
+                let mut req =
+                    json!({"cmd": "unpatch_input", "device_channels": cur.device_channels});
+                if let (Some(d), Some(o)) = (cur.device, req.as_object_mut()) {
+                    o.insert("device".into(), d.into());
+                }
+                self.patch_input(req, &s, cur.device, None);
+                return;
+            }
+        }
+        let surround = kind == "surround";
+        let weak = Rc::downgrade(self);
+        let item = |title: String, request: Value, device: Option<u32>, width: u32| -> MenuItem {
+            let (weak, s) = (weak.clone(), s.clone());
+            let f = move || {
+                if let Some(w) = weak.upgrade() {
+                    w.patch_input(request.clone(), &s, device, Some(width));
+                }
+            };
+            (title, Rc::new(f))
         };
-        let first = pair.first().copied().unwrap_or(1);
-        if first + width - 1 > from_net {
-            self.show_error(Some(
-                DaemonError::Refused(format!(
-                    "a surround source takes 8 inputs. Choose a pair from 1-2 to {}-{}.",
-                    from_net.saturating_sub(7),
-                    from_net.saturating_sub(6)
-                ))
-                .message(),
-            ));
-            // The clicked toggle changed state on its own: show the configured state again.
-            self.grid.update(Vec::new(), Vec::new(), None);
-            self.update_grid();
+        let base = json!({"cmd": "patch_input", "channel": s.channel, "kind": kind});
+        let with = |extra: Value| {
+            let mut req = base.clone();
+            if let (Some(o), Some(e)) = (req.as_object_mut(), extra.as_object()) {
+                o.extend(e.clone());
+            }
+            req
+        };
+        if c.multi() {
+            let n = column as u32 + 1;
+            if surround {
+                self.patch_input(
+                    with(json!({"device": n, "device_channels": (1..=8).collect::<Vec<u32>>()})),
+                    &s,
+                    Some(n),
+                    Some(8),
+                );
+                return;
+            }
+            let mut items = vec![item(
+                trf("Stereo on In {n}", &[("n", &n)]),
+                with(json!({"device": n, "device_channels": [1, 2]})),
+                Some(n),
+                2,
+            )];
+            for (title, mix) in [
+                (tr("Left only (mono)"), "left"),
+                (tr("Right only (mono)"), "right"),
+                (tr("L+R (mono)"), "sum"),
+            ] {
+                items.push(item(
+                    title.into(),
+                    with(json!({"device": n, "mix": mix, "device_channels": [1]})),
+                    Some(n),
+                    1,
+                ));
+            }
+            self.grid.popup(anchor, items);
             return;
         }
-        let channels: Vec<u32> = (first..first + width).collect();
-        self.mutate(json!({"cmd": "patch_input", "channel": r.source.channel,
-            "kind": r.source.patch_kind(), "device_channels": channels}));
+        let ch = column as u32 + 1;
+        let pair_first = if ch.is_multiple_of(2) { ch - 1 } else { ch };
+        let from_net = c.channels_from_net;
+        if surround {
+            if pair_first + 7 > from_net {
+                self.show_error(Some(
+                    DaemonError::Refused(trf(
+                        "a surround source takes 8 inputs. Choose a pair from 1-2 to {a}-{b}.",
+                        &[
+                            ("a", &from_net.saturating_sub(7)),
+                            ("b", &from_net.saturating_sub(6)),
+                        ],
+                    ))
+                    .message(),
+                ));
+                return;
+            }
+            self.mutate(with(
+                json!({"device_channels": (pair_first..pair_first + 8).collect::<Vec<u32>>()}),
+            ));
+            return;
+        }
+        let mut items = Vec::new();
+        if pair_first < from_net {
+            items.push(item(
+                trf(
+                    "Stereo on inputs {a}-{b}",
+                    &[("a", &pair_first), ("b", &(pair_first + 1))],
+                ),
+                with(json!({"device_channels": [pair_first, pair_first + 1]})),
+                None,
+                2,
+            ));
+        }
+        for (title, mix) in [
+            ("Left only on input {n}", "left"),
+            ("Right only on input {n}", "right"),
+            ("L+R (mono) on input {n}", "sum"),
+        ] {
+            items.push(item(
+                trf(title, &[("n", &ch)]),
+                with(json!({"mix": mix, "device_channels": [ch]})),
+                None,
+                1,
+            ));
+        }
+        self.grid.popup(anchor, items);
+    }
+
+    /// Multi layout: sends an input patch (`width` `None`: unpatch), warning first if it
+    /// changes a device's width (the daemon then recreates the shared region).
+    fn patch_input(
+        self: &Rc<Self>,
+        request: Value,
+        s: &DiscoveredSource,
+        device: Option<u32>,
+        width: Option<u32>,
+    ) {
+        let (c, skip) = (
+            self.st.borrow().config.clone(),
+            self.settings.borrow().skip_width_warning,
+        );
+        let Some(n) = device.filter(|_| c.multi() && !skip) else {
+            self.mutate(request);
+            return;
+        };
+        let changed = width_changes(&c, s, n, width);
+        let Some(&(device, from, to)) = changed.first() else {
+            self.mutate(request);
+            return;
+        };
+        let detail = if changed.len() > 1 {
+            trf(
+                "{count} OpenLW input devices change width.",
+                &[("count", &changed.len())],
+            )
+        } else if to == 1 {
+            trf(
+                "“OpenLW In {n}” changes from {from} channels to 1 channel.",
+                &[("n", &device), ("from", &from)],
+            )
+        } else {
+            trf(
+                "“OpenLW In {n}” changes from {from} to {to} channels.",
+                &[("n", &device), ("from", &from), ("to", &to)],
+            )
+        };
+        let body = trf(
+            "{detail} Audio on all OpenLW devices stops for a moment while PipeWire publishes them again.",
+            &[("detail", &detail)],
+        );
+        let heading = if width.is_none() {
+            tr("Release This Input?")
+        } else {
+            tr("Patch This Source?")
+        };
+        self.confirm(heading, &body, tr("Continue"), false, true, move |w| {
+            w.mutate(request)
+        });
     }
 
     /// Removes a manual or unadvertised row; releases its inputs if patched.
@@ -1063,7 +1426,7 @@ impl Window {
         let Some(ipv4) = ipv4 else {
             self.show_error(Some(
                 DaemonError::Refused(
-                    "the computer is not connected to the Livewire network yet. Choose the interface, then try again."
+                    tr("the computer is not connected to the Livewire network yet. Choose the interface, then try again.")
                         .into(),
                 )
                 .message(),
@@ -1099,14 +1462,7 @@ impl Window {
     }
 
     fn apply_output(self: &Rc<Self>, row: &OutputRow) {
-        let previous = self
-            .st
-            .borrow()
-            .config
-            .outputs
-            .iter()
-            .find(|o| o.device_channels.as_deref() == Some(&row.pair[..]))
-            .cloned();
+        let previous = output_patch(&self.st.borrow().config, row).cloned();
         if !row.emit.is_active() {
             if let Some(p) = previous {
                 self.mutate(json!({"cmd": "unpatch_output", "channel": p.channel}));
@@ -1114,19 +1470,19 @@ impl Window {
             return;
         }
         let Some(ch) = row.channel() else {
-            self.show_error(Some(
-                DaemonError::Refused("invalid channel. Enter a number from 1 to 32766.".into())
-                    .message(),
-            ));
+            self.show_error(Some(invalid_channel()));
             // Nothing transmitted: the switch shows the configured state, even while editing.
             row.set_emit(previous.is_some());
             row.show(previous.as_ref(), self);
             return;
         };
-        let patch = json!({"cmd": "patch_output", "channel": ch, "name": row.stream_name(),
+        let mut patch = json!({"cmd": "patch_output", "channel": ch, "name": row.stream_name(),
             "format": row.format(), "device_channels": row.pair});
+        if let (Some(d), Some(o)) = (row.device, patch.as_object_mut()) {
+            o.insert("device".into(), d.into());
+        }
         match previous {
-            // Channel change: stop this pair's previous stream first.
+            // Channel change: stop this row's previous stream first.
             Some(p) if p.channel != ch => {
                 self.request(
                     json!({"cmd": "unpatch_output", "channel": p.channel}),
@@ -1191,7 +1547,10 @@ impl Window {
         let proc = match proc {
             Ok(p) => p,
             Err(e) => {
-                self.show_error(Some(format!("Could not start the service: {e}.")));
+                self.show_error(Some(trf(
+                    "Could not start the service: {error}.",
+                    &[("error", &e)],
+                )));
                 return;
             }
         };
@@ -1207,12 +1566,19 @@ impl Window {
                 }
                 Ok((_, err)) => {
                     let detail = err.as_deref().map(str::trim).unwrap_or_default();
-                    w.show_error(Some(format!(
-                        "Could not start the service{}{detail}. Check the log: journalctl --user -u openlw.",
-                        if detail.is_empty() { "" } else { ": " }
-                    )));
+                    w.show_error(Some(if detail.is_empty() {
+                        tr("Could not start the service. Check the log: journalctl --user -u openlw.").into()
+                    } else {
+                        trf(
+                            "Could not start the service: {error}. Check the log: journalctl --user -u openlw.",
+                            &[("error", &detail)],
+                        )
+                    }));
                 }
-                Err(e) => w.show_error(Some(format!("Could not start the service: {e}."))),
+                Err(e) => w.show_error(Some(trf(
+                    "Could not start the service: {error}.",
+                    &[("error", &e)],
+                ))),
             }
         });
     }
@@ -1225,15 +1591,138 @@ impl Window {
             .developer_name("François Brille")
             .version(env!("CARGO_PKG_VERSION"))
             .license_type(gtk::License::Apache20)
-            .comments("Livewire® and AES67 audio on the computer, through PipeWire.\n\nExperimental project, provided “as is”, without any warranty. Not suitable for critical environments (on-air chains, safety systems).\n\nLivewire is a trademark of TLS Corp.")
+            .comments(tr("Livewire® and AES67 audio on the computer, through PipeWire.\n\nExperimental project, provided “as is”, without any warranty. Not suitable for critical environments (on-air chains, safety systems).\n\nLivewire is a trademark of TLS Corp."))
             .build();
         about.present();
     }
 }
 
-/// Output row: device pair, meter, channel, advertised name, format, transmission.
+/// Multi layout: input devices whose width changes (device, from, to) when source `s` goes to
+/// device `n` with `width` channels (`None`: released), as the daemon would compute them.
+fn width_changes(
+    c: &DaemonConfig,
+    s: &DiscoveredSource,
+    n: u32,
+    width: Option<u32>,
+) -> Vec<(usize, u32, u32)> {
+    let kind = s.patch_kind();
+    let devices = c.in_devices();
+    let before = DaemonConfig::in_widths(&c.inputs, devices);
+    // After: the source leaves its device, the target device takes the new width (or empties).
+    let mut after: Vec<InputPatch> = c
+        .inputs
+        .iter()
+        .filter(|i| !(i.channel == Some(s.channel) && i.kind == kind) && i.device != Some(n))
+        .cloned()
+        .collect();
+    if let Some(w) = width {
+        after.push(InputPatch {
+            channel: Some(s.channel),
+            kind: kind.into(),
+            device_channels: (1..=w).collect(),
+            device: Some(n),
+            mix: (w == 1).then(|| "sum".into()),
+        });
+    }
+    let widths = DaemonConfig::in_widths(&after, devices);
+    before
+        .iter()
+        .zip(&widths)
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, (&a, &b))| (i + 1, a, b))
+        .collect()
+}
+
+/// Configured patch of a source, if any.
+fn input_patch<'a>(c: &'a DaemonConfig, channel: u16, kind: &str) -> Option<&'a InputPatch> {
+    c.inputs
+        .iter()
+        .find(|i| i.channel == Some(channel) && i.kind == kind && !i.device_channels.is_empty())
+}
+
+/// Grid patch of a source: device column (multi layout) or channel span (duplex layout).
+fn grid_patch(c: &DaemonConfig, channel: u16, kind: &str) -> Option<GridPatch> {
+    let p = input_patch(c, channel, kind)?;
+    let first = *p.device_channels.iter().min()?;
+    let tag = match p.mix.as_deref() {
+        Some("left") => tr("L"),
+        Some("right") => tr("R"),
+        Some("sum") => tr("L+R"),
+        _ if p.kind == "surround" => "8",
+        _ => "",
+    }
+    .to_string();
+    if c.multi() {
+        let d = p.device?;
+        return Some(GridPatch {
+            column: d.checked_sub(1)? as usize,
+            span: 1,
+            tag,
+        });
+    }
+    Some(GridPatch {
+        column: first.checked_sub(1)? as usize,
+        span: p.device_channels.len(),
+        tag,
+    })
+}
+
+/// Grid columns and header groups: device channels in pairs (duplex), or devices (multi).
+fn grid_layout(c: &DaemonConfig) -> GridLayout {
+    if c.multi() {
+        let n = c.in_devices().max(1) as usize;
+        return GridLayout {
+            multi: true,
+            columns: n,
+            headers: (0..n)
+                .map(|i| GridHeader {
+                    columns: i..i + 1,
+                    title: trf("In {n}", &[("n", &(i + 1))]),
+                })
+                .collect(),
+        };
+    }
+    let ch = c.channels_from_net as usize;
+    GridLayout {
+        multi: false,
+        columns: ch,
+        headers: (1..=ch)
+            .step_by(2)
+            .map(|a| {
+                let b = (a + 1).min(ch);
+                GridHeader {
+                    columns: a - 1..b,
+                    title: if a == b {
+                        trf("Input {n}", &[("n", &a)])
+                    } else {
+                        trf("Inputs {a}-{b}", &[("a", &a), ("b", &b)])
+                    },
+                }
+            })
+            .collect(),
+    }
+}
+
+/// Configured transmitted stream of an output row.
+fn output_patch<'a>(c: &'a DaemonConfig, row: &OutputRow) -> Option<&'a OutputPatch> {
+    c.outputs.iter().find(|o| match row.device {
+        Some(d) => o.device == Some(d),
+        None => o.device.is_none() && o.device_channels.as_deref() == Some(&row.pair[..]),
+    })
+}
+
+fn invalid_channel() -> String {
+    DaemonError::Refused(tr("invalid channel. Enter a number from 1 to 32766.").into()).message()
+}
+
+/// Output row: device pair (duplex layout) or output device (multi layout), meter, channel,
+/// advertised name, format, transmission.
 struct OutputRow {
+    /// Device channels sent in the patch: the pair, or 1-2 of `device`.
     pair: Vec<u32>,
+    /// Multi layout: output device number.
+    device: Option<u32>,
     row: adw::PreferencesRow,
     meter: Meter,
     channel: gtk::Entry,
@@ -1244,10 +1733,20 @@ struct OutputRow {
 }
 
 impl OutputRow {
-    fn new(pair: Vec<u32>, weak: &Weak<Window>) -> Rc<Self> {
+    fn new(pair: Vec<u32>, device: Option<u32>, weak: &Weak<Window>) -> Rc<Self> {
+        let title = match device {
+            Some(n) => trf("Out {n}", &[("n", &n)]),
+            None => trf(
+                "Outputs {a}-{b}",
+                &[
+                    ("a", &pair.first().copied().unwrap_or(0)),
+                    ("b", &pair.last().copied().unwrap_or(0)),
+                ],
+            ),
+        };
         // Explicit layout rather than an action row: the suffixes would squeeze the title.
         let row = adw::PreferencesRow::builder()
-            .title(pair_label("Outputs", &pair))
+            .title(&title)
             .activatable(false)
             .build();
         let line = gtk::Box::builder()
@@ -1258,13 +1757,13 @@ impl OutputRow {
             .margin_end(12)
             .build();
         let label = gtk::Label::builder()
-            .label(pair_label("Outputs", &pair))
+            .label(&title)
             .xalign(0.0)
             .width_chars(10)
             .build();
         let meter = Meter::new(2, 110);
         let channel = gtk::Entry::builder()
-            .placeholder_text("channel")
+            .placeholder_text(tr("channel"))
             .width_chars(7)
             .max_width_chars(7)
             .input_purpose(gtk::InputPurpose::Digits)
@@ -1272,18 +1771,18 @@ impl OutputRow {
             .build();
         channel.add_css_class("monospace");
         let name = gtk::Entry::builder()
-            .placeholder_text("advertised name")
+            .placeholder_text(tr("advertised name"))
             .width_chars(12)
             .hexpand(true)
             .valign(gtk::Align::Center)
             .build();
-        let format = gtk::DropDown::from_strings(&FORMATS.map(|(_, t)| t));
+        let format = gtk::DropDown::from_strings(&FORMATS.map(|(_, t)| tr(t)));
         format.set_valign(gtk::Align::Center);
         let emit = gtk::Switch::builder()
             .valign(gtk::Align::Center)
-            .tooltip_text("Transmit")
+            .tooltip_text(tr("Transmit"))
             .build();
-        let emit_label = gtk::Label::new(Some("Transmit"));
+        let emit_label = gtk::Label::new(Some(tr("Transmit")));
         line.append(&label);
         line.append(meter.widget());
         line.append(&channel);
@@ -1294,6 +1793,7 @@ impl OutputRow {
         row.set_child(Some(&line));
         let this = Rc::new(Self {
             pair,
+            device,
             row,
             meter,
             channel,
@@ -1343,12 +1843,19 @@ impl OutputRow {
             .filter(|c| (1..=32766).contains(c))
     }
 
+    /// Advertised name; default “PC 1-2” or “PC n” (network name, not translated).
     fn stream_name(&self) -> String {
         let n = self.name.text().trim().to_string();
-        if n.is_empty() {
-            pair_label("PC", &self.pair)
-        } else {
-            n
+        if !n.is_empty() {
+            return n;
+        }
+        match self.device {
+            Some(d) => format!("PC {d}"),
+            None => format!(
+                "PC {}-{}",
+                self.pair.first().copied().unwrap_or(0),
+                self.pair.last().copied().unwrap_or(0)
+            ),
         }
     }
 
@@ -1394,21 +1901,18 @@ fn group(title: &str, description: &str) -> adw::PreferencesGroup {
         .build()
 }
 
-fn count_row(title: &str, unit: &str) -> adw::ComboRow {
-    let items: Vec<String> = (1..=MAX_PAIRS)
-        .map(|n| {
-            format!(
-                "{n} {} ({} {unit})",
-                if n == 1 { "channel" } else { "channels" },
-                2 * n
-            )
+/// Count menu entries: “n channels (2n inputs)”, or “n devices” in multi layout.
+fn count_titles(multi: bool, inputs: bool) -> Vec<String> {
+    (1..=MAX_PAIRS)
+        .map(|n| match (multi, inputs, n) {
+            (true, _, 1) => tr("1 device").to_string(),
+            (true, _, _) => trf("{n} devices", &[("n", &n)]),
+            (false, true, 1) => tr("1 channel (2 inputs)").to_string(),
+            (false, true, _) => trf("{n} channels ({m} inputs)", &[("n", &n), ("m", &(2 * n))]),
+            (false, false, 1) => tr("1 channel (2 outputs)").to_string(),
+            (false, false, _) => trf("{n} channels ({m} outputs)", &[("n", &n), ("m", &(2 * n))]),
         })
-        .collect();
-    let refs: Vec<&str> = items.iter().map(String::as_str).collect();
-    adw::ComboRow::builder()
-        .title(title)
-        .model(&gtk::StringList::new(&refs))
-        .build()
+        .collect()
 }
 
 fn set_dot(dot: &gtk::Label, class: &str) {
@@ -1423,4 +1927,111 @@ fn capitalize(s: &str) -> String {
     c.next()
         .map(|f| f.to_uppercase().chain(c).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn grid_geometry_and_patches() {
+        let duplex = DaemonConfig::from(&json!({
+            "device": {"channels_from_net": 6},
+            "destinations": [
+                {"channel": 1, "device_channels": [3, 4]},
+                {"channel": 2, "device_channels": [5], "mix": "right"},
+                {"channel": 3, "kind": "surround", "device_channels": []}],
+        }));
+        let l = grid_layout(&duplex);
+        assert_eq!((l.multi, l.columns, l.headers.len()), (false, 6, 3));
+        assert_eq!(l.headers[1].columns, 2..4);
+        assert_eq!(
+            grid_patch(&duplex, 1, "stereo"),
+            Some(GridPatch {
+                column: 2,
+                span: 2,
+                tag: String::new()
+            })
+        );
+        assert_eq!(
+            grid_patch(&duplex, 2, "stereo"),
+            Some(GridPatch {
+                column: 4,
+                span: 1,
+                tag: "R".into()
+            })
+        );
+        assert_eq!(grid_patch(&duplex, 3, "surround"), None);
+
+        let multi = DaemonConfig::from(&json!({
+            "device_layout": "multi",
+            "device": {"channels_from_net": 4},
+            "destinations": [
+                {"channel": 5, "kind": "surround", "device": 2, "device_channels": [1,2,3,4,5,6,7,8]}],
+        }));
+        let l = grid_layout(&multi);
+        assert_eq!((l.multi, l.columns), (true, 2));
+        assert_eq!(l.headers[1].title, "In 2");
+        assert_eq!(
+            grid_patch(&multi, 5, "surround"),
+            Some(GridPatch {
+                column: 1,
+                span: 1,
+                tag: "8".into()
+            })
+        );
+    }
+
+    #[test]
+    fn width_warning() {
+        let c = DaemonConfig::from(&json!({
+            "device_layout": "multi",
+            "device": {"channels_from_net": 6},
+            "destinations": [
+                {"channel": 101, "device": 2, "device_channels": [1], "mix": "left"},
+                {"channel": 2204, "device": 1, "device_channels": [1, 2]}],
+        }));
+        let s = |ch| DiscoveredSource::manual(ch, "stereo");
+        // Mono source moves from In 2 to In 3: both change width.
+        assert_eq!(
+            width_changes(&c, &s(101), 3, Some(1)),
+            vec![(2, 1, 2), (3, 2, 1)]
+        );
+        // Stereo on an empty device: geometry kept.
+        assert!(width_changes(&c, &s(2204), 3, Some(2)).is_empty());
+        // Releasing the mono patch: In 2 goes back to 2 channels.
+        assert_eq!(width_changes(&c, &s(101), 2, None), vec![(2, 1, 2)]);
+        // Surround replaces the stereo source on In 1.
+        let sur = DiscoveredSource::manual(300, "surround");
+        assert_eq!(width_changes(&c, &sur, 1, Some(8)), vec![(1, 2, 8)]);
+    }
+
+    #[test]
+    fn tables_are_translated() {
+        let fr = crate::i18n::french_catalog();
+        let texts = LAYOUTS
+            .iter()
+            .chain(&LATENCIES)
+            .chain(&FORMATS)
+            .chain(&MANUAL_KINDS)
+            .map(|(_, t)| *t)
+            .chain(DSCPS.iter().map(|(_, t)| *t))
+            .chain([
+                "Left only on input {n}",
+                "Right only on input {n}",
+                "L+R (mono) on input {n}",
+            ]);
+        for t in texts {
+            assert!(fr.contains_key(t), "missing in fr.po: {t:?}");
+        }
+    }
+
+    #[test]
+    fn count_menu() {
+        assert_eq!(count_titles(false, true)[0], "1 channel (2 inputs)");
+        assert_eq!(count_titles(false, false)[2], "3 channels (6 outputs)");
+        assert_eq!(count_titles(true, true)[15], "16 devices");
+    }
 }

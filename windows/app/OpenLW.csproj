@@ -12,8 +12,10 @@
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <!-- Generates OpenLW.pri (compiled XAML) for the unpackaged app. -->
+    <!-- Generates OpenLW.pri (compiled XAML, Strings\<language>\Resources.resw) for the unpackaged app. -->
     <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- Resource fallback language: English. -->
+    <DefaultLanguage>en-US</DefaultLanguage>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <Nullable>enable</Nullable>

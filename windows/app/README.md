@@ -8,11 +8,13 @@ WinUI 3 configuration app (C#, .NET 10, Windows App SDK, unpackaged and self-con
 |---|---|
 | Livewire network | Connection state, interface (automatic or forced), source advertisement |
 | Audio driver | How to select the ASIO® driver “OpenLW” in host applications; ASIO Compatible logo and trademark notice |
-| Inputs | Patch matrix (discovered, manual and unadvertised sources × input pairs), per-pair meters and state, headphone preview |
+| Inputs | Patch matrix (discovered, manual and unadvertised sources × driver input channels, headed per pair with meters and state): stereo on a pair, left, right or L+R (mono) on one channel, surround on 8 channels; headphone preview |
 | Outputs | One row per output pair: meter, Livewire channel, advertised name, format, transmission |
 | Advanced settings | Advertised name, receive latency, DSCP |
 
-User-facing strings are in English, with the same wording as the macOS and Linux apps.
+## Languages
+
+English by default, French when the Windows display language is French. Strings are MRT Core resources: `Strings\en-US\Resources.resw` (keys and English text, same wording as the macOS and Linux apps) and `Strings\fr-FR\Resources.resw`, compiled into `OpenLW.pri` next to the executable; XAML uses `x:Uid`, code uses `Loc.S` / `Loc.F`. The environment variable `OPENLW_UI_LANGUAGE` (`en-US` or `fr-FR`) forces the language. Messages from the service and channel names published by the service stay in English.
 
 ## Service connection
 

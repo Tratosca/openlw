@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- OpenLW app strings, English (default). x:Uid resources (Name.Property) for MainWindow.xaml, plain keys
+     for Loc.S / Loc.F ({0}: argument). Keys and English text: Strings\en-US\Resources.resw. -->
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <data name="NetworkTitle.Text" xml:space="preserve"><value>Livewire network</value></data>
+  <data name="StateConnecting.Text" xml:space="preserve"><value>Connecting to the OpenLW service…</value></data>
+  <data name="InterfaceLabel.Text" xml:space="preserve"><value>Interface:</value></data>
+  <data name="AdvertiseCheck.Content" xml:space="preserve"><value>Advertise outputs on the network</value></data>
+  <data name="ClockHint.Text" xml:space="preserve"><value>Clock: the computer's own. Drift relative to other devices is compensated automatically.</value></data>
+  <data name="DriverTitle.Text" xml:space="preserve"><value>Audio driver</value></data>
+  <data name="DriverText.Text" xml:space="preserve"><value>In your audio software, select the ASIO® driver “OpenLW”. Only one application can use it at a time; its inputs and outputs are the ones set below.</value></data>
+  <data name="DriverHint.Text" xml:space="preserve"><value>Applications without ASIO support (browsers, video conferencing) can't see OpenLW.</value></data>
+  <data name="AsioTrademark.Text" xml:space="preserve"><value>ASIO is a registered trademark of Steinberg Media Technologies GmbH.</value></data>
+  <data name="InputsTitle.Text" xml:space="preserve"><value>Inputs (network to computer)</value></data>
+  <data name="InCountLabel.Text" xml:space="preserve"><value>Received Livewire channels:</value></data>
+  <data name="InputsHint.Text" xml:space="preserve"><value>Click a cell to send the source to the OpenLW driver: stereo on the pair, or left, right, or L+R in mono on that input. Click again to release it. The headphone button plays the source on the Windows output without patching it.</value></data>
+  <data name="ManualLabel.Text" xml:space="preserve"><value>Unadvertised source, channel:</value></data>
+  <data name="ManualChannel.PlaceholderText" xml:space="preserve"><value>1 to 32766</value></data>
+  <data name="KindStereo.Content" xml:space="preserve"><value>Stereo</value></data>
+  <data name="KindBackfeed.Content" xml:space="preserve"><value>Backfeed (To Source)</value></data>
+  <data name="KindSurround.Content" xml:space="preserve"><value>8-channel surround</value></data>
+  <data name="AddManual.Content" xml:space="preserve"><value>Add to grid</value></data>
+  <data name="OutputsTitle.Text" xml:space="preserve"><value>Outputs (computer to network)</value></data>
+  <data name="OutCountLabel.Text" xml:space="preserve"><value>Transmitted Livewire channels:</value></data>
+  <data name="OutputsHint.Text" xml:space="preserve"><value>Each output pair of the OpenLW driver is transmitted on the Livewire channel of your choice, under the name shown. Changes apply when Transmit is checked.</value></data>
+  <data name="AdvancedExpander.Header" xml:space="preserve"><value>Advanced settings: advertised name, receive latency, network priority</value></data>
+  <data name="TerminalName.Header" xml:space="preserve"><value>Advertised name</value></data>
+  <data name="TerminalHint.Text" xml:space="preserve"><value>Name shown by other Livewire devices, 32 characters at most, accents replaced. Empty: the computer name. Press Enter to apply.</value></data>
+  <data name="LatencyCombo.Header" xml:space="preserve"><value>Receive latency</value></data>
+  <data name="LatencyHint.Text" xml:space="preserve"><value>Buffering added to that of the recording software. The lower the latency, the more likely a network or computer delay is to cause a brief dropout.</value></data>
+  <data name="DscpCombo.Header" xml:space="preserve"><value>Network priority (DSCP)</value></data>
+  <data name="DscpHint.Text" xml:space="preserve"><value>Marking of transmitted audio streams. Choose the value expected by your switches' QoS.</value></data>
+  <data name="StateSearching" xml:space="preserve"><value>Searching for the Livewire network. Connect the computer to the Livewire network, or choose the interface.</value></data>
+  <data name="StateIfaceUnavailable" xml:space="preserve"><value>Interface “{0}” unavailable. Connect it, or choose Automatic.</value></data>
+  <data name="StateConnected" xml:space="preserve"><value>Connected to the Livewire network via {0} · {1}</value></data>
+  <data name="StateAutoIface" xml:space="preserve"><value>interface chosen automatically</value></data>
+  <data name="IfaceAuto" xml:space="preserve"><value>Automatic</value></data>
+  <data name="IfaceAutoSearching" xml:space="preserve"><value>Automatic · searching</value></data>
+  <data name="IfaceAutoNamed" xml:space="preserve"><value>Automatic · {0}</value></data>
+  <data name="IfaceUnavailable" xml:space="preserve"><value>{0} (unavailable)</value></data>
+  <data name="LivewireNetworkTag" xml:space="preserve"><value>Livewire network</value></data>
+  <data name="LatencyLow" xml:space="preserve"><value>Low: ≈ 8 ms added, dedicated network</value></data>
+  <data name="LatencyNormal" xml:space="preserve"><value>Normal: ≈ 17 ms added</value></data>
+  <data name="LatencySafe" xml:space="preserve"><value>Safe: ≈ 35 ms added, shared network or busy computer</value></data>
+  <data name="DscpEf" xml:space="preserve"><value>EF (46): Livewire default</value></data>
+  <data name="DscpAf41" xml:space="preserve"><value>AF41 (34): recommended for AES67</value></data>
+  <data name="DscpNone" xml:space="preserve"><value>None (0)</value></data>
+  <data name="InCountOne" xml:space="preserve"><value>1 channel (2 inputs)</value></data>
+  <data name="InCountMany" xml:space="preserve"><value>{0} channels ({1} inputs)</value></data>
+  <data name="OutCountOne" xml:space="preserve"><value>1 channel (2 outputs)</value></data>
+  <data name="OutCountMany" xml:space="preserve"><value>{0} channels ({1} outputs)</value></data>
+  <data name="InputSingle" xml:space="preserve"><value>Input {0}</value></data>
+  <data name="InputsRange" xml:space="preserve"><value>Inputs {0}-{1}</value></data>
+  <data name="StatusFree" xml:space="preserve"><value>free</value></data>
+  <data name="StatusReceiving" xml:space="preserve"><value>receiving audio</value></data>
+  <data name="StatusWaiting" xml:space="preserve"><value>waiting</value></data>
+  <data name="NoSources" xml:space="preserve"><value>No sources discovered. Choose the interface, or enter a channel below.</value></data>
+  <data name="ListenTooltip" xml:space="preserve"><value>Listen on the Windows output</value></data>
+  <data name="StopListening" xml:space="preserve"><value>Stop listening</value></data>
+  <data name="KindTagSurround" xml:space="preserve"><value>surround</value></data>
+  <data name="KindTagBackfeed" xml:space="preserve"><value>backfeed</value></data>
+  <data name="OriginManual" xml:space="preserve"><value>manual</value></data>
+  <data name="OriginNotAdvertised" xml:space="preserve"><value>not advertised</value></data>
+  <data name="SendToInput" xml:space="preserve"><value>Send channel {0} to input {1}…</value></data>
+  <data name="SendToInputs" xml:space="preserve"><value>Send channel {0} to inputs {1}-{2}</value></data>
+  <data name="ReleaseInput" xml:space="preserve"><value>Release input {0}</value></data>
+  <data name="ReleaseInputs" xml:space="preserve"><value>Release inputs {0}-{1}</value></data>
+  <data name="RemoveFromGrid" xml:space="preserve"><value>Remove from grid</value></data>
+  <data name="MenuStereo" xml:space="preserve"><value>Stereo on inputs {0}-{1}</value></data>
+  <data name="MenuLeft" xml:space="preserve"><value>Left only on input {0}</value></data>
+  <data name="MenuRight" xml:space="preserve"><value>Right only on input {0}</value></data>
+  <data name="MenuSum" xml:space="preserve"><value>L+R (mono) on input {0}</value></data>
+  <data name="TagLeft" xml:space="preserve"><value>L</value></data>
+  <data name="TagRight" xml:space="preserve"><value>R</value></data>
+  <data name="TagSum" xml:space="preserve"><value>L+R</value></data>
+  <data name="LostOutputsOne" xml:space="preserve"><value>1 transmission stopped</value></data>
+  <data name="LostOutputsMany" xml:space="preserve"><value>{0} transmissions stopped</value></data>
+  <data name="LostInputsOne" xml:space="preserve"><value>1 source removed from the inputs</value></data>
+  <data name="LostInputsMany" xml:space="preserve"><value>{0} sources removed from the inputs</value></data>
+  <data name="ReduceTitle" xml:space="preserve"><value>Reduce the number of channels?</value></data>
+  <data name="ReduceText" xml:space="preserve"><value>{0}. The software using the OpenLW driver must reset it.</value></data>
+  <data name="ReduceButton" xml:space="preserve"><value>Reduce</value></data>
+  <data name="CancelButton" xml:space="preserve"><value>Cancel</value></data>
+  <data name="FormatStandard" xml:space="preserve"><value>Standard (5 ms)</value></data>
+  <data name="FormatAes67" xml:space="preserve"><value>AES67 (1 ms)</value></data>
+  <data name="FormatLivestream" xml:space="preserve"><value>Livestream (0.25 ms)</value></data>
+  <data name="OutputsRange" xml:space="preserve"><value>Outputs {0}-{1}</value></data>
+  <data name="OutputChannelPlaceholder" xml:space="preserve"><value>channel</value></data>
+  <data name="OutputNamePlaceholder" xml:space="preserve"><value>advertised name</value></data>
+  <data name="TransmitCheck" xml:space="preserve"><value>Transmit</value></data>
+  <data name="ErrorUnreachable" xml:space="preserve"><value>The OpenLW service isn't responding. If the problem persists, reinstall OpenLW.</value></data>
+  <data name="ErrorDecoding" xml:space="preserve"><value>Unreadable response from the OpenLW service. Reinstall OpenLW so the app and the service are the same version.</value></data>
+  <data name="ErrorRefused" xml:space="preserve"><value>Could not apply the change: {0}</value></data>
+  <data name="UnknownError" xml:space="preserve"><value>unknown error.</value></data>
+  <data name="ReasonInvalidChannel" xml:space="preserve"><value>invalid channel. Enter a number from 1 to 32766.</value></data>
+  <data name="ReasonNotConnected" xml:space="preserve"><value>the computer isn't connected to the Livewire network yet. Choose the interface, then try again.</value></data>
+  <data name="ReasonSurroundWidth" xml:space="preserve"><value>a surround source occupies 8 inputs. Choose a pair from 1-2 to {0}-{1}.</value></data>
+  <data name="ErrorListenOutput" xml:space="preserve"><value>Cannot listen to the source: Windows audio output unavailable ({0}).</value></data>
+  <data name="ErrorListenSocket" xml:space="preserve"><value>Cannot listen to the source ({0}: {1}). Check the selected Livewire interface.</value></data>
+</root>

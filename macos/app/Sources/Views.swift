@@ -214,9 +214,9 @@ final class InputGridView: NSView {
         let r = Int((p.y - headerHeight) / rowHeight)
         guard r < rows.count else { return nil }
         let menu = NSMenu()
-        menu.addItem(ClosureItem(listeningRow == r ? "Stop Listening" : "Listen") { [weak self] in self?.onListen?(r) })
+        menu.addItem(ClosureItem(listeningRow == r ? L("Stop Listening") : L("Listen")) { [weak self] in self?.onListen?(r) })
         if rows[r].removable {
-            menu.addItem(ClosureItem("Remove from Grid") { [weak self] in self?.onRemove?(r) })
+            menu.addItem(ClosureItem(L("Remove from Grid")) { [weak self] in self?.onRemove?(r) })
         }
         return menu
     }
@@ -258,7 +258,7 @@ final class InputGridView: NSView {
             text(h.status, NSRect(x: x, y: 30, width: w, height: 14), font: Theme.small, color: .tertiaryLabelColor, center: true)
         }
         if rows.isEmpty {
-            text("No sources discovered. Choose the interface, or enter a channel below.",
+            text(L("No sources discovered. Choose the interface, or enter a channel below."),
                  NSRect(x: 0, y: headerHeight + 6, width: bounds.width, height: 18), font: Theme.body, color: .secondaryLabelColor)
             return
         }
@@ -291,9 +291,9 @@ final class InputGridView: NSView {
                     (db > -6 ? Theme.meterRed : (db > -18 ? Theme.meterAmber : Theme.meterGreen)).setFill()
                     NSRect(x: track.minX, y: track.minY, width: track.width * CGFloat((db + 60) / 60), height: track.height).fill()
                 }
-                text("listening", NSRect(x: track.maxX + 6, y: y + 8, width: 50, height: 16), font: Theme.small, color: Theme.accent)
+                text(L("listening"), NSRect(x: track.maxX + 6, y: y + 8, width: 50, height: 16), font: Theme.small, color: Theme.accent)
             } else {
-                let kind = s.kind == "surround" ? " · surround" : ""
+                let kind = s.kind == "surround" ? L(" · surround") : ""
                 text(row.origin + kind, originRect, font: Theme.small, color: .secondaryLabelColor)
             }
             for c in 0..<columns where !(row.patch?.covers(c) ?? false) {
@@ -334,7 +334,7 @@ final class InputGridView: NSView {
             NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
         }
         let color: NSColor = active ? .white : .secondaryLabelColor
-        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "headphones", accessibilityDescription: "Listen") {
+        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "headphones", accessibilityDescription: L("Listen")) {
             let size = NSSize(width: 14, height: 13)
             let target = NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height)
             let tinted = NSImage(size: size, flipped: false) { bounds in

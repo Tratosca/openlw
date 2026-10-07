@@ -3,6 +3,7 @@
 #   make check-min  show minimum OS for each slice
 #   make snapshot   launch app and render window to build/snapshot.png
 #   make install    copy app to /Applications
+#   make check-l10n check the French localization (Resources/fr.lproj)
 #
 # Xcode SDK required (NSGlassEffectView, macOS 26). Before 10.14.4, Swift runtime
 # is not provided by system: swift-stdlib-tool embeds it in Contents/Frameworks.
@@ -14,6 +15,7 @@ NAME    := OpenLW
 APP     := build/OpenLW.app
 EXE     := $(APP)/Contents/MacOS/$(NAME)
 SRC     := $(wildcard Sources/*.swift)
+RES     := $(wildcard Resources/*.lproj/*)
 SDK     := $(shell DEVELOPER_DIR=$(DEVELOPER_DIR) xcrun --sdk macosx --show-sdk-path)
 SWIFTC  := xcrun --sdk macosx swiftc
 # /usr/lib/swift is already in default rpath; Frameworks holds embedded runtime (10.13–10.14.3).
@@ -33,11 +35,13 @@ build/arm64/$(NAME): $(SRC)
 	@mkdir -p $(dir $@)
 	$(SWIFTC) -target arm64-apple-macos11.0 $(FLAGS) $(SRC) -o $@
 
-$(STAMP): build/x86_64/$(NAME) build/arm64/$(NAME) Info.plist
+$(STAMP): build/x86_64/$(NAME) build/arm64/$(NAME) Info.plist $(RES)
 	@rm -rf "$(APP)"
 	@mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Frameworks"
 	lipo -create -output "$(EXE)" build/x86_64/$(NAME) build/arm64/$(NAME)
 	cp Info.plist "$(APP)/Contents/Info.plist"
+	mkdir -p "$(APP)/Contents/Resources"
+	cp -R Resources/*.lproj "$(APP)/Contents/Resources/"
 	xcrun swift-stdlib-tool --copy --platform macosx --scan-executable "$(EXE)" \
 	  --destination "$(APP)/Contents/Frameworks" --source-libraries "$$(dirname $$(xcrun -f swiftc))/../lib/swift-5.0/macosx"
 	codesign --force --deep --sign "$(SIGN_ID)" --timestamp=none "$(APP)"
@@ -47,6 +51,9 @@ check-min: $(STAMP)
 	@for a in x86_64 arm64; do printf '%s: ' $$a; \
 	  otool -arch $$a -l "$(EXE)" | awk '/LC_VERSION_MIN_MACOSX|LC_BUILD_VERSION/{f=1} f&&/version|minos/{print $$2; f=0; exit}'; done
 	@ls "$(APP)/Contents/Frameworks"
+
+check-l10n:
+	./check-l10n.py
 
 snapshot: $(STAMP)
 	"$(EXE)" --snapshot "$(CURDIR)/build/snapshot.png"
@@ -58,4 +65,4 @@ install: $(STAMP)
 clean:
 	rm -rf build
 
-.PHONY: all check-min snapshot install clean
+.PHONY: all check-min check-l10n snapshot install clean

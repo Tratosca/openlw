@@ -4,6 +4,8 @@
 import AppKit
 
 enum Theme {
+    /// Unpatched crosspoint, legible on light glass.
+    static let emptyCell = NSColor.labelColor.withAlphaComponent(0.12)
     static var accent: NSColor {
         if #available(macOS 10.14, *) { return .controlAccentColor }
         return .systemBlue
@@ -70,7 +72,16 @@ final class GlassPanel: NSView {
 
 /// Horizontal meter, one segment per channel; −60…0 dBFS scale.
 final class MeterView: NSView {
-    var levels: [Double?] = [] { didSet { needsDisplay = true } }
+    var levels: [Double?] = [] { didSet { if levels != oldValue { needsDisplay = true } } }
+
+    // Own layer: level changes redraw only the meter.
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
 
     override var intrinsicContentSize: NSSize { NSSize(width: 120, height: 10) }
 
@@ -92,14 +103,87 @@ final class MeterView: NSView {
     }
 }
 
+/// Flat meter bars (track and level) in their own layer, above a view whose drawing is costly:
+/// level changes redraw only the bars. Transparent to clicks.
+final class MeterBarsView: NSView {
+    struct Bar: Equatable {
+        var rect: NSRect
+        var level: Double?
+    }
+
+    var bars: [Bar] = [] { didSet { if bars != oldValue { needsDisplay = true } } }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+    }
+
+    required init?(coder: NSCoder) { fatalError("unused") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        for bar in bars {
+            NSColor.quaternaryLabelColor.setFill()
+            bar.rect.fill()
+            if let db = bar.level, db > -60 {
+                (db > -6 ? Theme.meterRed : (db > -18 ? Theme.meterAmber : Theme.meterGreen)).setFill()
+                NSRect(x: bar.rect.minX, y: bar.rect.minY, width: bar.rect.width * CGFloat((db + 60) / 60),
+                       height: bar.rect.height).fill()
+            }
+        }
+    }
+}
+
 /// Column-header group: a pair (duplex layout) or a device (multi layout), coupled in stereo
-/// or not; title, meters, and state.
-struct GridHeader {
+/// or not; title and state (meters: `InputGridView.headerLevels`).
+struct GridHeader: Equatable {
     let columns: Range<Int>
     let title: String
-    let levels: [Double?]
     let status: String
     let coupled: Bool
+}
+
+/// Display-synchronized callback while started: `CADisplayLink` on macOS 14 and later, 60 Hz
+/// timer before. Runs in common modes (menus, resizing).
+final class FrameTicker: NSObject {
+    private let action: () -> Void
+    private var link: AnyObject?
+    private var timer: Timer?
+
+    init(_ action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    var running: Bool { link != nil || timer != nil }
+
+    func start(for view: NSView) {
+        guard !running else { return }
+        if #available(macOS 14.0, *) {
+            let l = view.displayLink(target: self, selector: #selector(fire))
+            l.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            l.add(to: .main, forMode: .common)
+            link = l
+        } else {
+            let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.action() }
+            RunLoop.main.add(t, forMode: .common)
+            timer = t
+        }
+    }
+
+    func stop() {
+        if #available(macOS 14.0, *) {
+            (link as? CADisplayLink)?.invalidate()
+        }
+        link = nil
+        timer?.invalidate()
+        timer = nil
+    }
+
+    @objc private func fire() { action() }
 }
 
 /// Sides of a stereo source feeding an uncoupled column; `tag`: other source channel
@@ -132,6 +216,32 @@ final class InputGridView: NSView {
     init(part: Part) {
         self.part = part
         super.init(frame: .zero)
+        addSubview(meters)
+    }
+
+    override func layout() {
+        super.layout()
+        meters.frame = bounds
+    }
+
+    private func updateMeters() {
+        switch part {
+        case .cells:
+            meters.bars = headers.enumerated().flatMap { hi, h -> [MeterBarsView.Bar] in
+                let x = x0 + CGFloat(h.columns.lowerBound) * columnWidth
+                let w = columnWidth * CGFloat(h.columns.count)
+                let levels = hi < headerLevels.count ? headerLevels[hi] : []
+                return levels.prefix(2).enumerated().map { i, level in
+                    MeterBarsView.Bar(rect: NSRect(x: x + 14, y: 19 + CGFloat(i) * 5, width: w - 28, height: 4), level: level)
+                }
+            }
+        case .labels:
+            // During preview: received level replaces provenance (see `drawLabels`).
+            meters.bars = listeningRow.map { r in
+                [MeterBarsView.Bar(rect: NSRect(x: 220, y: headerHeight + CGFloat(r) * rowHeight + 13, width: 70, height: 5),
+                                   level: listenLevel)]
+            } ?? []
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("unused") }
@@ -139,8 +249,10 @@ final class InputGridView: NSView {
     var rows: [GridRow] = [] { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var columns = 4 { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     /// Column width: 46 for channels (two per pair), 92 for devices.
-    var columnWidth: CGFloat = 46 { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
-    var headers: [GridHeader] = [] { didSet { needsDisplay = true } }
+    var columnWidth: CGFloat = 46 { didSet { invalidateIntrinsicContentSize(); needsDisplay = true; updateMeters() } }
+    var headers: [GridHeader] = [] { didSet { if headers != oldValue { needsDisplay = true; updateMeters() } } }
+    /// Header meters (first two channels of each header).
+    var headerLevels: [[Double?]] = [] { didSet { updateMeters() } }
     /// Click on a coupled group (row, header index).
     var onGroup: ((Int, Int) -> Void)?
     /// Click on one side of an uncoupled column (row, column, left side?).
@@ -152,8 +264,10 @@ final class InputGridView: NSView {
     /// Row removal-button click.
     var onRemove: ((Int) -> Void)?
     /// Previewed row and its level (dBFS).
-    var listeningRow: Int? { didSet { needsDisplay = true } }
-    var listenLevel: Double? { didSet { needsDisplay = true } }
+    var listeningRow: Int? { didSet { needsDisplay = true; updateMeters() } }
+    var listenLevel: Double? { didSet { updateMeters() } }
+    /// Header meters (cells) or preview meter (labels).
+    private let meters = MeterBarsView()
 
     private let headerHeight: CGFloat = 46
     private let rowHeight: CGFloat = 30
@@ -258,7 +372,7 @@ final class InputGridView: NSView {
         let r = Int((p.y - headerHeight) / rowHeight)
         guard r < rows.count else { return nil }
         let menu = NSMenu()
-        menu.addItem(ClosureItem(listeningRow == r ? L("Stop Listening") : L("Listen")) { [weak self] in self?.onListen?(r) })
+        menu.addItem(ClosureItem(listeningRow == r ? L("Stop Listening") : L("Listen on the computer's audio output")) { [weak self] in self?.onListen?(r) })
         if rows[r].removable {
             menu.addItem(ClosureItem(L("Remove from Grid")) { [weak self] in self?.onRemove?(r) })
         }
@@ -291,22 +405,12 @@ final class InputGridView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Column headers: title, meters (first two channels), state.
+        // Column headers: title, state (meters: `meters` subview).
         for h in part == .cells ? headers : [] {
             let x = x0 + CGFloat(h.columns.lowerBound) * columnWidth
             let w = columnWidth * CGFloat(h.columns.count)
             text(h.title, NSRect(x: x, y: 0, width: w - 14, height: 16), font: Theme.small, color: .secondaryLabelColor, center: true)
-            let mrect = NSRect(x: x + 14, y: 19, width: w - 28, height: 9)
-            for (i, level) in h.levels.prefix(2).enumerated() {
-                let y = mrect.minY + CGFloat(i) * 5
-                NSColor.quaternaryLabelColor.setFill()
-                NSRect(x: mrect.minX, y: y, width: mrect.width, height: 4).fill()
-                if let db = level, db > -60 {
-                    (db > -6 ? Theme.meterRed : (db > -18 ? Theme.meterAmber : Theme.meterGreen)).setFill()
-                    NSRect(x: mrect.minX, y: y, width: mrect.width * CGFloat((db + 60) / 60), height: 4).fill()
-                }
-            }
-            text(h.status, NSRect(x: x, y: 30, width: w, height: 14), font: Theme.small, color: .tertiaryLabelColor, center: true)
+            text(h.status, NSRect(x: x, y: 30, width: w, height: 14), font: Theme.small, color: .secondaryLabelColor, center: true)
         }
         for i in part == .cells ? Array(headers.indices) : [] {
             drawLink(linkRect(header: i), coupled: headers[i].coupled)
@@ -361,7 +465,7 @@ final class InputGridView: NSView {
                     text(tag, box.insetBy(dx: 2, dy: 2), font: Theme.small, color: .white, center: true)
                 }
             } else {
-                (hovered ? Theme.accent.withAlphaComponent(0.25) : NSColor.labelColor.withAlphaComponent(0.08)).setFill()
+                (hovered ? Theme.accent.withAlphaComponent(0.25) : Theme.emptyCell).setFill()
                 NSBezierPath(roundedRect: box, xRadius: whole && span.count > 1 ? 9 : 5, yRadius: whole && span.count > 1 ? 9 : 5).fill()
             }
         }
@@ -376,17 +480,17 @@ final class InputGridView: NSView {
             if on {
                 (hovered ? Theme.accent.withAlphaComponent(0.8) : Theme.accent).setFill()
             } else {
-                (hovered ? Theme.accent.withAlphaComponent(0.25) : NSColor.labelColor.withAlphaComponent(0.08)).setFill()
+                (hovered ? Theme.accent.withAlphaComponent(0.25) : Theme.emptyCell).setFill()
             }
             NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3).fill()
-            text(label, box.offsetBy(dx: 0, dy: -1.5), font: Theme.tiny, color: on ? .white : .tertiaryLabelColor, center: true)
+            text(label, box.offsetBy(dx: 0, dy: -1.5), font: Theme.tiny, color: on ? .white : .secondaryLabelColor, center: true)
         }
     }
 
     /// Link button: coupled pair (accent link) or uncoupled (broken link).
     private func drawLink(_ rect: NSRect, coupled: Bool) {
-        let color: NSColor = coupled ? Theme.accent : .tertiaryLabelColor
-        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "link", accessibilityDescription: coupled ? L("Uncouple") : L("Couple")) {
+        let color: NSColor = coupled ? Theme.accent : .secondaryLabelColor
+        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "link", accessibilityDescription: coupled ? L("Unlink") : L("Link")) {
             let size = NSSize(width: 13, height: 13)
             let target = NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height)
             NSImage(size: size, flipped: false) { bounds in
@@ -425,17 +529,10 @@ final class InputGridView: NSView {
         text(s.name.isEmpty ? "—" : s.name, NSRect(x: 88, y: y + 8, width: 130, height: 16), font: Theme.body)
         let originRect = NSRect(x: 220, y: y + 8, width: labelWidth - 250, height: 16)
         if listeningRow == r {
-            // During preview: received level replaces provenance.
-            let track = NSRect(x: originRect.minX, y: y + 13, width: 70, height: 5)
-            NSColor.quaternaryLabelColor.setFill()
-            track.fill()
-            if let db = listenLevel, db > -60 {
-                (db > -6 ? Theme.meterRed : (db > -18 ? Theme.meterAmber : Theme.meterGreen)).setFill()
-                NSRect(x: track.minX, y: track.minY, width: track.width * CGFloat((db + 60) / 60), height: track.height).fill()
-            }
-            text(L("listening"), NSRect(x: track.maxX + 6, y: y + 8, width: 50, height: 16), font: Theme.small, color: Theme.accent)
+            // During preview: received level (`meters` subview, 70 pt) replaces provenance.
+            text(L("listening"), NSRect(x: originRect.minX + 76, y: y + 8, width: 50, height: 16), font: Theme.small, color: Theme.accent)
         } else {
-            let kind = s.kind == "surround" ? L(" · surround") : ""
+            let kind = s.kind == "surround" ? " · " + L("surround") : ""
             text(row.origin + kind, originRect, font: Theme.small, color: .secondaryLabelColor)
         }
     }
@@ -450,7 +547,7 @@ final class InputGridView: NSView {
             NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
         }
         let color: NSColor = active ? .white : .secondaryLabelColor
-        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "headphones", accessibilityDescription: L("Listen")) {
+        if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "headphones", accessibilityDescription: L("Listen on the computer's audio output")) {
             let size = NSSize(width: 14, height: 13)
             let target = NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height)
             let tinted = NSImage(size: size, flipped: false) { bounds in
@@ -478,6 +575,7 @@ final class InputMatrixView: NSView {
     var columns = 4 { didSet { cells.columns = columns } }
     var columnWidth: CGFloat = 46 { didSet { cells.columnWidth = columnWidth } }
     var headers: [GridHeader] = [] { didSet { cells.headers = headers } }
+    var headerLevels: [[Double?]] = [] { didSet { cells.headerLevels = headerLevels } }
     var onGroup: ((Int, Int) -> Void)? { didSet { cells.onGroup = onGroup } }
     var onSide: ((Int, Int, Bool) -> Void)? { didSet { cells.onSide = onSide } }
     var onCoupling: ((Int) -> Void)? { didSet { cells.onCoupling = onCoupling } }

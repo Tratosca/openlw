@@ -12,7 +12,7 @@
 //!   channel with a mono mix);
 //! - in `loopback` test mode, copies output ring n to input ring n instead.
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, TryLockError};
 use std::time::{Duration, Instant};
 
 use lw_sys::shm::{Dir, Region, RingSpec};
@@ -87,9 +87,10 @@ pub struct DeviceStatus {
     pub from_net_frames: u64,
     pub from_net_overruns: u64,
     pub from_net_underruns: u64,
-    /// Per-channel application audio peak over the last 100 ms (dBFS), devices concatenated.
+    /// Per-channel application audio peak over the last `METER_WINDOW` periods (dBFS), devices
+    /// concatenated; refreshed every `METER_PERIOD`.
     pub to_net_peak_dbfs: Vec<f64>,
-    /// Per-device-input peak (network audio) over the last 100 ms (dBFS), devices concatenated.
+    /// Per-device-input peak (network audio), same window, devices concatenated.
     pub from_net_peak_dbfs: Vec<f64>,
     /// Active routes: device channels (1-based, devices concatenated) and bus counters.
     pub outputs: Vec<RouteStatus>,
@@ -189,6 +190,10 @@ const SAMPLE_RATE: u32 = 48_000;
 /// without forwarding host blocks in bursts to transmitted streams.
 const OUT_CARRY_MAX: usize = 512;
 const TICK: Duration = Duration::from_millis(1);
+/// Peak publication period (ticks), and window (periods) over which published peaks are held:
+/// an app polling at most every 50 ms sees every peak, at most 10 ms late.
+const METER_PERIOD: u32 = 10;
+const METER_WINDOW: usize = 5;
 
 fn dbfs(p: f32) -> f64 {
     if p > 0.0 {
@@ -196,6 +201,50 @@ fn dbfs(p: f32) -> f64 {
     } else {
         f64::NEG_INFINITY
     }
+}
+
+/// Per-channel peaks (linear) of the current period and of the last `METER_WINDOW` periods.
+struct PeakWindow {
+    acc: Vec<f32>,
+    periods: Vec<f32>,
+    next: usize,
+}
+
+impl PeakWindow {
+    fn new(channels: usize) -> Self {
+        Self {
+            acc: vec![0.0; channels],
+            periods: vec![0.0; channels * METER_WINDOW],
+            next: 0,
+        }
+    }
+
+    /// Close the current period and write the window maximum per channel (dBFS) to `out`.
+    fn roll(&mut self, out: &mut Vec<f64>) {
+        let c = self.acc.len();
+        if let Some(slot) = self.periods.get_mut(self.next * c..(self.next + 1) * c) {
+            slot.copy_from_slice(&self.acc);
+        }
+        self.acc.iter_mut().for_each(|p| *p = 0.0);
+        self.next = (self.next + 1) % METER_WINDOW;
+        out.clear();
+        out.extend((0..c).map(|i| {
+            dbfs(
+                self.periods
+                    .iter()
+                    .skip(i)
+                    .step_by(c)
+                    .fold(0f32, |m, &p| m.max(p)),
+            )
+        }));
+    }
+}
+
+/// Peak metering of both directions; `due`: publication postponed (status locked).
+struct Meters {
+    to_net: PeakWindow,
+    from_net: PeakWindow,
+    due: bool,
 }
 
 /// Ring channel count and offset in the concatenated (metering) channel space.
@@ -281,8 +330,11 @@ pub fn start(
             let mut buf = vec![0f32; w_in * ring];
             let mut out = vec![0f32; w_out * ring];
             let mut scratch = vec![0f32; 8 * ring];
-            let mut peaks = vec![0f32; ch_in];
-            let mut in_peaks = vec![0f32; ch_out];
+            let mut meters = Meters {
+                to_net: PeakWindow::new(ch_in),
+                from_net: PeakWindow::new(ch_out),
+                due: false,
+            };
             let mut routes = Routes::default();
             let mut produced: u64 = 0;
             let mut out_clock: u64 = 0;
@@ -334,7 +386,7 @@ pub fn start(
                         continue;
                     };
                     let _ = ring_in.read(block);
-                    if let Some(p) = peaks.get_mut(lane.offset..lane.offset + w) {
+                    if let Some(p) = meters.to_net.acc.get_mut(lane.offset..lane.offset + w) {
                         for frame in block.chunks_exact(w) {
                             for (p, s) in p.iter_mut().zip(frame) {
                                 *p = p.max(s.abs());
@@ -380,8 +432,7 @@ pub fn start(
                         &out_lanes,
                         &in_lanes,
                         &st,
-                        &mut peaks,
-                        &mut in_peaks,
+                        &mut meters,
                         &routes,
                     );
                     continue;
@@ -403,7 +454,9 @@ pub fn start(
                     if w == 0 || !fed {
                         continue;
                     }
-                    let lp = in_peaks
+                    let lp = meters
+                        .from_net
+                        .acc
                         .get_mut(lane.offset..lane.offset + w)
                         .unwrap_or_default();
                     // Ring full: nobody is reading (plugin I/O stopped). Streams are still
@@ -449,8 +502,7 @@ pub fn start(
                     &out_lanes,
                     &in_lanes,
                     &st,
-                    &mut peaks,
-                    &mut in_peaks,
+                    &mut meters,
                     &routes,
                 );
             }
@@ -464,7 +516,8 @@ pub fn start(
     })
 }
 
-/// Every 100 ticks: ring counters (summed per direction), peaks, route state.
+/// Every `METER_PERIOD` ticks: peaks; every 100 ticks: ring counters (summed per direction),
+/// route state.
 #[allow(clippy::too_many_arguments)]
 fn continue_status(
     k: u32,
@@ -473,10 +526,23 @@ fn continue_status(
     out_lanes: &[Lane],
     in_lanes: &[Lane],
     st: &Mutex<DeviceStatus>,
-    peaks: &mut [f32],
-    in_peaks: &mut [f32],
+    meters: &mut Meters,
     routes: &Routes,
 ) {
+    // Peaks: never wait for the status lock, retry on the next tick.
+    meters.due |= k % METER_PERIOD == 0;
+    if meters.due {
+        let s = match st.try_lock() {
+            Ok(s) => Some(s),
+            Err(TryLockError::Poisoned(e)) => Some(e.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        if let Some(mut s) = s {
+            meters.to_net.roll(&mut s.to_net_peak_dbfs);
+            meters.from_net.roll(&mut s.from_net_peak_dbfs);
+            meters.due = false;
+        }
+    }
     if k % 100 != 0 {
         return;
     }
@@ -494,14 +560,6 @@ fn continue_status(
     s.from_net_frames = b.0;
     s.from_net_overruns = b.1;
     s.from_net_underruns = b.2;
-    // Reuse vectors: no allocation unless sizes change.
-    s.to_net_peak_dbfs.clear();
-    s.to_net_peak_dbfs.extend(peaks.iter().map(|&p| dbfs(p)));
-    peaks.iter_mut().for_each(|p| *p = 0.0);
-    s.from_net_peak_dbfs.clear();
-    s.from_net_peak_dbfs
-        .extend(in_peaks.iter().map(|&p| dbfs(p)));
-    in_peaks.iter_mut().for_each(|p| *p = 0.0);
     // Route state: device channels reported in the concatenated space (1-based).
     let flat = |lanes: &[Lane], ring: usize, chs: &[usize]| -> Vec<usize> {
         let off = lanes.get(ring).map_or(0, |l| l.offset);
@@ -580,5 +638,27 @@ impl RoutesHandle {
         st.inputs.clear();
         drop(st);
         *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some(routes);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peak_held_for_the_window() {
+        let mut w = PeakWindow::new(2);
+        let mut out = Vec::new();
+        w.acc[0] = 0.5;
+        w.roll(&mut out);
+        assert!((out[0] - dbfs(0.5)).abs() < 1e-9);
+        assert_eq!(out[1], f64::NEG_INFINITY);
+        for _ in 1..METER_WINDOW {
+            w.roll(&mut out);
+            assert!((out[0] - dbfs(0.5)).abs() < 1e-9);
+        }
+        w.roll(&mut out);
+        assert_eq!(out, [f64::NEG_INFINITY; 2]);
     }
 }

@@ -25,7 +25,7 @@ struct Iface {
     /// Menu label: friendly name, BSD name, address.
     var title: String {
         let base = friendly == name ? "\(name) · \(ipv4)" : "\(friendly) (\(name)) · \(ipv4)"
-        return livewire ? base + L(" · Livewire network") : base
+        return livewire ? base + " · " + L("Livewire network") : base
     }
 }
 
@@ -186,8 +186,7 @@ struct DeviceMeters {
 
     init(_ status: [String: Any]) {
         guard let dev = status["device"] as? [String: Any] else { return }
-        toNet = (dev["to_net_peak_dbfs"] as? [Any] ?? []).map { $0 as? Double }
-        fromNet = (dev["from_net_peak_dbfs"] as? [Any] ?? []).map { $0 as? Double }
+        setPeaks(dev)
         outWidths = dev["out_widths"] as? [Int] ?? []
         inWidths = dev["in_widths"] as? [Int] ?? []
         for r in dev["inputs"] as? [[String: Any]] ?? [] {
@@ -195,6 +194,12 @@ struct DeviceMeters {
             inputsPrimed[chs] = r["primed"] as? Bool ?? false
             inputSlips[chs] = (r["bus"] as? [String: Any])?["slips"] as? Int ?? 0
         }
+    }
+
+    /// Peaks from a `status` device object or a `meters` reply.
+    mutating func setPeaks(_ dev: [String: Any]) {
+        toNet = (dev["to_net_peak_dbfs"] as? [Any] ?? []).map { $0 as? Double }
+        fromNet = (dev["from_net_peak_dbfs"] as? [Any] ?? []).map { $0 as? Double }
     }
 
     /// Concatenated 1-based channels of device `n` (1-based) given device widths.
@@ -207,6 +212,28 @@ struct DeviceMeters {
     /// Maximum peak (dBFS) across 1-based channels, or nil for silence.
     static func peak(_ values: [Double?], channels: [Int]) -> Double? {
         channels.compactMap { c in c >= 1 && c <= values.count ? values[c - 1] : nil }.max()
+    }
+}
+
+/// Peak-meter ballistics, per meter and per bar: instant rise, then a fall of 20 dB in 1.7 s
+/// (IEC 60268-10 type I return), so that short dips do not blank the bar.
+struct MeterBallistics {
+    static let floor = -60.0
+    static let fallPerSecond = 20 / 1.7
+    private(set) var shown: [[Double?]] = []
+
+    /// All bars at the floor.
+    var idle: Bool { shown.allSatisfy { $0.allSatisfy { $0 == nil } } }
+
+    /// Advance `dt` seconds toward `targets` (dBFS, nil for silence).
+    mutating func step(_ targets: [[Double?]], dt: Double) {
+        shown = targets.enumerated().map { m, bars in
+            bars.enumerated().map { b, target -> Double? in
+                let held = m < shown.count && b < shown[m].count ? shown[m][b] : nil
+                let level = [target, held.map { $0 - Self.fallPerSecond * dt }].compactMap { $0 }.max()
+                return level.flatMap { $0 > Self.floor ? $0 : nil }
+            }
+        }
     }
 }
 

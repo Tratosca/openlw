@@ -147,7 +147,7 @@ impl DiscoveredSource {
 
 pub fn patch_kind(kind: &str) -> &str {
     match kind {
-        "stereo" | "backfeed" | "surround" => kind,
+        "stereo" | "return" | "surround" => kind,
         _ => "stereo",
     }
 }
@@ -155,7 +155,7 @@ pub fn patch_kind(kind: &str) -> &str {
 /// Multicast group of a Livewire channel (docs/protocol/01-channels.md).
 pub fn group(channel: u16, kind: &str) -> Option<Ipv4Addr> {
     let k = match kind {
-        "backfeed" => GroupKind::Backfeed,
+        "return" => GroupKind::Backfeed,
         "surround" => GroupKind::Surround,
         _ => GroupKind::Stereo,
     };
@@ -359,15 +359,22 @@ impl DeviceMeters {
         let Some(dev) = status.get("device").filter(|d| d.is_object()) else {
             return Self::default();
         };
-        Self {
-            to_net: peaks(dev, "to_net_peak_dbfs"),
-            from_net: peaks(dev, "from_net_peak_dbfs"),
+        let mut m = Self {
             out_widths: ints(dev, "out_widths"),
             in_widths: ints(dev, "in_widths"),
             inputs: objects(dev, "inputs")
                 .map(|r| (ints(r, "device_channels"), b(r, "primed", false)))
                 .collect(),
-        }
+            ..Self::default()
+        };
+        m.set_peaks(dev);
+        m
+    }
+
+    /// Peaks from a `status.device` object or a `meters` reply.
+    pub fn set_peaks(&mut self, dev: &Value) {
+        self.to_net = peaks(dev, "to_net_peak_dbfs");
+        self.from_net = peaks(dev, "from_net_peak_dbfs");
     }
 }
 
@@ -521,7 +528,7 @@ mod tests {
     #[test]
     fn groups() {
         assert_eq!(group(1, "stereo"), Some(Ipv4Addr::new(239, 192, 0, 1)));
-        assert_eq!(group(300, "backfeed"), Some(Ipv4Addr::new(239, 193, 1, 44)));
+        assert_eq!(group(300, "return"), Some(Ipv4Addr::new(239, 193, 1, 44)));
         assert_eq!(group(5, "surround"), Some(Ipv4Addr::new(239, 196, 0, 5)));
         assert_eq!(group(0, "stereo"), None);
         let s = DiscoveredSource::from(

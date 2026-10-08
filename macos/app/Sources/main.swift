@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let confirm = NSAlert()
         confirm.messageText = L("Uninstall OpenLW?")
-        confirm.informativeText = L("The OpenLW devices, the network service, and this app are removed. Settings are deleted. Mac audio stops for a few seconds.")
+        confirm.informativeText = L("OpenLW, its devices and its settings are removed. The computer's audio stops for a few seconds.")
         confirm.addButton(withTitle: L("Uninstall"))
         confirm.addButton(withTitle: L("Cancel"))
         guard confirm.runModal() == .alertFirstButtonReturn else { return }

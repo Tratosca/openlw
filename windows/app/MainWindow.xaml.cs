@@ -1,5 +1,5 @@
 // Main window logic, ported from macos/app/Sources/MainWindowController.swift.
-// Polls status at 5 Hz; configuration, sources and interfaces every 2 s.
+// Polls meters at 30 Hz, status at 5 Hz; configuration, sources and interfaces every 2 s.
 using System.Text.Json.Nodes;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
@@ -39,7 +39,9 @@ public sealed partial class MainWindow : Window
     private readonly InputGrid grid = new();
     private readonly List<OutputRowView> outputRows = [];
     private readonly HashSet<string> busy = [];
-    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer fast, slow;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer metering, fast, slow;
+    /// Daemon answers `meters` (otherwise peaks come with the status, at 5 Hz).
+    private bool metersCommand = true;
 
     private DaemonConfig config = new();
     private bool configLoaded;
@@ -92,6 +94,9 @@ public sealed partial class MainWindow : Window
         GridHost.Content = grid;
         RebuildOutputRows(1);
 
+        metering = DispatcherQueue.CreateTimer();
+        metering.Interval = TimeSpan.FromMilliseconds(33);
+        metering.Tick += (_, _) => RefreshMeters();
         fast = DispatcherQueue.CreateTimer();
         fast.Interval = TimeSpan.FromMilliseconds(200);
         fast.Tick += (_, _) => RefreshStatus();
@@ -101,6 +106,7 @@ public sealed partial class MainWindow : Window
         Activated += FirstActivation;
         Closed += (_, _) =>
         {
+            metering.Stop();
             fast.Stop();
             slow.Stop();
             listener.Dispose();
@@ -113,6 +119,7 @@ public sealed partial class MainWindow : Window
         Activated -= FirstActivation;
         RefreshSlow();
         RefreshStatus();
+        metering.Start();
         fast.Start();
         slow.Start();
     }
@@ -145,7 +152,16 @@ public sealed partial class MainWindow : Window
             return;
         }
         SetReachable(true);
-        meters = DeviceMeters.From(status);
+        DeviceMeters fromStatus = DeviceMeters.From(status);
+        if (metersCommand)
+        {
+            // Fresher than the status ones.
+            fromStatus.ToNet.Clear();
+            fromStatus.ToNet.AddRange(meters.ToNet);
+            fromStatus.FromNet.Clear();
+            fromStatus.FromNet.AddRange(meters.FromNet);
+        }
+        meters = fromStatus;
         LinkStatus next = LinkStatus.From(status);
         if (listening is not null && (next.Iface != link.Iface || next.Ipv4 != link.Ipv4 || next.Searching))
         {
@@ -160,6 +176,25 @@ public sealed partial class MainWindow : Window
         }
         UpdateMeters();
     });
+
+    private async void RefreshMeters()
+    {
+        if (!metersCommand || !reachable || !busy.Add("meters"))
+        {
+            return;
+        }
+        DaemonResult r = await client.CallAsync(Cmd("meters"));
+        busy.Remove("meters");
+        if (r.Ok && r.Reply!["meters"] is JsonObject peaks)
+        {
+            meters.SetPeaks(peaks);
+            UpdateMeters();
+        }
+        else if (r.Error?.Kind == DaemonErrorKind.Refused)
+        {
+            metersCommand = false; // older daemon
+        }
+    }
 
     private void RefreshSlow()
     {
@@ -202,12 +237,14 @@ public sealed partial class MainWindow : Window
         if (link.Searching)
         {
             StateDot.Fill = Brush(0xFF, 0x9F, 0x0A);
-            StateText.Text = link.Auto ? Loc.S("StateSearching") : Loc.F("StateIfaceUnavailable", config.Iface);
+            StateText.Text = link.Auto
+                ? $"{Loc.S("StateSearching")}. {Loc.S("StateSearchingHint")}"
+                : $"{Loc.F("StateIfaceUnavailable", config.Iface)}. {Loc.S("StateIfaceHint")}";
             return;
         }
         StateDot.Fill = Brush(0x34, 0xC7, 0x59);
         string name = link.Friendly == link.Iface ? link.Iface : $"{link.Friendly} ({link.Iface})";
-        StateText.Text = Loc.F("StateConnected", name, link.Ipv4) + (link.Auto ? $" · {Loc.S("StateAutoIface")}" : "");
+        StateText.Text = $"{Loc.F("StateConnected", name)} · {link.Ipv4}" + (link.Auto ? $" · {Loc.S("StateAutoIface")}" : "");
     }
 
     // ---------- Display updates ----------

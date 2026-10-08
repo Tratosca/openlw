@@ -186,7 +186,8 @@ fn meters_follow_signal_level() {
         to_net.write(&block).unwrap();
         std::thread::sleep(Duration::from_millis(1));
     }
-    std::thread::sleep(Duration::from_millis(50));
+    // Past one publication period (10 ms), within the 50 ms hold window.
+    std::thread::sleep(Duration::from_millis(20));
     let s = dev.snapshot();
     assert!(
         (s.to_net_peak_dbfs[0] + 12.0).abs() < 0.1,

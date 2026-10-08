@@ -79,7 +79,7 @@ enum DaemonError: Error {
         case .unreachable:
             return L("The OpenLW service is not responding. If the problem persists, reinstall OpenLW.")
         case .encoding, .decoding:
-            return L("Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version.")
+            return L("Unexpected response from the OpenLW service. Reinstall OpenLW to update the app and the service.")
         case .refused(let reason):
             return L("Could not apply the change: %@", reason)
         }

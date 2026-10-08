@@ -1,8 +1,8 @@
 //! Main window, ported from macos/app/Sources/MainWindowController.swift and
 //! windows/app/MainWindow.xaml.cs: Livewire network, audio device (layout), input patch matrix,
 //! transmitted outputs, advanced settings. The network service itself is never shown: the app
-//! talks about network, channels and devices. Polls status at 5 Hz; configuration, sources and
-//! interfaces every 2 s.
+//! talks about network, channels and devices. Polls meters at 30 Hz, status at 5 Hz;
+//! configuration, sources and interfaces every 2 s.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashSet};
@@ -32,7 +32,7 @@ const LAYOUTS: [(&str, &str); 2] = [
         "duplex",
         "Two multichannel devices, “OpenLW In” and “OpenLW Out”",
     ),
-    ("multi", "Several devices, “OpenLW In n” and “OpenLW Out n”"),
+    ("multi", "One virtual audio device per stereo pair"),
 ];
 const LATENCIES: [(&str, &str); 3] = [
     ("low", "Low: ≈ 8 ms added, dedicated network"),
@@ -54,7 +54,7 @@ const FORMATS: [(&str, &str); 3] = [
 ];
 const MANUAL_KINDS: [(&str, &str); 3] = [
     ("stereo", "Stereo"),
-    ("backfeed", "Backfeed (To Source)"),
+    ("return", "Return (To Source)"),
     ("surround", "8-Channel Surround"),
 ];
 
@@ -113,6 +113,8 @@ pub struct Window {
     /// Programmatic control updates must not be taken as user choices.
     updating: Cell<bool>,
     busy: RefCell<HashSet<&'static str>>,
+    /// Daemon answers `meters` (otherwise peaks come with the status, at 5 Hz).
+    meters_command: Cell<bool>,
 }
 
 /// Connects a widget signal to a window method through a weak reference.
@@ -140,6 +142,14 @@ impl Window {
         w.refresh_slow();
         w.refresh_status();
         let weak = Rc::downgrade(&w);
+        glib::timeout_add_local(Duration::from_millis(33), move || match weak.upgrade() {
+            Some(w) => {
+                w.refresh_meters();
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
+        let weak = Rc::downgrade(&w);
         glib::timeout_add_local(Duration::from_millis(200), move || match weak.upgrade() {
             Some(w) => {
                 w.refresh_status();
@@ -164,7 +174,7 @@ impl Window {
         // ---------- Livewire network ----------
         let network = group(
             tr("Livewire Network"),
-            tr("Clock: the computer's own. Drift relative to other devices is compensated automatically."),
+            tr("Clock is managed automatically by the computer."),
         );
         let state_dot = gtk::Label::new(Some("●"));
         state_dot.add_css_class("dim-label");
@@ -190,7 +200,7 @@ impl Window {
         // ---------- Audio device (PipeWire nodes) ----------
         let device = group(
             tr("Audio Device"),
-            tr("Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel when uncoupled, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."),
+            tr("Two devices: all sources share the channels of “OpenLW In”. Several devices: each source has its own device."),
         );
         // Layout: one radio row per choice (the titles are too long for a drop-down).
         let mut layout_checks: Vec<gtk::CheckButton> = Vec::new();
@@ -210,9 +220,9 @@ impl Window {
             layout_checks.push(check);
         }
         let naming_row = adw::SwitchRow::builder()
-            .title(tr("Name Devices After Their Source"))
+            .title(tr("Append Source Name to Virtual Audio Device Name"))
             .subtitle(tr(
-                "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Several devices only.",
+                "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Available with several devices only.",
             ))
             .build();
         let nodes_icon = gtk::Image::from_icon_name("content-loading-symbolic");
@@ -246,7 +256,11 @@ impl Window {
         grid_card.append(grid.widget());
         let manual = adw::PreferencesGroup::new();
         let manual_entry = adw::EntryRow::builder()
-            .title(tr("Unadvertised source, channel (1 to 32766)"))
+            .title(format!(
+                "{} ({})",
+                tr("Manually add channel"),
+                tr("1 to 32766")
+            ))
             .input_purpose(gtk::InputPurpose::Digits)
             .build();
         let manual_kind = gtk::DropDown::from_strings(&MANUAL_KINDS.map(|(_, t)| tr(t)));
@@ -273,20 +287,22 @@ impl Window {
             .expanded(settings.advanced_visible)
             .build();
         let terminal_row = adw::EntryRow::builder()
-            .title(tr("Advertised name (empty: computer name)"))
+            .title(tr("Advertised name"))
             .show_apply_button(true)
-            .tooltip_text(tr("Name shown by other Livewire devices: 32 characters at most, accented letters replaced."))
+            .tooltip_text(tr("Name shown on other Livewire devices (32 characters max). If empty, the computer name is used. Press Enter to apply."))
             .build();
         let latency_row = adw::ComboRow::builder()
             .title(tr("Receive Latency"))
-            .subtitle(tr("Added to the recording software's own latency"))
-            .tooltip_text(tr("Buffers added to the recording software's own buffer. The lower the latency, the more likely a network or computer delay causes a brief dropout."))
+            .subtitle(tr("Added to the latency of your audio software"))
+            .tooltip_text(tr("Added to the latency of your audio software. Lower values increase the risk of brief dropouts."))
             .model(&gtk::StringList::new(&LATENCIES.map(|(_, t)| tr(t))))
             .build();
         let dscp_row = adw::ComboRow::builder()
             .title(tr("Network Priority (DSCP)"))
             .subtitle(tr("Depends on the switches' QoS"))
-            .tooltip_text(tr("Marking of transmitted audio streams. Choose the value expected by your switches' QoS policy."))
+            .tooltip_text(tr(
+                "Choose the value expected by your network switches (QoS).",
+            ))
             .model(&gtk::StringList::new(&DSCPS.map(|(_, t)| tr(t))))
             .build();
         advanced.add_row(&terminal_row);
@@ -388,6 +404,7 @@ impl Window {
             st: RefCell::default(),
             updating: Cell::new(false),
             busy: RefCell::default(),
+            meters_command: Cell::new(true),
         }
     }
 
@@ -492,7 +509,13 @@ impl Window {
             let nodes = status.get("audio_nodes").and_then(Value::as_bool);
             let (stop, changed, nodes_changed) = {
                 let mut st = w.st.borrow_mut();
-                st.meters = DeviceMeters::from(status);
+                let mut meters = DeviceMeters::from(status);
+                if w.meters_command.get() {
+                    // Fresher than the status ones.
+                    meters.to_net = std::mem::take(&mut st.meters.to_net);
+                    meters.from_net = std::mem::take(&mut st.meters.from_net);
+                }
+                st.meters = meters;
                 let link = &st.link;
                 // Interface changed: group membership no longer valid.
                 let stop = st.listening.is_some()
@@ -516,6 +539,28 @@ impl Window {
                 w.show_nodes();
             }
             w.update_meters();
+        });
+    }
+
+    fn refresh_meters(self: &Rc<Self>) {
+        if !self.meters_command.get()
+            || self.st.borrow().reachable != Some(true)
+            || !self.busy.borrow_mut().insert("meters")
+        {
+            return;
+        }
+        self.request(json!({"cmd": "meters"}), |w, r| {
+            w.busy.borrow_mut().remove("meters");
+            match r {
+                Ok(reply) => {
+                    if let Some(m) = reply.get("meters") {
+                        w.st.borrow_mut().meters.set_peaks(m);
+                        w.update_meters();
+                    }
+                }
+                Err(DaemonError::Refused(_)) => w.meters_command.set(false), // Older daemon
+                Err(_) => {} // Unreachable: the status poll reports it
+            }
         });
     }
 
@@ -568,7 +613,7 @@ impl Window {
             set_dot(&self.state_dot, "warning");
             if link.auto {
                 self.state_row
-                    .set_title(tr("Searching for the Livewire network"));
+                    .set_title(tr("Searching for the Livewire network…"));
                 self.state_row.set_subtitle(tr(
                     "Connect the computer to the Livewire network, or choose the interface.",
                 ));
@@ -578,7 +623,7 @@ impl Window {
                     &[("name", &st.config.iface)],
                 ));
                 self.state_row
-                    .set_subtitle(tr("Plug it in, or choose Automatic."));
+                    .set_subtitle(tr("Connect the interface, or choose Automatic."));
             }
             return;
         }
@@ -593,10 +638,7 @@ impl Window {
             &[("name", &name)],
         ));
         self.state_row.set_subtitle(&if link.auto {
-            trf(
-                "{address} · interface chosen automatically",
-                &[("address", &link.ipv4)],
-            )
+            format!("{} · {}", link.ipv4, tr("interface chosen automatically"))
         } else {
             link.ipv4.clone()
         });
@@ -614,7 +656,7 @@ impl Window {
             (Some(true), Some(false)) => (
                 "dialog-warning-symbolic",
                 tr("PipeWire unreachable"),
-                tr("OpenLW devices will appear as soon as PipeWire responds (retrying every 5 s)."),
+                tr("OpenLW devices appear when PipeWire responds. Retrying every 5 s."),
             ),
             (Some(true), None) => (
                 "dialog-warning-symbolic",
@@ -653,20 +695,20 @@ impl Window {
         self.in_count.set_title(in_title);
         self.out_count.set_title(out_title);
         if multi {
-            self.inputs_group.set_description(Some(tr("Click a cell to send the source to that device in stereo; click again to release it. The link button above a device uncouples it: the device becomes mono and each cell offers the left (L) and right (R) sides of the source, both for L+R. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it.")));
-            self.outputs_group.set_description(Some(tr("Each “OpenLW Out n” device is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.")));
+            self.inputs_group.set_description(Some(tr("Click a cell to send the source to that device. Click again to remove it. The link button above a device makes it mono, with a choice of L, R or L+R in each cell. The headphone button plays the source on the computer's audio output.")));
+            self.outputs_group.set_description(Some(tr("Each “OpenLW Out n” device is transmitted on the chosen Livewire channel, with the name entered. Changes apply immediately. Changing the channel or format briefly restarts the stream.")));
             self.out_device_row.set_title(tr("OpenLW Out n"));
-            self.out_device_row.set_subtitle(tr("Choose one as the output: what applications play to it is transmitted to the network, according to the outputs set below."));
+            self.out_device_row.set_subtitle(tr("Select one of these devices as the output to send audio to the network. The outputs below set how it is transmitted."));
             self.in_device_row.set_title(tr("OpenLW In n"));
-            self.in_device_row.set_subtitle(tr("Choose one as the input: each device receives the source patched to it in the input grid."));
+            self.in_device_row.set_subtitle(tr("Select one of these devices as the input to receive audio from the network. The input grid sets the source of each device."));
         } else {
-            self.inputs_group.set_description(Some(tr("Click a cell to send the source in stereo to that pair of “OpenLW In”; click again to release it. The link button above a pair uncouples it: each input then offers the left (L) and right (R) sides of the source, both for L+R, and a source can feed several inputs. The headphone button plays the source on the computer's audio output, without patching it.")));
-            self.outputs_group.set_description(Some(tr("Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on.")));
+            self.inputs_group.set_description(Some(tr("Click a cell to send the source to that input pair. Click again to remove it. The link button above a pair splits it into two inputs, each with a choice of L, R or L+R. The headphone button plays the source on the computer's audio output.")));
+            self.outputs_group.set_description(Some(tr("Each output pair is transmitted on the chosen Livewire channel, with the name entered. Changes apply immediately. Changing the channel or format briefly restarts the stream.")));
             self.out_device_row.set_title(tr("OpenLW Out"));
-            self.out_device_row.set_subtitle(tr("Choose it as the output: what applications play to it is transmitted to the network, according to the outputs set below."));
+            self.out_device_row.set_subtitle(tr("Select this device as the output to send audio to the network. The outputs below set how it is transmitted."));
             self.in_device_row.set_title(tr("OpenLW In"));
             self.in_device_row.set_subtitle(tr(
-                "Choose it as the input: it receives audio from the network, according to the input grid.",
+                "Select this device as the input to receive audio from the network. The input grid sets which sources it receives.",
             ));
         }
     }
@@ -743,9 +785,9 @@ impl Window {
             let auto_title = if !auto {
                 tr("Automatic").to_string()
             } else if link.searching {
-                tr("Automatic · searching").to_string()
+                tr("Automatic (searching)").to_string()
             } else {
-                trf("Automatic · {name}", &[("name", &link.friendly)])
+                trf("Automatic ({name})", &[("name", &link.friendly)])
             };
             let mut items = vec![(auto_title, "auto".to_string())];
             let mut found: Vec<&Iface> = st
@@ -1040,14 +1082,14 @@ impl Window {
             return;
         }
         let heading = if value == "multi" {
-            tr("Switch to Several Devices?")
+            tr("Switch to “Several Virtual Devices” Mode?")
         } else {
             tr("Switch to “OpenLW In” and “OpenLW Out”?")
         };
         let request = json!({"cmd": "set_device_layout", "layout": value});
         self.confirm(
             heading,
-            tr("Patches move between input pair n and device n (a mono patch on input c goes to device ⌈c/2⌉); those that no longer fit are released. Audio on OpenLW devices stops for a moment while PipeWire publishes them again."),
+            &format!("{} {}", tr("When you switch, existing patches are kept when possible. Patches that can't be kept are removed."), tr("Audio on all OpenLW devices stops for a moment.")),
             tr("Switch"),
             false,
             false,
@@ -1114,7 +1156,7 @@ impl Window {
             ));
         }
         let body = trf(
-            "{lost}. Software using OpenLW devices finds them again after a few seconds.",
+            "{lost}. Applications using OpenLW devices find them again after a few seconds.",
             &[("lost", &capitalize(&lost.join(", ")))],
         );
         let heading = if multi {
@@ -1266,14 +1308,14 @@ impl Window {
             } else {
                 trf("“OpenLW In {n}” becomes a stereo device.", &[("n", &n)])
             };
-            let body = trf(
-                "{detail} Audio on all OpenLW devices stops for a moment while PipeWire publishes them again.",
-                &[("detail", &detail)],
+            let body = format!(
+                "{detail} {}",
+                tr("Audio on all OpenLW devices stops for a moment.")
             );
             let (heading, accept) = if coupled {
-                (tr("Uncouple This Device?"), tr("Uncouple"))
+                (tr("Unlink This Device?"), tr("Unlink"))
             } else {
-                (tr("Couple This Device?"), tr("Couple"))
+                (tr("Link This Device?"), tr("Link"))
             };
             self.confirm(heading, &body, accept, false, true, move |w| {
                 w.mutate(request)
@@ -1283,13 +1325,13 @@ impl Window {
         // Coupling releases what does not fit a stereo patch of the first input's source.
         if !coupled && coupling_releases(&c, &g) {
             let heading = trf(
-                "Couple Inputs {a}-{b}?",
+                "Link Inputs {a}-{b}?",
                 &[("a", &(g.columns.start + 1)), ("b", &g.columns.end)],
             );
             self.confirm(
                 &heading,
-                tr("The source of the first input becomes stereo on the pair; the other patches on these inputs are released."),
-                tr("Couple"),
+                tr("The two inputs become one stereo input, using the source of the first. Other patches on these inputs are removed."),
+                tr("Link"),
                 true,
                 false,
                 move |w| w.mutate(request),
@@ -1326,9 +1368,9 @@ impl Window {
                 &[("n", &device), ("from", &from), ("to", &to)],
             )
         };
-        let body = trf(
-            "{detail} Audio on all OpenLW devices stops for a moment while PipeWire publishes them again.",
-            &[("detail", &detail)],
+        let body = format!(
+            "{detail} {}",
+            tr("Audio on all OpenLW devices stops for a moment.")
         );
         let heading = if width.is_none() {
             tr("Release This Input?")
@@ -1634,7 +1676,7 @@ fn group_taps(c: &DaemonConfig, g: &GridHeader, surround: bool) -> Result<Vec<Ta
         if !c.coupled(n) {
             if surround {
                 return Err(trf(
-                    "a surround source needs a coupled device. Couple “OpenLW In {n}” first.",
+                    "a surround source needs a linked device. Link “OpenLW In {n}” first.",
                     &[("n", &n)],
                 ));
             }
@@ -1655,7 +1697,7 @@ fn group_taps(c: &DaemonConfig, g: &GridHeader, surround: bool) -> Result<Vec<Ta
     };
     if first + width - 1 > from_net {
         return Err(trf(
-            "a surround source takes 8 inputs. Choose a pair from 1-2 to {a}-{b}.",
+            "a surround source uses 8 inputs. Choose a pair from 1-2 to {a}-{b}.",
             &[
                 ("a", &from_net.saturating_sub(7)),
                 ("b", &from_net.saturating_sub(6)),

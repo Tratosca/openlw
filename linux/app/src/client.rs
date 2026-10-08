@@ -24,11 +24,11 @@ impl DaemonError {
     pub fn message(&self) -> String {
         match self {
             DaemonError::Unreachable => tr(
-                "The OpenLW service is not responding. Start it, or reinstall OpenLW if the problem persists.",
+                "The OpenLW service is not responding. If the problem persists, reinstall OpenLW.",
             )
             .into(),
             DaemonError::Decoding => tr(
-                "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version.",
+                "Unexpected response from the OpenLW service. Reinstall OpenLW to update the app and the service.",
             )
             .into(),
             // `reason`: daemon message (English) or app reason (translated by the caller).

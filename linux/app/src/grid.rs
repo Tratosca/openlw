@@ -81,12 +81,12 @@ button.openlw-link { padding: 0 2px; min-width: 16px; min-height: 16px; }
 /// Tooltips of the sides of an uncoupled column: [duplex, multi] × [left, right].
 const SIDE_TIPS: [[&str; 2]; 2] = [
     [
-        "Left side of channel {channel} to input {n}",
-        "Right side of channel {channel} to input {n}",
+        "Left side (L) of channel {channel} to input {n}",
+        "Right side (R) of channel {channel} to input {n}",
     ],
     [
-        "Left side of channel {channel} to In {n}",
-        "Right side of channel {channel} to In {n}",
+        "Left side (L) of channel {channel} to In {n}",
+        "Right side (R) of channel {channel} to In {n}",
     ],
 ];
 
@@ -316,9 +316,9 @@ impl InputGrid {
             put(&self.labels, name.upcast_ref(), 2, 1);
 
             let kind = match g.source.patch_kind() {
-                "surround" => tr(" · surround"),
-                "backfeed" => tr(" · backfeed"),
-                _ => "",
+                "surround" => format!(" · {}", tr("surround")),
+                "return" => format!(" · {}", tr("return")),
+                _ => String::new(),
             };
             let origin = caption(&format!("{}{kind}", g.origin), false);
             origin.set_max_width_chars(24);
@@ -367,9 +367,9 @@ impl InputGrid {
         link.add_css_class("openlw-link");
         link.add_css_class(if head.coupled { "accent" } else { "dim-label" });
         link.set_tooltip_text(Some(if head.coupled {
-            tr("Uncouple")
+            tr("Unlink")
         } else {
-            tr("Couple")
+            tr("Link")
         }));
         link.set_valign(gtk::Align::Center);
         let a = self.actions.clone();

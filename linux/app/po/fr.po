@@ -13,8 +13,8 @@ msgstr ""
 msgid "Livewire Network"
 msgstr "Réseau Livewire"
 
-msgid "Clock: the computer's own. Drift relative to other devices is compensated automatically."
-msgstr "Horloge : celle de l’ordinateur. La dérive par rapport aux autres appareils est compensée automatiquement."
+msgid "Clock is managed automatically by the computer."
+msgstr "L’horloge est gérée automatiquement par l’ordinateur."
 
 msgid "Connecting to the OpenLW service…"
 msgstr "Connexion au service OpenLW…"
@@ -31,23 +31,20 @@ msgstr "Les autres appareils Livewire voient les canaux émis et leurs noms."
 msgid "Audio Device"
 msgstr "Périphérique audio"
 
-msgid "Two devices: every source goes to channels of “OpenLW In”, as with a multichannel sound card; suits applications that use one device per direction. Several devices: each source gets its own device, as wide as the source (1 channel when uncoupled, 8 for surround); suits applications that pick one input, such as video calls. PipeWire, PulseAudio and JACK applications see the same devices. After changing the layout or the names, select the device again in applications that find it by name."
-msgstr "Deux périphériques : chaque source va sur des canaux de « OpenLW In », comme avec une carte son multicanal ; convient aux applications qui utilisent un périphérique par sens. Plusieurs périphériques : chaque source a son propre périphérique, avec autant de canaux que la source (1 quand il est découplé, 8 pour le surround) ; convient aux applications qui choisissent une seule entrée, comme la visioconférence. Les applications PipeWire, PulseAudio et JACK voient les mêmes périphériques. Après un changement de disposition ou de noms, sélectionnez de nouveau le périphérique dans les applications qui le retrouvent par son nom."
+msgid "Two devices: all sources share the channels of “OpenLW In”. Several devices: each source has its own device."
+msgstr "Deux périphériques : toutes les sources partagent les canaux de « OpenLW In ». Plusieurs périphériques : chaque source a son propre périphérique."
 
-msgid "Name Devices After Their Source"
-msgstr "Nommer les périphériques d’après leur source"
+msgid "Append Source Name to Virtual Audio Device Name"
+msgstr "Ajouter le nom de la source au nom du périphérique audio virtuel"
 
-msgid "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Several devices only."
-msgstr "Par exemple « OpenLW In - Studio A@Omnia One (ch. 2) ». Avec plusieurs périphériques uniquement."
+msgid "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Available with several devices only."
+msgstr "Par exemple « OpenLW In - Studio A@Omnia One (ch. 2) ». Disponible uniquement avec plusieurs périphériques."
 
 msgid "Audio Devices"
 msgstr "Périphériques audio"
 
 msgid "Inputs (Network to Computer)"
 msgstr "Entrées (du réseau vers l’ordinateur)"
-
-msgid "Unadvertised source, channel (1 to 32766)"
-msgstr "Source non annoncée, canal (1 à 32766)"
 
 msgid "Add to Grid"
 msgstr "Ajouter à la grille"
@@ -56,25 +53,19 @@ msgid "Outputs (Computer to Network)"
 msgstr "Sorties (de l’ordinateur vers le réseau)"
 
 msgid "Advanced Settings"
-msgstr "Paramètres avancés"
+msgstr "Réglages avancés"
 
 msgid "Advertised name, receive latency, network priority"
 msgstr "Nom annoncé, latence de réception, priorité réseau"
 
-msgid "Advertised name (empty: computer name)"
-msgstr "Nom annoncé (vide : nom de l’ordinateur)"
-
-msgid "Name shown by other Livewire devices: 32 characters at most, accented letters replaced."
-msgstr "Nom affiché par les autres appareils Livewire : 32 caractères au maximum, lettres accentuées remplacées."
-
 msgid "Receive Latency"
 msgstr "Latence de réception"
 
-msgid "Added to the recording software's own latency"
-msgstr "S’ajoute à la latence du logiciel d’enregistrement"
+msgid "Added to the latency of your audio software"
+msgstr "S’ajoute à la latence du logiciel audio"
 
-msgid "Buffers added to the recording software's own buffer. The lower the latency, the more likely a network or computer delay causes a brief dropout."
-msgstr "Mémoire tampon ajoutée à celle du logiciel d’enregistrement. Plus la latence est faible, plus un retard du réseau ou de l’ordinateur risque de provoquer une brève coupure."
+msgid "Added to the latency of your audio software. Lower values increase the risk of brief dropouts."
+msgstr "S’ajoute à la latence du logiciel audio. Une valeur plus faible augmente le risque de brèves coupures."
 
 msgid "Network Priority (DSCP)"
 msgstr "Priorité réseau (DSCP)"
@@ -82,8 +73,8 @@ msgstr "Priorité réseau (DSCP)"
 msgid "Depends on the switches' QoS"
 msgstr "Dépend de la QoS des commutateurs"
 
-msgid "Marking of transmitted audio streams. Choose the value expected by your switches' QoS policy."
-msgstr "Marquage des flux audio émis. Choisissez la valeur attendue par la politique de QoS des commutateurs."
+msgid "Choose the value expected by your network switches (QoS)."
+msgstr "Choisissez la valeur attendue par vos commutateurs réseau (QoS)."
 
 msgid "Start Service"
 msgstr "Démarrer le service"
@@ -97,23 +88,23 @@ msgstr "Menu principal"
 msgid "OpenLW service unreachable"
 msgstr "Service OpenLW injoignable"
 
-msgid "Searching for the Livewire network"
-msgstr "Recherche du réseau Livewire"
+msgid "Searching for the Livewire network…"
+msgstr "Recherche du réseau Livewire…"
 
 msgid "Connect the computer to the Livewire network, or choose the interface."
-msgstr "Connectez l’ordinateur au réseau Livewire, ou choisissez l’interface."
+msgstr "Connectez l’ordinateur au réseau Livewire ou choisissez l’interface."
 
 msgid "Interface “{name}” unavailable"
 msgstr "Interface « {name} » non disponible"
 
-msgid "Plug it in, or choose Automatic."
-msgstr "Branchez-la, ou choisissez Automatique."
+msgid "Connect the interface, or choose Automatic."
+msgstr "Connectez l’interface ou choisissez Automatique."
 
 msgid "Connected to the Livewire network via {name}"
 msgstr "Connecté au réseau Livewire par {name}"
 
-msgid "{address} · interface chosen automatically"
-msgstr "{address} · interface choisie automatiquement"
+msgid "interface chosen automatically"
+msgstr "interface choisie automatiquement"
 
 msgid "Devices published in PipeWire"
 msgstr "Périphériques publiés dans PipeWire"
@@ -124,8 +115,8 @@ msgstr "Les périphériques OpenLW apparaissent dans les paramètres du son et d
 msgid "PipeWire unreachable"
 msgstr "PipeWire injoignable"
 
-msgid "OpenLW devices will appear as soon as PipeWire responds (retrying every 5 s)."
-msgstr "Les périphériques OpenLW apparaîtront dès que PipeWire répondra (nouvel essai toutes les 5 s)."
+msgid "OpenLW devices appear when PipeWire responds. Retrying every 5 s."
+msgstr "Les périphériques OpenLW apparaîtront dès que PipeWire répondra. Nouvel essai toutes les 5 s."
 
 msgid "No audio devices"
 msgstr "Aucun périphérique audio"
@@ -148,65 +139,59 @@ msgstr "Canaux Livewire reçus"
 msgid "Transmitted Livewire Channels"
 msgstr "Canaux Livewire émis"
 
-msgid "Click a cell to send the source to that device in stereo; click again to release it. The link button above a device uncouples it: the device becomes mono and each cell offers the left (L) and right (R) sides of the source, both for L+R. Applications record from “OpenLW In n”. The headphone button plays the source on the computer's audio output, without patching it."
-msgstr "Cliquez sur une case pour envoyer la source en stéréo vers ce périphérique ; cliquez de nouveau pour la libérer. Le bouton de lien au-dessus d’un périphérique le découple : il devient mono et chaque case propose le côté gauche (G) et le côté droit (D) de la source, les deux pour G+D. Les applications enregistrent depuis « OpenLW In n ». Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur, sans l’affecter."
+msgid "Click a cell to send the source to that device. Click again to remove it. The link button above a device makes it mono, with a choice of L, R or L+R in each cell. The headphone button plays the source on the computer's audio output."
+msgstr "Cliquez sur une case pour envoyer la source sur ce périphérique. Cliquez de nouveau pour la retirer. Le bouton de lien au-dessus d’un périphérique le rend mono, avec le choix entre G, D ou G+D dans chaque case. Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur."
 
-msgid "Each “OpenLW Out n” device is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on."
-msgstr "Chaque périphérique « OpenLW Out n » est émis sur le canal Livewire de votre choix, sous le nom indiqué. Les modifications s’appliquent pendant l’émission."
+msgid "Each “OpenLW Out n” device is transmitted on the chosen Livewire channel, with the name entered. Changes apply immediately. Changing the channel or format briefly restarts the stream."
+msgstr "Chaque périphérique « OpenLW Out n » est émis sur le canal Livewire choisi, sous le nom saisi. Les modifications s’appliquent immédiatement. Changer le canal ou le format redémarre brièvement le flux."
 
 msgid "OpenLW Out n"
 msgstr "OpenLW Out n"
 
-msgid "Choose one as the output: what applications play to it is transmitted to the network, according to the outputs set below."
-msgstr "Choisissez-en un comme sortie : ce que les applications y lisent est émis sur le réseau, selon les sorties définies plus bas."
+msgid "Select one of these devices as the output to send audio to the network. The outputs below set how it is transmitted."
+msgstr "Choisissez l’un de ces périphériques comme sortie pour envoyer l’audio sur le réseau. Les sorties ci-dessous déterminent son émission."
 
 msgid "OpenLW In n"
 msgstr "OpenLW In n"
 
-msgid "Choose one as the input: each device receives the source patched to it in the input grid."
-msgstr "Choisissez-en un comme entrée : chaque périphérique reçoit la source qui lui est affectée dans la grille des entrées."
-
-msgid "Click a cell to send the source in stereo to that pair of “OpenLW In”; click again to release it. The link button above a pair uncouples it: each input then offers the left (L) and right (R) sides of the source, both for L+R, and a source can feed several inputs. The headphone button plays the source on the computer's audio output, without patching it."
-msgstr "Cliquez sur une case pour envoyer la source en stéréo vers cette paire de « OpenLW In » ; cliquez de nouveau pour la libérer. Le bouton de lien au-dessus d’une paire la découple : chaque entrée propose alors le côté gauche (G) et le côté droit (D) de la source, les deux pour G+D, et une source peut alimenter plusieurs entrées. Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur, sans l’affecter."
-
-msgid "Each OpenLW Out channel pair is transmitted on the Livewire channel of your choice, under the name given. Changes take effect while transmission is on."
-msgstr "Chaque paire de canaux d’OpenLW Out est émise sur le canal Livewire de votre choix, sous le nom indiqué. Les modifications s’appliquent pendant l’émission."
+msgid "Select one of these devices as the input to receive audio from the network. The input grid sets the source of each device."
+msgstr "Choisissez l’un de ces périphériques comme entrée pour recevoir l’audio du réseau. La grille des entrées détermine la source de chaque périphérique."
 
 msgid "OpenLW Out"
 msgstr "OpenLW Out"
 
-msgid "Choose it as the output: what applications play to it is transmitted to the network, according to the outputs set below."
-msgstr "Choisissez-le comme sortie : ce que les applications y lisent est émis sur le réseau, selon les sorties définies plus bas."
+msgid "Select this device as the output to send audio to the network. The outputs below set how it is transmitted."
+msgstr "Choisissez ce périphérique comme sortie pour envoyer l’audio sur le réseau. Les sorties ci-dessous déterminent son émission."
 
 msgid "OpenLW In"
 msgstr "OpenLW In"
 
-msgid "Choose it as the input: it receives audio from the network, according to the input grid."
-msgstr "Choisissez-le comme entrée : il reçoit l’audio du réseau, selon la grille des entrées."
+msgid "Select this device as the input to receive audio from the network. The input grid sets which sources it receives."
+msgstr "Choisissez ce périphérique comme entrée pour recevoir l’audio du réseau. La grille des entrées détermine les sources reçues."
 
 msgid "Automatic"
 msgstr "Automatique"
 
-msgid "Automatic · searching"
-msgstr "Automatique · recherche"
+msgid "Automatic (searching)"
+msgstr "Automatique (recherche en cours)"
 
-msgid "Automatic · {name}"
-msgstr "Automatique · {name}"
+msgid "Automatic ({name})"
+msgstr "Automatique ({name})"
 
 msgid "{name} (unavailable)"
 msgstr "{name} (non disponible)"
 
 msgid "manual"
-msgstr "manuelle"
+msgstr "manuel"
 
 msgid "not advertised"
-msgstr "non annoncée"
+msgstr "non annoncé"
 
 msgid "free"
 msgstr "libre"
 
 msgid "receiving audio"
-msgstr "réception audio"
+msgstr "reçoit l’audio"
 
 msgid "waiting"
 msgstr "en attente"
@@ -217,14 +202,11 @@ msgstr "Annuler"
 msgid "Do not ask again"
 msgstr "Ne plus demander"
 
-msgid "Switch to Several Devices?"
-msgstr "Passer à plusieurs périphériques ?"
+msgid "Switch to “Several Virtual Devices” Mode?"
+msgstr "Passer au mode « plusieurs périphériques » ?"
 
 msgid "Switch to “OpenLW In” and “OpenLW Out”?"
 msgstr "Passer à « OpenLW In » et « OpenLW Out » ?"
-
-msgid "Patches move between input pair n and device n (a mono patch on input c goes to device ⌈c/2⌉); those that no longer fit are released. Audio on OpenLW devices stops for a moment while PipeWire publishes them again."
-msgstr "Les affectations passent de la paire d’entrées n au périphérique n (une affectation mono sur l’entrée c va au périphérique ⌈c/2⌉) ; celles qui ne tiennent plus sont libérées. Le son des périphériques OpenLW s’interrompt un instant pendant que PipeWire les publie de nouveau."
 
 msgid "Switch"
 msgstr "Changer"
@@ -241,8 +223,8 @@ msgstr "1 source retirée des entrées"
 msgid "{n} sources removed from the inputs"
 msgstr "{n} sources retirées des entrées"
 
-msgid "{lost}. Software using OpenLW devices finds them again after a few seconds."
-msgstr "{lost}. Les logiciels qui utilisent les périphériques OpenLW les retrouvent après quelques secondes."
+msgid "{lost}. Applications using OpenLW devices find them again after a few seconds."
+msgstr "{lost}. Les applications qui utilisent les périphériques OpenLW les retrouvent après quelques secondes."
 
 msgid "Reduce the Number of Devices?"
 msgstr "Réduire le nombre de périphériques ?"
@@ -253,8 +235,8 @@ msgstr "Réduire le nombre de canaux ?"
 msgid "Reduce"
 msgstr "Réduire"
 
-msgid "a surround source takes 8 inputs. Choose a pair from 1-2 to {a}-{b}."
-msgstr "une source surround occupe 8 entrées. Choisissez une paire de 1-2 à {a}-{b}."
+msgid "a surround source uses 8 inputs. Choose a pair from 1-2 to {a}-{b}."
+msgstr "une source surround utilise 8 entrées. Choisissez une paire entre 1-2 et {a}-{b}."
 
 msgid "“OpenLW In {n}” changes from {from} channels to 1 channel."
 msgstr "« OpenLW In {n} » passe de {from} canaux à 1 canal."
@@ -262,14 +244,11 @@ msgstr "« OpenLW In {n} » passe de {from} canaux à 1 canal."
 msgid "“OpenLW In {n}” changes from {from} to {to} channels."
 msgstr "« OpenLW In {n} » passe de {from} à {to} canaux."
 
-msgid "{detail} Audio on all OpenLW devices stops for a moment while PipeWire publishes them again."
-msgstr "{detail} Le son de tous les périphériques OpenLW s’interrompt un instant pendant que PipeWire les publie de nouveau."
-
 msgid "Release This Input?"
 msgstr "Libérer cette entrée ?"
 
 msgid "Patch This Source?"
-msgstr "Affecter cette source ?"
+msgstr "Patcher cette source ?"
 
 msgid "Continue"
 msgstr "Continuer"
@@ -308,7 +287,7 @@ msgid "Inputs {a}-{b}"
 msgstr "Entrées {a}-{b}"
 
 msgid "invalid channel. Enter a number from 1 to 32766."
-msgstr "canal non valide. Entrez un nombre de 1 à 32766."
+msgstr "canal non valide. Saisissez un nombre de 1 à 32766."
 
 msgid "Out {n}"
 msgstr "Out {n}"
@@ -344,7 +323,7 @@ msgid "{n} channels ({m} outputs)"
 msgstr "{n} canaux ({m} sorties)"
 
 msgid "No sources discovered. Choose the interface, or enter a channel below."
-msgstr "Aucune source découverte. Choisissez l’interface, ou entrez un canal ci-dessous."
+msgstr "Aucune source découverte. Choisissez l’interface ou saisissez un canal manuellement ci-dessous."
 
 msgid "Stop listening"
 msgstr "Arrêter l’écoute"
@@ -352,17 +331,17 @@ msgstr "Arrêter l’écoute"
 msgid "Listen on the computer's audio output"
 msgstr "Écouter sur la sortie audio de l’ordinateur"
 
-msgid " · surround"
-msgstr " · surround"
+msgid "surround"
+msgstr "surround"
 
-msgid " · backfeed"
-msgstr " · retour"
+msgid "return"
+msgstr "retour"
 
 msgid "Send channel {channel} to In {n}"
-msgstr "Envoyer le canal {channel} vers In {n}"
+msgstr "Envoyer le canal {channel} sur In {n}"
 
 msgid "Send channel {channel} to input {n}"
-msgstr "Envoyer le canal {channel} vers l’entrée {n}"
+msgstr "Envoyer le canal {channel} sur l’entrée {n}"
 
 msgid "Release In {n}"
 msgstr "Libérer In {n}"
@@ -376,11 +355,11 @@ msgstr "Libérer les entrées {a}-{b}"
 msgid "Remove from grid"
 msgstr "Retirer de la grille"
 
-msgid "The OpenLW service is not responding. Start it, or reinstall OpenLW if the problem persists."
-msgstr "Le service OpenLW ne répond pas. Démarrez-le, ou réinstallez OpenLW si le problème persiste."
+msgid "The OpenLW service is not responding. If the problem persists, reinstall OpenLW."
+msgstr "Le service OpenLW ne répond pas. Si le problème persiste, réinstallez OpenLW."
 
-msgid "Unreadable response from the OpenLW service. Reinstall OpenLW so that the app and the service are the same version."
-msgstr "Réponse illisible du service OpenLW. Réinstallez OpenLW pour avoir l’application et le service dans la même version."
+msgid "Unexpected response from the OpenLW service. Reinstall OpenLW to update the app and the service."
+msgstr "Réponse inattendue du service OpenLW. Réinstallez OpenLW pour mettre à jour l’application et le service."
 
 msgid "Could not apply the change: {reason}"
 msgstr "Impossible d’appliquer la modification : {reason}"
@@ -403,8 +382,8 @@ msgstr "réseau Livewire"
 msgid "Two multichannel devices, “OpenLW In” and “OpenLW Out”"
 msgstr "Deux périphériques multicanaux, « OpenLW In » et « OpenLW Out »"
 
-msgid "Several devices, “OpenLW In n” and “OpenLW Out n”"
-msgstr "Plusieurs périphériques, « OpenLW In n » et « OpenLW Out n »"
+msgid "One virtual audio device per stereo pair"
+msgstr "Un périphérique audio virtuel par paire stéréo"
 
 msgid "Low: ≈ 8 ms added, dedicated network"
 msgstr "Faible : ≈ 8 ms ajoutées, réseau dédié"
@@ -436,7 +415,7 @@ msgstr "Livestream (0,25 ms)"
 msgid "Stereo"
 msgstr "Stéréo"
 
-msgid "Backfeed (To Source)"
+msgid "Return (To Source)"
 msgstr "Retour (vers la source)"
 
 msgid "8-Channel Surround"
@@ -444,31 +423,31 @@ msgstr "Surround 8 canaux"
 
 # Input crosspoints: coupled pairs or devices, left and right sides.
 msgid "Send channel {channel} to inputs {a}-{b}"
-msgstr "Envoyer le canal {channel} vers les entrées {a}-{b}"
+msgstr "Envoyer le canal {channel} sur les entrées {a}-{b}"
 
-msgid "Left side of channel {channel} to input {n}"
-msgstr "Côté gauche du canal {channel} vers l’entrée {n}"
+msgid "Left side (L) of channel {channel} to input {n}"
+msgstr "Côté gauche (G) du canal {channel} sur l’entrée {n}"
 
-msgid "Right side of channel {channel} to input {n}"
-msgstr "Côté droit du canal {channel} vers l’entrée {n}"
+msgid "Right side (R) of channel {channel} to input {n}"
+msgstr "Côté droit (D) du canal {channel} sur l’entrée {n}"
 
-msgid "Left side of channel {channel} to In {n}"
-msgstr "Côté gauche du canal {channel} vers In {n}"
+msgid "Left side (L) of channel {channel} to In {n}"
+msgstr "Côté gauche (G) du canal {channel} sur In {n}"
 
-msgid "Right side of channel {channel} to In {n}"
-msgstr "Côté droit du canal {channel} vers In {n}"
+msgid "Right side (R) of channel {channel} to In {n}"
+msgstr "Côté droit (D) du canal {channel} sur In {n}"
 
-msgid "Couple"
-msgstr "Coupler"
+msgid "Link"
+msgstr "Lier"
 
-msgid "Uncouple"
-msgstr "Découpler"
+msgid "Unlink"
+msgstr "Délier"
 
-msgid "Couple This Device?"
-msgstr "Coupler ce périphérique ?"
+msgid "Link This Device?"
+msgstr "Lier ce périphérique ?"
 
-msgid "Uncouple This Device?"
-msgstr "Découpler ce périphérique ?"
+msgid "Unlink This Device?"
+msgstr "Délier ce périphérique ?"
 
 msgid "“OpenLW In {n}” becomes a mono device."
 msgstr "« OpenLW In {n} » devient un périphérique mono."
@@ -476,11 +455,35 @@ msgstr "« OpenLW In {n} » devient un périphérique mono."
 msgid "“OpenLW In {n}” becomes a stereo device."
 msgstr "« OpenLW In {n} » devient un périphérique stéréo."
 
-msgid "Couple Inputs {a}-{b}?"
-msgstr "Coupler les entrées {a}-{b} ?"
+msgid "Link Inputs {a}-{b}?"
+msgstr "Lier les entrées {a}-{b} ?"
 
-msgid "The source of the first input becomes stereo on the pair; the other patches on these inputs are released."
-msgstr "La source de la première entrée passe en stéréo sur la paire ; les autres affectations de ces entrées sont libérées."
+msgid "The two inputs become one stereo input, using the source of the first. Other patches on these inputs are removed."
+msgstr "Les deux entrées deviennent une seule entrée stéréo, avec la source de la première. Les autres patchs de ces entrées sont supprimés."
 
-msgid "a surround source needs a coupled device. Couple “OpenLW In {n}” first."
-msgstr "une source surround demande un périphérique couplé. Couplez d’abord « OpenLW In {n} »."
+msgid "a surround source needs a linked device. Link “OpenLW In {n}” first."
+msgstr "une source surround nécessite un périphérique lié. Liez d’abord « OpenLW In {n} »."
+
+msgid "Click a cell to send the source to that input pair. Click again to remove it. The link button above a pair splits it into two inputs, each with a choice of L, R or L+R. The headphone button plays the source on the computer's audio output."
+msgstr "Cliquez sur une case pour envoyer la source sur cette paire d’entrées. Cliquez de nouveau pour la retirer. Le bouton de lien au-dessus d’une paire la sépare en deux entrées, avec le choix entre G, D ou G+D pour chacune. Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur."
+
+msgid "Each output pair is transmitted on the chosen Livewire channel, with the name entered. Changes apply immediately. Changing the channel or format briefly restarts the stream."
+msgstr "Chaque paire de sorties est émise sur le canal Livewire choisi, sous le nom saisi. Les modifications s’appliquent immédiatement. Changer le canal ou le format redémarre brièvement le flux."
+
+msgid "When you switch, existing patches are kept when possible. Patches that can't be kept are removed."
+msgstr "Lors du changement, les patchs existants sont conservés si possible. Ceux qui ne peuvent pas l’être sont supprimés."
+
+msgid "Audio on all OpenLW devices stops for a moment."
+msgstr "Le son de tous les périphériques OpenLW s’interrompt un instant."
+
+msgid "Name shown on other Livewire devices (32 characters max). If empty, the computer name is used. Press Enter to apply."
+msgstr "Nom affiché sur les autres appareils Livewire (32 caractères au maximum). Si le champ est vide, le nom de l’ordinateur est utilisé. Appuyez sur Entrée pour appliquer."
+
+msgid "Advertised name"
+msgstr "Nom annoncé"
+
+msgid "Manually add channel"
+msgstr "Ajouter manuellement le canal"
+
+msgid "1 to 32766"
+msgstr "1 à 32766"

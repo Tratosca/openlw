@@ -10,43 +10,45 @@
   <data name="StateConnecting.Text" xml:space="preserve"><value>Connexion au service OpenLW…</value></data>
   <data name="InterfaceLabel.Text" xml:space="preserve"><value>Interface :</value></data>
   <data name="AdvertiseCheck.Content" xml:space="preserve"><value>Annoncer les sorties sur le réseau</value></data>
-  <data name="ClockHint.Text" xml:space="preserve"><value>Horloge : celle de l’ordinateur. La dérive par rapport aux autres appareils est compensée automatiquement.</value></data>
+  <data name="ClockHint.Text" xml:space="preserve"><value>L’horloge est gérée automatiquement par l’ordinateur.</value></data>
   <data name="DriverTitle.Text" xml:space="preserve"><value>Pilote audio</value></data>
-  <data name="DriverText.Text" xml:space="preserve"><value>Dans le logiciel audio, sélectionnez le pilote ASIO® « OpenLW ». Une seule application peut l’utiliser à la fois ; ses entrées et sorties sont celles réglées ci-dessous.</value></data>
+  <data name="DriverText.Text" xml:space="preserve"><value>Dans le logiciel audio, sélectionnez le pilote ASIO® « OpenLW ». Une seule application peut l’utiliser à la fois.</value></data>
   <data name="DriverHint.Text" xml:space="preserve"><value>Les applications sans prise en charge d’ASIO (navigateurs, visioconférence) ne voient pas OpenLW.</value></data>
   <data name="AsioTrademark.Text" xml:space="preserve"><value>ASIO est une marque déposée de Steinberg Media Technologies GmbH.</value></data>
-  <data name="InputsTitle.Text" xml:space="preserve"><value>Entrées (réseau vers ordinateur)</value></data>
+  <data name="InputsTitle.Text" xml:space="preserve"><value>Entrées (du réseau vers l’ordinateur)</value></data>
   <data name="InCountLabel.Text" xml:space="preserve"><value>Canaux Livewire reçus :</value></data>
-  <data name="InputsHint.Text" xml:space="preserve"><value>Cliquez sur une case pour envoyer la source en stéréo sur cette paire du pilote OpenLW ; cliquez de nouveau pour la libérer. Le bouton de lien au-dessus d’une paire la découple : chaque entrée propose alors le côté gauche (G) et le côté droit (D) de la source, les deux pour G+D, et une source peut alimenter plusieurs entrées. Le bouton casque fait écouter la source sur la sortie de Windows, sans la patcher.</value></data>
-  <data name="ManualLabel.Text" xml:space="preserve"><value>Source non annoncée, canal :</value></data>
+  <data name="InputsHint.Text" xml:space="preserve"><value>Cliquez sur une case pour envoyer la source sur cette paire d’entrées. Cliquez de nouveau pour la retirer. Le bouton de lien au-dessus d’une paire la sépare en deux entrées, avec le choix entre G, D ou G+D pour chacune. Le bouton casque fait écouter la source sur la sortie audio de l’ordinateur.</value></data>
+  <data name="ManualLabel.Text" xml:space="preserve"><value>Ajouter manuellement le canal :</value></data>
   <data name="ManualChannel.PlaceholderText" xml:space="preserve"><value>1 à 32766</value></data>
   <data name="KindStereo.Content" xml:space="preserve"><value>Stéréo</value></data>
-  <data name="KindBackfeed.Content" xml:space="preserve"><value>Retour (To Source)</value></data>
+  <data name="KindBackfeed.Content" xml:space="preserve"><value>Retour (vers la source)</value></data>
   <data name="KindSurround.Content" xml:space="preserve"><value>Surround 8 canaux</value></data>
   <data name="AddManual.Content" xml:space="preserve"><value>Ajouter à la grille</value></data>
-  <data name="OutputsTitle.Text" xml:space="preserve"><value>Sorties (ordinateur vers réseau)</value></data>
+  <data name="OutputsTitle.Text" xml:space="preserve"><value>Sorties (de l’ordinateur vers le réseau)</value></data>
   <data name="OutCountLabel.Text" xml:space="preserve"><value>Canaux Livewire émis :</value></data>
-  <data name="OutputsHint.Text" xml:space="preserve"><value>Chaque paire de sorties du pilote OpenLW est émise sur le canal Livewire de votre choix, sous le nom indiqué. Les modifications s’appliquent quand Émettre est coché.</value></data>
-  <data name="AdvancedExpander.Header" xml:space="preserve"><value>Paramètres avancés : nom annoncé, latence de réception, priorité réseau</value></data>
+  <data name="OutputsHint.Text" xml:space="preserve"><value>Chaque paire de sorties est émise sur le canal Livewire choisi, sous le nom saisi. Les modifications s’appliquent immédiatement. Changer le canal ou le format redémarre brièvement le flux.</value></data>
+  <data name="AdvancedExpander.Header" xml:space="preserve"><value>Réglages avancés : nom annoncé, latence de réception, priorité réseau</value></data>
   <data name="TerminalName.Header" xml:space="preserve"><value>Nom annoncé</value></data>
-  <data name="TerminalHint.Text" xml:space="preserve"><value>Nom affiché par les autres appareils Livewire, 32 caractères au plus, accents remplacés. Vide : nom de l’ordinateur. Appuyez sur Entrée pour appliquer.</value></data>
+  <data name="TerminalHint.Text" xml:space="preserve"><value>Nom affiché sur les autres appareils Livewire (32 caractères au maximum). Si le champ est vide, le nom de l’ordinateur est utilisé. Appuyez sur Entrée pour appliquer.</value></data>
   <data name="LatencyCombo.Header" xml:space="preserve"><value>Latence de réception</value></data>
-  <data name="LatencyHint.Text" xml:space="preserve"><value>Mise en mémoire tampon ajoutée à celle du logiciel d’enregistrement. Plus la latence est faible, plus un retard du réseau ou de l’ordinateur risque de provoquer une brève coupure.</value></data>
+  <data name="LatencyHint.Text" xml:space="preserve"><value>S’ajoute à la latence du logiciel audio. Une valeur plus faible augmente le risque de brèves coupures.</value></data>
   <data name="DscpCombo.Header" xml:space="preserve"><value>Priorité réseau (DSCP)</value></data>
-  <data name="DscpHint.Text" xml:space="preserve"><value>Marquage des flux audio émis. Choisissez la valeur attendue par la politique de QoS des commutateurs.</value></data>
-  <data name="StateSearching" xml:space="preserve"><value>Recherche du réseau Livewire. Connectez l’ordinateur au réseau Livewire ou choisissez l’interface.</value></data>
-  <data name="StateIfaceUnavailable" xml:space="preserve"><value>L’interface « {0} » n’est pas disponible. Connectez-la ou choisissez Automatique.</value></data>
-  <data name="StateConnected" xml:space="preserve"><value>Connecté au réseau Livewire par {0} · {1}</value></data>
+  <data name="DscpHint.Text" xml:space="preserve"><value>Choisissez la valeur attendue par vos commutateurs réseau (QoS).</value></data>
+  <data name="StateSearching" xml:space="preserve"><value>Recherche du réseau Livewire…</value></data>
+  <data name="StateIfaceUnavailable" xml:space="preserve"><value>Interface « {0} » non disponible</value></data>
+  <data name="StateIfaceHint" xml:space="preserve"><value>Connectez l’interface ou choisissez Automatique.</value></data>
+  <data name="StateSearchingHint" xml:space="preserve"><value>Connectez l’ordinateur au réseau Livewire ou choisissez l’interface.</value></data>
+  <data name="StateConnected" xml:space="preserve"><value>Connecté au réseau Livewire par {0}</value></data>
   <data name="StateAutoIface" xml:space="preserve"><value>interface choisie automatiquement</value></data>
   <data name="IfaceAuto" xml:space="preserve"><value>Automatique</value></data>
-  <data name="IfaceAutoSearching" xml:space="preserve"><value>Automatique · recherche</value></data>
-  <data name="IfaceAutoNamed" xml:space="preserve"><value>Automatique · {0}</value></data>
+  <data name="IfaceAutoSearching" xml:space="preserve"><value>Automatique (recherche en cours)</value></data>
+  <data name="IfaceAutoNamed" xml:space="preserve"><value>Automatique ({0})</value></data>
   <data name="IfaceUnavailable" xml:space="preserve"><value>{0} (non disponible)</value></data>
   <data name="LivewireNetworkTag" xml:space="preserve"><value>réseau Livewire</value></data>
   <data name="LatencyLow" xml:space="preserve"><value>Faible : ≈ 8 ms ajoutées, réseau dédié</value></data>
   <data name="LatencyNormal" xml:space="preserve"><value>Normale : ≈ 17 ms ajoutées</value></data>
-  <data name="LatencySafe" xml:space="preserve"><value>Sûre : ≈ 35 ms ajoutées, réseau partagé ou ordinateur chargé</value></data>
-  <data name="DscpEf" xml:space="preserve"><value>EF (46) : défaut Livewire</value></data>
+  <data name="LatencySafe" xml:space="preserve"><value>Prudente : ≈ 35 ms ajoutées, réseau partagé ou ordinateur chargé</value></data>
+  <data name="DscpEf" xml:space="preserve"><value>EF (46) : valeur par défaut de Livewire</value></data>
   <data name="DscpAf41" xml:space="preserve"><value>AF41 (34) : recommandé pour AES67</value></data>
   <data name="DscpNone" xml:space="preserve"><value>Aucune (0)</value></data>
   <data name="InCountOne" xml:space="preserve"><value>1 canal (2 entrées)</value></data>
@@ -58,8 +60,8 @@
   <data name="StatusFree" xml:space="preserve"><value>libre</value></data>
   <data name="StatusReceiving" xml:space="preserve"><value>reçoit l’audio</value></data>
   <data name="StatusWaiting" xml:space="preserve"><value>en attente</value></data>
-  <data name="NoSources" xml:space="preserve"><value>Aucune source découverte. Choisissez l’interface ou saisissez un canal ci-dessous.</value></data>
-  <data name="ListenTooltip" xml:space="preserve"><value>Écouter sur la sortie de Windows</value></data>
+  <data name="NoSources" xml:space="preserve"><value>Aucune source découverte. Choisissez l’interface ou saisissez un canal manuellement ci-dessous.</value></data>
+  <data name="ListenTooltip" xml:space="preserve"><value>Écouter sur la sortie audio de l’ordinateur</value></data>
   <data name="StopListening" xml:space="preserve"><value>Arrêter l’écoute</value></data>
   <data name="KindTagSurround" xml:space="preserve"><value>surround</value></data>
   <data name="KindTagBackfeed" xml:space="preserve"><value>retour</value></data>
@@ -75,16 +77,16 @@
   <data name="TagSum" xml:space="preserve"><value>G+D</value></data>
   <data name="SideLeftTooltip" xml:space="preserve"><value>Côté gauche (G) du canal {0} sur l’entrée {1}</value></data>
   <data name="SideRightTooltip" xml:space="preserve"><value>Côté droit (D) du canal {0} sur l’entrée {1}</value></data>
-  <data name="Couple" xml:space="preserve"><value>Coupler</value></data>
-  <data name="Uncouple" xml:space="preserve"><value>Découpler</value></data>
-  <data name="CoupleTitle" xml:space="preserve"><value>Coupler les entrées {0}-{1} ?</value></data>
-  <data name="CoupleText" xml:space="preserve"><value>La source de la première entrée passe en stéréo sur la paire ; les autres patchs de ces entrées sont libérés.</value></data>
+  <data name="Couple" xml:space="preserve"><value>Lier</value></data>
+  <data name="Uncouple" xml:space="preserve"><value>Délier</value></data>
+  <data name="CoupleTitle" xml:space="preserve"><value>Lier les entrées {0}-{1} ?</value></data>
+  <data name="CoupleText" xml:space="preserve"><value>Les deux entrées deviennent une seule entrée stéréo, avec la source de la première. Les autres patchs de ces entrées sont supprimés.</value></data>
   <data name="LostOutputsOne" xml:space="preserve"><value>1 émission arrêtée</value></data>
   <data name="LostOutputsMany" xml:space="preserve"><value>{0} émissions arrêtées</value></data>
   <data name="LostInputsOne" xml:space="preserve"><value>1 source retirée des entrées</value></data>
   <data name="LostInputsMany" xml:space="preserve"><value>{0} sources retirées des entrées</value></data>
   <data name="ReduceTitle" xml:space="preserve"><value>Réduire le nombre de canaux ?</value></data>
-  <data name="ReduceText" xml:space="preserve"><value>{0}. Le logiciel qui utilise le pilote OpenLW doit le réinitialiser.</value></data>
+  <data name="ReduceText" xml:space="preserve"><value>{0}. Réinitialisez le pilote OpenLW dans le logiciel audio.</value></data>
   <data name="ReduceButton" xml:space="preserve"><value>Réduire</value></data>
   <data name="CancelButton" xml:space="preserve"><value>Annuler</value></data>
   <data name="FormatStandard" xml:space="preserve"><value>Standard (5 ms)</value></data>
@@ -95,12 +97,12 @@
   <data name="OutputNamePlaceholder" xml:space="preserve"><value>nom annoncé</value></data>
   <data name="TransmitCheck" xml:space="preserve"><value>Émettre</value></data>
   <data name="ErrorUnreachable" xml:space="preserve"><value>Le service OpenLW ne répond pas. Si le problème persiste, réinstallez OpenLW.</value></data>
-  <data name="ErrorDecoding" xml:space="preserve"><value>Réponse illisible du service OpenLW. Réinstallez OpenLW pour que l’application et le service soient de la même version.</value></data>
+  <data name="ErrorDecoding" xml:space="preserve"><value>Réponse inattendue du service OpenLW. Réinstallez OpenLW pour mettre à jour l’application et le service.</value></data>
   <data name="ErrorRefused" xml:space="preserve"><value>Impossible d’appliquer la modification : {0}</value></data>
   <data name="UnknownError" xml:space="preserve"><value>erreur inconnue.</value></data>
   <data name="ReasonInvalidChannel" xml:space="preserve"><value>canal non valide. Saisissez un nombre de 1 à 32766.</value></data>
   <data name="ReasonNotConnected" xml:space="preserve"><value>l’ordinateur n’est pas encore connecté au réseau Livewire. Choisissez l’interface, puis réessayez.</value></data>
-  <data name="ReasonSurroundWidth" xml:space="preserve"><value>une source surround occupe huit entrées. Choisissez une paire de 1-2 à {0}-{1}.</value></data>
-  <data name="ErrorListenOutput" xml:space="preserve"><value>Impossible d’écouter la source : la sortie audio de Windows n’est pas disponible ({0}).</value></data>
+  <data name="ReasonSurroundWidth" xml:space="preserve"><value>une source surround utilise 8 entrées. Choisissez une paire entre 1-2 et {0}-{1}.</value></data>
+  <data name="ErrorListenOutput" xml:space="preserve"><value>Impossible d’écouter la source : la sortie audio de l’ordinateur n’est pas disponible (erreur {0}).</value></data>
   <data name="ErrorListenSocket" xml:space="preserve"><value>Impossible d’écouter la source ({0} : {1}). Vérifiez l’interface Livewire choisie.</value></data>
 </root>

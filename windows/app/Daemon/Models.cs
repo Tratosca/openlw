@@ -148,19 +148,27 @@ public sealed class DeviceMeters
         {
             return m;
         }
-        if (dev["to_net_peak_dbfs"] is JsonArray a)
-        {
-            m.ToNet.AddRange(a.Select(Json.Double));
-        }
-        if (dev["from_net_peak_dbfs"] is JsonArray b)
-        {
-            m.FromNet.AddRange(b.Select(Json.Double));
-        }
+        m.SetPeaks(dev);
         foreach (JsonNode r in Json.Objects(dev, "inputs"))
         {
             m.Inputs.Add((Json.Ints(r, "device_channels"), Json.Bool(r, "primed")));
         }
         return m;
+    }
+
+    /// Peaks from a `status.device` object or a `meters` reply.
+    public void SetPeaks(JsonNode dev)
+    {
+        ToNet.Clear();
+        FromNet.Clear();
+        if (dev["to_net_peak_dbfs"] is JsonArray a)
+        {
+            ToNet.AddRange(a.Select(Json.Double));
+        }
+        if (dev["from_net_peak_dbfs"] is JsonArray b)
+        {
+            FromNet.AddRange(b.Select(Json.Double));
+        }
     }
 
     /// Maximum peak (dBFS) across 1-based channels, or null for silence.

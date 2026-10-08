@@ -1,7 +1,8 @@
 //! Daemon control: shared state and JSON requests received through the control channel (ADR 0005,
 //! ADR 0007): XPC (macOS), Unix socket (Linux), named pipe (Windows).
 //!
-//! Requests: `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"attach"}` (the audio client also requests
+//! Requests: `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"meters"}` (device peaks only, for
+//! frequent polling), `{"cmd":"attach"}` (the audio client also requests
 //! the shared region, attached by the transport to the response). Responses: `{"ok":true,...}` or
 //! `{"ok":false,"error":...}`. Configuration apps and `lw-daemon ctl` use this
 //! protocol.
@@ -244,6 +245,22 @@ impl Shared {
         Some(s)
     }
 
+    /// Device peaks (dBFS, silence as null), without the rest of the status.
+    fn meters(&self) -> Value {
+        let dev = self
+            .device
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match dev {
+            Some(d) => {
+                let s = d.lock().unwrap_or_else(PoisonError::into_inner);
+                json!({ "to_net_peak_dbfs": s.to_net_peak_dbfs, "from_net_peak_dbfs": s.from_net_peak_dbfs })
+            }
+            None => json!({ "to_net_peak_dbfs": [], "from_net_peak_dbfs": [] }),
+        }
+    }
+
     pub fn snapshot(&self) -> Status {
         let uptime = self.started.elapsed().as_secs();
         let device = self.device_status();
@@ -276,6 +293,7 @@ impl Shared {
                     Ok(status) => json!({ "ok": true, "status": status }),
                     Err(e) => json!({ "ok": false, "error": e.to_string() }),
                 },
+                Some("meters") => json!({ "ok": true, "meters": self.meters() }),
                 Some("sources") => {
                     let sources = self.directory.sources(Instant::now());
                     let terminals: Vec<Value> = self
@@ -605,6 +623,14 @@ mod tests {
         assert_eq!(v["ok"], true);
         assert_eq!(v["status"]["tx"]["239.192.15.161"]["packets"], 42);
         assert_eq!(v["status"]["advertised_sources"], 2);
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"meters"}"#, &me)).unwrap();
+        assert_eq!(v["meters"]["to_net_peak_dbfs"], json!([]));
+        s.set_device(Arc::new(Mutex::new(crate::device::DeviceStatus {
+            to_net_peak_dbfs: vec![-6.0, f64::NEG_INFINITY],
+            ..Default::default()
+        })));
+        let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"meters"}"#, &me)).unwrap();
+        assert_eq!(v["meters"]["to_net_peak_dbfs"], json!([-6.0, null]));
         let v: Value = serde_json::from_str(&s.handle(r#"{"cmd":"nope"}"#, &me)).unwrap();
         assert_eq!(v["ok"], false);
         let v: Value = serde_json::from_str(&s.handle("not json", &me)).unwrap();

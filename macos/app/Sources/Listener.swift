@@ -238,7 +238,7 @@ enum ListenError: Error {
         case .socket(let step, let code):
             return L("Cannot listen to the source (%@: %@). Check the selected Livewire interface.", step, String(cString: strerror(code)))
         case .audio(let status):
-            return L("Cannot listen to the source: the Mac's audio output is unavailable (error %@).", "\(status)")
+            return L("Cannot listen to the source: the computer's audio output is unavailable (error %@).", "\(status)")
         }
     }
 }

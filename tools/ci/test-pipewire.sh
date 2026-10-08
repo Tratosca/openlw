@@ -4,7 +4,7 @@
 # - daemon internal loopback: sine played to “OpenLW Out”, recorded from “OpenLW In”;
 # - PipeWire restarted: nodes are published again (reconnection);
 # - multi layout: one node per device (openlw_in_n / openlw_out_n), loopback Out 2 -> In 2,
-#   node renamed after a patch (ADR 0010).
+#   node renamed after a patch.
 #   tools/ci/test-pipewire.sh            arm64 host (native); PLATFORM=linux/amd64 for x86_64
 set -eu
 cd "$(dirname "$0")/../.."

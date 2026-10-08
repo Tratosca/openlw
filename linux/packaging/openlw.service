@@ -1,5 +1,5 @@
-# OpenLW user systemd service: daemon serves the session's PipeWire nodes
-# (ADR 0009). Installed in /usr/lib/systemd/user/; enable with:
+# OpenLW user systemd service: daemon serves the session's PipeWire nodes.
+# Installed in /usr/lib/systemd/user/; enable with:
 #   systemctl --user enable --now openlw.service
 # Without an active session (dedicated machine): loginctl enable-linger <user>.
 [Unit]

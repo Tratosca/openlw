@@ -5,7 +5,7 @@
 //! The endpoints follow different clocks (remote transmitter versus host clock):
 //! the [`JitterReader`] primes, slips (discards excess) above the high threshold, and
 //! restarts priming after an underrun. This compensates through slips rather than
-//! resampling: occasional audible jumps until clock synchronization is implemented (ADR 0003).
+//! resampling: occasional audible jumps until clock synchronization is implemented.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;

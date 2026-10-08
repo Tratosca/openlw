@@ -1,4 +1,4 @@
-// Control channel client: one JSON request per line over the service named pipe (ADR 0007).
+// Control channel client: one JSON request per line over the service named pipe.
 // Opens the pipe with exactly the rights granted to authenticated users (read, write data and
 // attributes, no pipe instance creation) at Identification level: the service identifies the
 // caller and cannot act on its behalf.

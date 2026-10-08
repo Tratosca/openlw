@@ -1,4 +1,4 @@
-//! Daemon control channel: one JSON request, one JSON response (ADR 0007).
+//! Daemon control channel: one JSON request, one JSON response.
 //!
 //! | System | Installed service transport | May modify |
 //! |---------|-------------------------------------------------------|----------------------------------------|

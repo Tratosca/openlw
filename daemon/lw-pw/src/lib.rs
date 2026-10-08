@@ -1,4 +1,4 @@
-//! OpenLW device PipeWire nodes (Linux, ADR 0009).
+//! OpenLW device PipeWire nodes (Linux).
 //!
 //! Daemon publishes one node per shared-region ring, in its own process:
 //! - sink (`Audio/Sink`) per TO_NET ring: application playback goes to the network (ring
@@ -6,11 +6,11 @@
 //! - source (`Audio/Source`) per FROM_NET ring: applications record network audio (ring
 //!   consumer), with the service latency margin; duplex layout: “OpenLW In” (`openlw_in`).
 //!
-//! Multi layout (ADR 0010): one sink per output device (`openlw_out_n`) and one source per
+//! Multi layout: one sink per output device (`openlw_out_n`) and one source per
 //! input device (`openlw_in_n`), named like the macOS devices.
 //!
 //! Nodes follow the graph driver (sound card or dummy driver); differences from the daemon
-//! clock are compensated through buffer slips, like the HAL plugin (ADR 0003). Outside Linux,
+//! clock are compensated through buffer slips, like the HAL plugin. Outside Linux,
 //! the crate is empty.
 
 #[cfg(target_os = "linux")]

@@ -1,5 +1,5 @@
 //! OpenLW network service: Livewire / AES67 RTP streams sent and received on the selected interface,
-//! source advertisement/discovery, virtual device shared with the audio client (ADR 0005),
+//! source advertisement/discovery, virtual device shared with the audio client,
 //! control channel and supervision (live patching, interface selection).
 
 pub mod advertise;

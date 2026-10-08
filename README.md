@@ -9,11 +9,18 @@ OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-
 
 ## Features
 
-- **Virtual audio device:** one multichannel “OpenLW” device (1–16 stereo channels in each direction), or on macOS and Linux numbered devices “OpenLW In n” and “OpenLW Out n”, one per source, named after it ([ADR 0010](docs/adr/0010-macos-device-layouts.md)).
+- **Virtual audio device:** one multichannel “OpenLW” device (1–16 stereo channels in each direction), or on macOS and Linux numbered devices “OpenLW In n” and “OpenLW Out n”, one per source, named after it.
 - **Receive:** discover advertised network sources, patch a Livewire channel to an input pair or, in mono (left, right, or L+R), to a single input, and preview sources through the Mac's audio output.
 - **Transmit:** send each output pair on the selected Livewire channel, using the selected source name, and advertise it to other devices.
 - **Network selection:** automatically use the interface receiving Livewire advertisements; apply changes without interrupting unrelated streams.
 - **OpenLW app:** manage patches, transmission, meters, settings, and uninstallation.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/openlw-macos-dark.png">
+    <img src="docs/assets/openlw-macos-light.png" width="760" alt="OpenLW app on macOS: Livewire network status, audio device layout, input patch matrix with stereo and left/right crosspoints and meters, transmitted outputs">
+  </picture>
+</p>
 
 | Platform | Architectures | Audio device | App | Status |
 |---|---|---|---|---|
@@ -21,7 +28,7 @@ OpenLW is an open-source audio driver for Livewire®-compatible and AES67 audio-
 | Windows 10 22H2 and 11 | x64, ARM64 | ASIO® driver, displayed as “OpenLW” (ASIO-compatible applications) <img src="docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="40"> | OpenLW (WinUI 3) | Build from source only, no binary release ([why](#windows-build-from-source-only)) |
 | Linux (PipeWire 0.3.49+) | x86_64, ARM64 | PipeWire nodes (PipeWire, PulseAudio, and JACK applications) | OpenLW (GTK4) | In progress; service, PipeWire nodes, app and packages implemented, real machine validation pending |
 
-See the [roadmap](docs/roadmap.md), [Windows guide](windows/README.md), and [Linux guide](linux/README.md) for platform-specific progress and validation limits. The following usage instructions describe macOS.
+See the [Windows guide](windows/README.md) and [Linux guide](linux/README.md) for platform-specific progress and validation limits. The following usage instructions describe macOS.
 
 ## Install and start on macOS
 
@@ -89,15 +96,14 @@ tools/ci/test-wine.sh               # Windows build under Wine (Docker)
 | `windows/` | Windows service, audio driver, app, and installer (in progress) |
 | `linux/` | Linux systemd unit, GTK app, and `.deb`/`.rpm` packages |
 | `docs/protocol/` | Network specification: what OpenLW sends and accepts |
-| `docs/adr/` | Architecture decisions |
 | `tools/lw/` | Python codecs, test transmitters, and capture analysis tools |
 | `tools/wireshark/` | Wireshark dissector |
 | `tools/ci/` | Windows tests under Wine (Docker) |
 
 ## Limitations
 
-- No network-clock synchronization yet (PTP or Livewire clock). Buffer slips compensate for clock drift, with occasional brief interruptions; see [ADR 0003](docs/adr/0003-clock-strategy.md).
-- Surround and AES67 have not been verified with third-party devices; see [open questions](docs/protocol/open-questions.md).
+- No network-clock synchronization yet (PTP or Livewire clock). Buffer slips compensate for clock drift, with occasional brief interruptions.
+- Surround and AES67 have not been verified with third-party devices.
 - macOS 10.13 has not been tested on a target machine.
 
 ## License and trademarks

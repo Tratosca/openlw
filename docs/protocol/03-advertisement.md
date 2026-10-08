@@ -115,7 +115,7 @@ envelope: 03 00 02 07 | sequence | 00 × 8
 message 'READ', 1 entry: 'ADVD' u8 = 1
 ```
 
-Device responses to this request are not established ([open-questions.md](open-questions.md)). Otherwise, the list arrives with the next periodic full advertisement.
+Device responses to this request are not established. Otherwise, the list arrives with the next periodic full advertisement.
 
 ## Other observed message
 

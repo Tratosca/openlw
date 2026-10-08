@@ -2,7 +2,7 @@
 
 ## OpenLW behavior
 
-OpenLW does not yet synchronize to a network clock: the Mac's clock paces audio (nominal 48 kHz). Audio exchange works with the tested devices without a common clock. Reception buffers compensate for clock differences through slips: occasional very brief interruptions when accumulated drift exceeds the buffer. Synchronization is planned (PTP, then Livewire clock; [ADR 0003](../adr/0003-clock-strategy.md)).
+OpenLW does not yet synchronize to a network clock: the Mac's clock paces audio (nominal 48 kHz). Audio exchange works with the tested devices without a common clock. Reception buffers compensate for clock differences through slips: occasional very brief interruptions when accumulated drift exceeds the buffer. Synchronization is planned (PTP, then Livewire clock).
 
 ## Livewire clock
 
@@ -13,7 +13,7 @@ OpenLW does not yet synchronize to a network clock: the Mac's clock paces audio 
 | RTP timestamp | 48 kHz sample counter | Hypothesis |
 | Timing | One packet every 250 µs (timestamp +12) | Hypothesis |
 
-Assumed UDP payload content (to be confirmed by capture, [Q4](open-questions.md)):
+Assumed UDP payload content (to be confirmed by capture):
 
 | Bytes | Contents |
 |---|---|

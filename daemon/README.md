@@ -1,12 +1,12 @@
 # Daemon — Rust Livewire / AES67 stack
 
-Cargo workspace for OpenLW's network service ([ADR 0001](../docs/adr/0001-daemon-rust.md)), for macOS, Linux, and Windows on x86_64 and ARM64 ([ADR 0006](../docs/adr/0006-cross-platform.md)).
+Cargo workspace for OpenLW's network service, for macOS, Linux, and Windows on x86_64 and ARM64.
 
 | Crate | Purpose | Status |
 |---|---|---|
 | `lw-proto` | Pure codecs, no I/O: channels ↔ groups, stream formats, RTP and L24, TlvMsg, Envelope, advertisements (ADV), SDP, PTPv2, Livewire clock decoding | Implemented |
 | `lw-sys` | System layer, one C implementation per system (`csrc/macos`, `csrc/linux`, `csrc/windows`, `csrc/posix`): real-time threads (Mach, `SCHED_FIFO`, MMCSS), precise sleep, host clock, logging, **shared region with the audio client** (`csrc/lw_shm.h`/`.c` v2: SPSC rings, clock seqlock), control channel (`ctl`: XPC, Unix socket, named pipe), qWAVE DSCP, Windows service. Only crate with `unsafe`; every block justified (`SAFETY:`) | Implemented |
-| `lw-pw` | Linux: PipeWire nodes of the device (“OpenLW Out” sink → TO_NET ring, “OpenLW In” source ← FROM_NET ring), served by the daemon itself, with reconnection when PipeWire restarts; empty crate on other systems ([ADR 0009](../docs/adr/0009-audio-linux.md)) | Implemented |
+| `lw-pw` | Linux: PipeWire nodes of the device (“OpenLW Out” sink → TO_NET ring, “OpenLW In” source ← FROM_NET ring), served by the daemon itself, with reconnection when PipeWire restarts; empty crate on other systems | Implemented |
 | `lw-daemon` | NIC-bound sockets (`IP_BOUND_IF`, `SO_BINDTODEVICE`, `IP_MULTICAST_IF`), real-time RTP transmission (test generator), reception with statistics, ADV advertisements, JSON configuration, control channel (`status`, `meters`, `ping`, `attach`, patching), virtual device (clock, peaks, internal loopback) | Implemented; PTP slave pending |
 
 Each `lw-proto` module links to its [protocol document](../docs/protocol/README.md). Decoders process unauthenticated traffic: invalid inputs return errors without panicking. `unsafe` is forbidden in the workspace, and `clippy::indexing_slicing` flags indexed access outside tests.
@@ -31,11 +31,11 @@ target/release/lw-daemon run --config lw-daemon.json --control    # Format: src/
 target/release/lw-daemon ctl status                               # Service control channel
 ```
 
-Control channel ([ADR 0007](../docs/adr/0007-control-channel.md)): `--control` without a value publishes the installed service endpoint (XPC on macOS, Unix socket on Linux, named pipe on Windows); use `--control unix:/tmp/lw.sock` or `pipe:NAME` for testing. On Windows, the Service Control Manager starts `lw-daemon service` ([windows/README.md](../windows/README.md)).
+Control channel: `--control` without a value publishes the installed service endpoint (XPC on macOS, Unix socket on Linux, named pipe on Windows); use `--control unix:/tmp/lw.sock` or `pipe:NAME` for testing. On Windows, the Service Control Manager starts `lw-daemon service` ([windows/README.md](../windows/README.md)).
 
 Formats: `standard` (240 samples), `aes67` (48), `livestream` (12), `surround` (60, eight channels, 239.196). Use `--tos 136` for AF41. Multicast loopback is disabled on a physical NIC: a transmitter does not receive its own streams.
 
-macOS universal binary (ADR 0004 minimum, measured: x86_64 `LC_VERSION_MIN_MACOSX` 10.13, arm64 `minos` 11.0):
+macOS universal binary (minimum OS, measured: x86_64 `LC_VERSION_MIN_MACOSX` 10.13, arm64 `minos` 11.0):
 
 ```sh
 cargo build --release --target x86_64-apple-darwin && cargo build --release --target aarch64-apple-darwin
@@ -57,8 +57,8 @@ Transmit threads enter real-time scheduling and wait for deadlines without busy-
 
 One C contract: [lw-sys/csrc/lw_shm.h](lw-sys/csrc/lw_shm.h) and `lw_shm.c`, compiled **unchanged** by the HAL plugin and Windows driver. Rust duplicates no memory layout: the daemon uses these C functions.
 
-- Region (v3) = 8 KiB header with a ring table + one ring per device and direction: `TO_NET` rings (applications → network; producer: plugin), then `FROM_NET` rings (network → applications; producer: daemon). Duplex layout: one of each; macOS multi layout: one per numbered device (ADR 0010). Interleaved float32, lock-free SPSC, 64-bit positions, overrun/underrun counters.
-- Seqlock clock: (host time, sample position, rate scalar); the header declares the host clock (`mach_absolute_time`, `QueryPerformanceCounter`, or `CLOCK_MONOTONIC`). The plugin uses it in `GetZeroTimeStamp` (ADR 0003).
+- Region (v3) = 8 KiB header with a ring table + one ring per device and direction: `TO_NET` rings (applications → network; producer: plugin), then `FROM_NET` rings (network → applications; producer: daemon). Duplex layout: one of each; macOS multi layout: one per numbered device. Interleaved float32, lock-free SPSC, 64-bit positions, overrun/underrun counters.
+- Seqlock clock: (host time, sample position, rate scalar); the header declares the host clock (`mach_absolute_time`, `QueryPerformanceCounter`, or `CLOCK_MONOTONIC`). The plugin uses it in `GetZeroTimeStamp`.
 - Transfer: client sends `{"cmd":"attach"}` requesting the region; `xpc_shmem` object attached on macOS, section duplicated into the client process on Windows. On Linux, the region stays in the daemon.
 - A daemon real-time thread running every 1 ms publishes the clock, measures per-channel peaks, and, with `"device": {"loopback": true}`, returns application output to application input.
 
@@ -76,7 +76,7 @@ lw-daemon ctl patch-out --from 1,2 --channel 4001 --name "MAC 1"   # Outputs 1�
 lw-daemon ctl patch-in --channel 22 --mix sum --to 5   # Mono (L+R)/2 of channel 22 → input 5 (also left, right)
 lw-daemon ctl set-coupling --pair 3 --coupled false    # Uncouple inputs 5-6 (multi layout: OpenLW In 3 becomes mono)
 lw-daemon ctl unpatch-in --to 1,2 ; lw-daemon ctl unpatch-out --channel 4001
-lw-daemon ctl set-layout multi                  # macOS: OpenLW In n / OpenLW Out n (ADR 0010)
+lw-daemon ctl set-layout multi                  # macOS: OpenLW In n / OpenLW Out n
 lw-daemon ctl patch-in --channel 21 --device 2 --to 1,2   # Multi layout: channel 21 → OpenLW In 2
 lw-daemon ctl set-naming false                  # Multi layout: generic names (OpenLW In 2)
 lw-daemon ctl status                            # Streams, routes (priming, slips), peaks
@@ -84,10 +84,10 @@ lw-daemon discover --iface en7 --seconds 30     # Discovery without the daemon
 ```
 
 - **Discovery:** the daemon listens to advertisements (239.192.255.3:4001), accumulates full-advertisement pages, and sends `READ` to unknown terminals. If a terminal does not respond, its sources appear only with the next full advertisement (up to 2–3 min).
-- **Crosspoints:** a received stream feeds device inputs through `taps` (`{"channel": 3, "from": [1]}`: left on input 3; `[2]` right, `[1, 2]` (L+R)/2, `[k]` channel k of a surround stream; `device` in multi layout). JSON command `patch_input` with `taps` adds crosspoints (an empty `from` releases the input); the CLI `patch-in --to` form moves the stream. Pairs are coupled in stereo by default (`uncoupled_inputs`, `set_coupling`, see [ADR 0010](../docs/adr/0010-macos-device-layouts.md)).
+- **Crosspoints:** a received stream feeds device inputs through `taps` (`{"channel": 3, "from": [1]}`: left on input 3; `[2]` right, `[1, 2]` (L+R)/2, `[k]` channel k of a surround stream; `device` in multi layout). JSON command `patch_input` with `taps` adds crosspoints (an empty `from` releases the input); the CLI `patch-in --to` form moves the stream. Pairs are coupled in stereo by default (`uncoupled_inputs`, `set_coupling`).
 - **Live patching:** each command validates and saves the new configuration (`lw-daemon.json`), then reloads the network session without touching the device: the plugin retains its region. Patching an occupied input releases it first.
-- **Authorization on macOS:** patch-changing commands require root or `admin` membership (XPC caller's effective UID); `status`, `meters`, `sources`, and `config` are unrestricted. Other platforms use the caller rules in ADR 0007.
-- **Clocks:** received streams follow the transmitter clock; the device follows the Mac clock. The jitter buffer absorbs network jitter and compensates for drift by slipping (discarding or repriming; `slips` and `underruns` counters in `status`). Occasional slight audible jumps may occur until clock synchronization is implemented (ADR 0003, adaptive resampling).
+- **Authorization on macOS:** patch-changing commands require root or `admin` membership (XPC caller's effective UID); `status`, `meters`, `sources`, and `config` are unrestricted. On Linux and Windows, the caller is checked with the operating system's own mechanisms (per-user socket, `OpenLW Users` group).
+- **Clocks:** received streams follow the transmitter clock; the device follows the Mac clock. The jitter buffer absorbs network jitter and compensates for drift by slipping (discarding or repriming; `slips` and `underruns` counters in `status`). Occasional slight audible jumps may occur until clock synchronization is implemented (adaptive resampling).
 - **Input latency:** approximately 12 ms jitter buffer, plus the application's I/O block and a 256-frame margin (5.3 ms) managed by the plugin, which discards late audio.
 
 ## Logging and control

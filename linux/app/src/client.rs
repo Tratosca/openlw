@@ -1,5 +1,5 @@
 //! Control channel client: one JSON request per line over the user service Unix socket
-//! `$XDG_RUNTIME_DIR/openlw/control.sock` (ADR 0007). The socket directory belongs to the user;
+//! `$XDG_RUNTIME_DIR/openlw/control.sock`. The socket directory belongs to the user;
 //! the service identifies the caller through `SO_PEERCRED`.
 
 use std::io::{self, BufRead, BufReader, Write};

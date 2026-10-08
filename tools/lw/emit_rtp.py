@@ -3,7 +3,7 @@
 
     python3 emit_rtp.py --iface en7 --channel 4001 --mode standard --seconds 30 [--freq 997]
 
-Acceptance criterion (Q2): stream plays on a Livewire receiver
+Acceptance criterion: stream plays on a Livewire receiver
 (Statistics window without errors). Software pacing: regularity suffices for interoperability tests,
 not for production.
 """

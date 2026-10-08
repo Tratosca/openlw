@@ -5,7 +5,7 @@ GTK 4 and libadwaita configuration app (Rust, gtk4-rs and libadwaita-rs), x86_64
 | Section | Contents |
 |---|---|
 | Livewire network | Connection state, interface (automatic or forced), source advertisement |
-| Audio device | Layout ([ADR 0010](../../docs/adr/0010-macos-device-layouts.md)): two multichannel nodes “OpenLW In” and “OpenLW Out”, or one node per source, “OpenLW In n” and “OpenLW Out n” (optionally named after their source); state of the PipeWire nodes |
+| Audio device | Layout: two multichannel nodes “OpenLW In” and “OpenLW Out”, or one node per source, “OpenLW In n” and “OpenLW Out n” (optionally named after their source); state of the PipeWire nodes |
 | Inputs | Patch matrix (discovered, manual and unadvertised sources × input pairs or input devices): stereo in one click on a coupled pair or device, left and right sides per input once uncoupled, surround on 8 channels; per-pair or per-device meters and state, headphone preview |
 | Outputs | One row per output pair or output device: meter, Livewire channel, advertised name, format, transmission |
 | Advanced settings | Advertised name, receive latency, DSCP |
@@ -28,7 +28,7 @@ Floor: GTK 4.12 and libadwaita 1.4 (Ubuntu 24.04, Debian 13, Fedora 39 and later
 
 ## Service connection
 
-Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock`, one JSON request per line ([ADR 0007](../../docs/adr/0007-control-channel.md)). The app runs as the user who owns the service: no privilege escalation. When the service does not answer, a banner offers to start it (`systemctl --user enable --now openlw.service`).
+Unix socket `$XDG_RUNTIME_DIR/openlw/control.sock`, one JSON request per line. The app runs as the user who owns the service: no privilege escalation. When the service does not answer, a banner offers to start it (`systemctl --user enable --now openlw.service`).
 
 ## Preview
 

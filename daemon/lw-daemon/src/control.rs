@@ -1,5 +1,4 @@
-//! Daemon control: shared state and JSON requests received through the control channel (ADR 0005,
-//! ADR 0007): XPC (macOS), Unix socket (Linux), named pipe (Windows).
+//! Daemon control: shared state and JSON requests received through the control channel: XPC (macOS), Unix socket (Linux), named pipe (Windows).
 //!
 //! Requests: `{"cmd":"ping"}`, `{"cmd":"status"}`, `{"cmd":"meters"}` (device peaks only, for
 //! frequent polling), `{"cmd":"attach"}` (the audio client also requests

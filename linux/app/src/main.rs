@@ -1,5 +1,5 @@
-//! OpenLW app for Linux: GTK4 and libadwaita configuration app (ADR 0006), same sections as the
-//! macOS and Windows apps. Talks to the user service through its Unix socket (ADR 0007).
+//! OpenLW app for Linux: GTK4 and libadwaita configuration app, same sections as the
+//! macOS and Windows apps. Talks to the user service through its Unix socket.
 
 mod client;
 mod grid;

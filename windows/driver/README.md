@@ -2,7 +2,7 @@
 
 <img src="../../docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="64" align="right">
 
-User-mode ASIO® driver: ASIO-compatible audio applications (DAWs, broadcast software) see it as **“OpenLW”**. Decision: [ADR 0008](../../docs/adr/0008-audio-windows.md).
+User-mode ASIO® driver: ASIO-compatible audio applications (DAWs, broadcast software) see it as **“OpenLW”**.
 
 - In-process COM DLL `OpenLWDriver.dll`, Windows 10 22H2 and 11, x64 and ARM64; static C runtime (no Visual C++ Redistributable).
 - On ARM64, `OpenLWDriver.dll` is an ARM64X forwarder to `OpenLWDriver_arm64.dll` and `OpenLWDriver_x64.dll`: native ARM64 hosts and x64 hosts under emulation use the same registration.
@@ -59,7 +59,7 @@ Without a Windows machine, `tools/ci/test-wine.sh` (ARM64, native Wine on an arm
 
 ## Limitations
 
-- Applications without ASIO support (browsers, conferencing) cannot see OpenLW: see the WaveRT kernel driver in [docs/roadmap.md](../../docs/roadmap.md).
+- Applications without ASIO support (browsers, conferencing) cannot see OpenLW; a WaveRT kernel driver would be needed, and is not planned for now.
 - 32-bit host applications: not supported (no x86 build, no `WOW6432Node` registration).
 - Pending real-world tests: commercial hosts (Reaper, broadcast software), coexistence with the Axia driver.
 

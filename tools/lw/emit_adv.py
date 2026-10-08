@@ -3,7 +3,7 @@
 
     python3 emit_adv.py --iface en7 --channel 4001 --name "MAC TEST" [--seconds 120] [--dry-run]
 
-Acceptance criterion (Q8): source appears in Livewire device source browsers.
+Acceptance criterion: source appears in Livewire device source browsers.
 Combine with emit_rtp.py for audio.
 Timing: full advertisement at startup and after 1 s, then short every 20 s +/- 5 s,
 full after eight short advertisements.

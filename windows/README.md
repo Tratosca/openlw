@@ -2,7 +2,7 @@
 
 <img src="../docs/assets/asio-compatible-logo.png" alt="ASIO Compatible" height="48" align="right">
 
-Windows 10 22H2 and 11, x64 and ARM64. Audio device: ASIO® driver, displayed as “OpenLW” in host applications ([ADR 0008](../docs/adr/0008-audio-windows.md)).
+Windows 10 22H2 and 11, x64 and ARM64. Audio device: ASIO® driver, displayed as “OpenLW” in host applications.
 
 | Component | Directory | Status |
 |---|---|---|

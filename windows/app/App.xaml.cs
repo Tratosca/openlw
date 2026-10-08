@@ -1,4 +1,4 @@
-// OpenLW for Windows: configuration app for the network service (named pipe, ADR 0007).
+// OpenLW for Windows: configuration app for the network service (named pipe).
 using Microsoft.UI.Xaml;
 
 namespace OpenLW;

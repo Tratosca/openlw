@@ -1,6 +1,6 @@
 # OpenLW for Linux
 
-x86_64 and ARM64, distributions with PipeWire 0.3.49 or later and systemd (Ubuntu 24.04, Debian 12, Fedora 38 and later; Ubuntu 22.04 ships PipeWire 0.3.48 and is not supported). Audio device: PipeWire nodes served by the daemon ([ADR 0009](../docs/adr/0009-audio-linux.md)).
+x86_64 and ARM64, distributions with PipeWire 0.3.49 or later and systemd (Ubuntu 24.04, Debian 12, Fedora 38 and later; Ubuntu 22.04 ships PipeWire 0.3.48 and is not supported). Audio device: PipeWire nodes served by the daemon.
 
 | Component | Directory | Status |
 |---|---|---|

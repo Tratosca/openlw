@@ -10,7 +10,6 @@ Information comes from traffic observed on compatible devices (network captures)
 | [02-rtp-audio.md](02-rtp-audio.md) | Audio streams: formats, RTP headers, SDP, QoS |
 | [03-advertisement.md](03-advertisement.md) | Source advertisements and discovery |
 | [04-clock.md](04-clock.md) | Livewire clock and PTP |
-| [open-questions.md](open-questions.md) | Unverified points |
 
 ## Conventions
 
@@ -18,7 +17,7 @@ Where needed, statements carry one of these labels:
 
 - **Observed:** seen in captures of Livewire device traffic.
 - **OpenLW choice:** OpenLW behavior compatible with observed devices, but not mandated by them.
-- **Hypothesis:** assumed, not verified on the network; listed in [open-questions.md](open-questions.md).
+- **Hypothesis:** assumed, not verified on the network.
 
 Bytes are in network order (big-endian) unless stated otherwise.
 

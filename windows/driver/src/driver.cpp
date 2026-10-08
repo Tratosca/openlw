@@ -1,10 +1,10 @@
-// OpenLW — Windows audio driver, ASIO interface (ADR 0008).
+// OpenLW — Windows audio driver, ASIO interface.
 // Copyright 2026 François Brille (Tratosca). GPL version 3 (LICENSE file): driver
 // is built with Steinberg ASIO SDK, used under GPLv3.
 // ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 //
 // In-process COM DLL loaded by host application. Driver:
-// - connects to OpenLW service through named pipe (ADR 0007), reads device geometry;
+// - connects to OpenLW service through named pipe, reads device geometry;
 // - obtains shared region (`attach`), duplicated into this process by service;
 // - paces buffer exchanges using published region clock (QueryPerformanceCounter),
 // in an MMCSS “Pro Audio” thread: FROM_NET ring → host inputs, host outputs →

@@ -18,6 +18,9 @@ venv/
 coverage/
 *.profraw
 
+# Local working notes (decision records, roadmap, open questions): not published
+docs-local/
+
 # Downloaded third-party SDKs (fetched at build time)
 windows/driver/sdk/
 

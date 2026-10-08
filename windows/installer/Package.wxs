@@ -26,7 +26,7 @@
       <ComponentGroupRef Id="App" />
     </Feature>
 
-    <!-- Local group whose members may change the configuration without elevation (ADR 0007);
+    <!-- Local group whose members may change the configuration without elevation;
          the installing user is added (name resolved from UserSID). Removed on uninstall.
          Square brackets are MSI property syntax: literal ones are escaped as [\[] and [\]]. -->
     <CustomAction Id="CreateEditGroup" Directory="System64Folder" Execute="deferred" Impersonate="no" Return="ignore"

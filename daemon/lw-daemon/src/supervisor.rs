@@ -405,7 +405,7 @@ pub fn supervise(
 
     let mut current = cfg;
     let mut dev: Option<((DeviceConfig, Vec<RingSpec>), Stop, device::Device)> = None;
-    // Linux: PipeWire nodes connected to device region (ADR 0009).
+    // Linux: PipeWire nodes connected to device region.
     #[cfg(all(target_os = "linux", feature = "pipewire"))]
     let mut nodes: Option<(lw_pw::BridgeConfig, lw_pw::Bridge)> = None;
     let mut generation = 0u64;

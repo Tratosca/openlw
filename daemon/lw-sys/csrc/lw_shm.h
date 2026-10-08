@@ -1,5 +1,5 @@
 /*
- * Daemon ↔ audio client shared region (ADR 0005). Single contract: HAL plugin (macOS),
+ * Daemon ↔ audio client shared region. Single contract: HAL plugin (macOS),
  * Windows driver, and daemon (Rust through FFI) compile this file and lw_shm.c. No other
  * layout definition.
  *

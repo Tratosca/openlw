@@ -1,5 +1,5 @@
 //! Daemon side of the virtual device: region shared with the audio client (HAL plugin on macOS,
-//! audio driver on Windows, daemon PipeWire nodes on Linux; ADR 0005).
+//! audio driver on Windows, daemon PipeWire nodes on Linux).
 //!
 //! One ring per device and direction: one of each in duplex layout, one per numbered device
 //! in `multi` layout (output rings first, see `lw_shm.h`).

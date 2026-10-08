@@ -222,7 +222,7 @@ impl Window {
         let naming_row = adw::SwitchRow::builder()
             .title(tr("Append Source Name to Virtual Audio Device Name"))
             .subtitle(tr(
-                "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Available with several devices only.",
+                "For example “OpenLW In - Studio A@Node 1 (ch. 2)”. Available with several devices only.",
             ))
             .build();
         let nodes_icon = gtk::Image::from_icon_name("content-loading-symbolic");

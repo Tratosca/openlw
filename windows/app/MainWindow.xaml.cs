@@ -103,7 +103,8 @@ public sealed partial class MainWindow : Window
         slow = DispatcherQueue.CreateTimer();
         slow.Interval = TimeSpan.FromSeconds(2);
         slow.Tick += (_, _) => RefreshSlow();
-        Activated += FirstActivation;
+        // Polling starts once the content is loaded (XamlRoot set): activation can come first.
+        ((FrameworkElement)Content).Loaded += StartPolling;
         Closed += (_, _) =>
         {
             metering.Stop();
@@ -114,9 +115,9 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    private void FirstActivation(object sender, WindowActivatedEventArgs e)
+    private void StartPolling(object sender, RoutedEventArgs e)
     {
-        Activated -= FirstActivation;
+        ((FrameworkElement)Content).Loaded -= StartPolling;
         RefreshSlow();
         RefreshStatus();
         metering.Start();
@@ -256,7 +257,7 @@ public sealed partial class MainWindow : Window
         configLoaded = true;
         updating = true;
         AdvertiseCheck.IsChecked = c.Advertise;
-        if (!ReferenceEquals(FocusManager.GetFocusedElement(Content.XamlRoot), TerminalName))
+        if (TerminalName.FocusState == FocusState.Unfocused) // Not while the user types
         {
             TerminalName.Text = c.TerminalName;
         }

@@ -460,7 +460,7 @@ int main(int argc, char **argv) {
         UInt32 before = gPropertyChanges, req = gConfigRequests;
         gGen = 3;
         gNames = ",\"layout\":\"multi\",\"in_widths\":[1,8],\"out_widths\":[2],"
-                 "\"in_device_names\":[\"OpenLW In - Studio A@Omnia One (ch. 2, L+R)\",\"\"],"
+                 "\"in_device_names\":[\"OpenLW In - Studio A@Node 1 (ch. 2, L+R)\",\"\"],"
                  "\"out_device_names\":[\"OpenLW Out 1\"],"
                  "\"input_names\":[\"2 - Studio A (L+R)\",\"5 1\",\"5 2\"],\"output_names\":[\"4005 - MAC L\",\"4005 - MAC R\"]";
         poll();
@@ -474,7 +474,7 @@ int main(int argc, char **argv) {
         CHECK(gConfigRequests == req, "new devices: no configuration change request");
         char name[128];
         CHECK(get_str(100, kAudioObjectPropertyName, name, sizeof name) == 0 &&
-                  strcmp(name, "OpenLW In - Studio A@Omnia One (ch. 2, L+R)") == 0,
+                  strcmp(name, "OpenLW In - Studio A@Node 1 (ch. 2, L+R)") == 0,
               "In 1: %s", name);
         CHECK(get_str(102, kAudioObjectPropertyName, name, sizeof name) == 0 && strcmp(name, "OpenLW In 2") == 0,
               "In 2 (no name from the daemon): %s", name);

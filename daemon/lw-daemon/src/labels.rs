@@ -6,8 +6,8 @@
 //!   suffixes 1–8. Unpatched channel: empty name (CoreAudio displays its default name).
 //! - Devices, `duplex` layout: “OpenLW” (fixed name).
 //! - Devices, `multi` layout: “OpenLW In n” / “OpenLW Out n”, or with `custom_device_names`
-//!   (default) “OpenLW In - Studio A@Omnia One (ch. 2)” (advertised source name @ advertising
-//!   terminal), “OpenLW In - Studio A@Omnia One (ch. 2, L+R)” for a mono patch, “OpenLW In
+//!   (default) “OpenLW In - Studio A@Node 1 (ch. 2)” (advertised source name @ advertising
+//!   terminal), “OpenLW In - Studio A@Node 1 (ch. 2, L+R)” for a mono patch, “OpenLW In
 //!   (ch. 2)” when the source is not advertised, “OpenLW Out - MAC 1-2 (ch. 4005)”. An empty
 //!   device keeps its number.
 //! - Linux PipeWire nodes: same names (duplex: “OpenLW In” and “OpenLW Out”).
@@ -225,7 +225,7 @@ mod tests {
             2,
             Announced {
                 name: "Studio A".into(),
-                terminal: "Omnia One".into(),
+                terminal: "Node 1".into(),
             },
         )])
     }
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(
             l.input_device_names,
             [
-                "OpenLW In - Studio A@Omnia One (ch. 2)",
+                "OpenLW In - Studio A@Node 1 (ch. 2)",
                 "OpenLW In (ch. 21, L)",
                 "OpenLW In 3",
                 "OpenLW In (ch. 5)"

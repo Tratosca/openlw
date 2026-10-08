@@ -37,8 +37,8 @@ msgstr "Deux périphériques : toutes les sources partagent les canaux de « O
 msgid "Append Source Name to Virtual Audio Device Name"
 msgstr "Ajouter le nom de la source au nom du périphérique audio virtuel"
 
-msgid "For example “OpenLW In - Studio A@Omnia One (ch. 2)”. Available with several devices only."
-msgstr "Par exemple « OpenLW In - Studio A@Omnia One (ch. 2) ». Disponible uniquement avec plusieurs périphériques."
+msgid "For example “OpenLW In - Studio A@Node 1 (ch. 2)”. Available with several devices only."
+msgstr "Par exemple « OpenLW In - Studio A@Node 1 (ch. 2) ». Disponible uniquement avec plusieurs périphériques."
 
 msgid "Audio Devices"
 msgstr "Périphériques audio"

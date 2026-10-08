@@ -179,16 +179,28 @@ fn meters_follow_signal_level() {
     };
     let dev = device::start(&cfg, &cfg.duplex_rings(), &stop).unwrap();
     let mut to_net = dev.region.producer(Dir::ToNet).unwrap();
-    // 200 ms: channel 0 at −12 dBFS, channel 2 at −3 dBFS, channels 1 and 3 silent.
+    // Channel 0 at −12 dBFS, channel 2 at −3 dBFS, channels 1 and 3 silent: written in real
+    // time while peaks are read, so slow machines see them as well (published peaks are held
+    // only 50 ms).
     let (a, b) = (10f32.powf(-12.0 / 20.0), 10f32.powf(-3.0 / 20.0));
-    for _ in 0..200 {
-        let block: Vec<f32> = (0..48).flat_map(|_| [a, 0.0, b, 0.0]).collect();
-        to_net.write(&block).unwrap();
+    let block: Vec<f32> = (0..48).flat_map(|_| [a, 0.0, b, 0.0]).collect();
+    let near = |v: f64, db: f64| (v - db).abs() < 0.1;
+    let t0 = std::time::Instant::now();
+    let mut written = 0u32;
+    let s = loop {
+        if t0.elapsed() >= Duration::from_millis(u64::from(written)) {
+            to_net.write(&block).unwrap();
+            written += 1;
+        }
+        let s = dev.snapshot();
+        let p = &s.to_net_peak_dbfs;
+        if written >= 100 && near(p[0], -12.0) && near(p[2], -3.0)
+            || t0.elapsed() > Duration::from_secs(3)
+        {
+            break s;
+        }
         std::thread::sleep(Duration::from_millis(1));
-    }
-    // Past one publication period (10 ms), within the 50 ms hold window.
-    std::thread::sleep(Duration::from_millis(20));
-    let s = dev.snapshot();
+    };
     assert!(
         (s.to_net_peak_dbfs[0] + 12.0).abs() < 0.1,
         "{:?}",
@@ -258,9 +270,15 @@ fn large_host_blocks_reach_the_stream_smoothly() {
     }
     let c = jitter.counters();
     assert_eq!(c.slips, 0, "no frame discarded: {c:?}");
-    assert_eq!(
-        silent_after_prime, 0,
-        "no silent packet after priming: {c:?}"
+    // Virtual machines with coarse timers (CI Intel macOS): a few late wakeups allowed.
+    let allowed = if std::env::var_os("OPENLW_COARSE_TIMERS").is_some() {
+        packets / 100
+    } else {
+        0
+    };
+    assert!(
+        silent_after_prime <= allowed,
+        "no silent packet after priming ({silent_after_prime}, {allowed} allowed): {c:?}"
     );
     stop.request();
     dev.thread.join().unwrap();

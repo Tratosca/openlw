@@ -1,7 +1,9 @@
 # macOS release: Developer ID signing, notarization, stapling (macos/scripts/release.sh), one package
 # for Apple Silicon (arm64) and one for Intel (x86_64), both cross-built on this Apple Silicon runner.
-# Runs on a version tag (vX.Y.Z, matching macos/app/Info.plist) or by hand. Produces a CI
-# artifact only: nothing is published.
+# Runs on a version tag (vX.Y.Z, matching macos/app/Info.plist) or by hand. By hand: CI artifact
+# only. On a tag: the "publish" job also attaches both packages and their SHA-256 sums to the
+# GitHub release of that tag (pre-release for 0.x versions and tags with a suffix, such as
+# v1.0.0-beta.1), with generated notes. The publishing job holds no signing secret.
 #
 # Secrets live in the "release" environment (add required reviewers to gate every run):
 #   MACOS_APP_CERT_P12        base64 of the "Developer ID Application" .p12 (certificate + key)
@@ -104,3 +106,32 @@ jobs:
         run: |
           [ -n "${KEYCHAIN:-}" ] && security delete-keychain "$KEYCHAIN" || true
           rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/app.p12" "$RUNNER_TEMP/installer.p12"
+
+  publish:
+    name: GitHub release
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: openlw-macos-${{ github.ref_name }}
+          path: dist
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          (cd dist && sha256sum -c ./*.sha256)
+          flags=""
+          case "$TAG" in v0.*|*-*) flags="--prerelease" ;; esac
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "OpenLW ${TAG#v}" --generate-notes $flags
+          fi

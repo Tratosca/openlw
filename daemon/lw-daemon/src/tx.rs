@@ -81,6 +81,8 @@ pub struct TxReport {
     pub late_packets: u64,
     /// The thread obtained real-time scheduling.
     pub realtime: bool,
+    /// Transmission time, from the first packet deadline to the stop.
+    pub elapsed_us: u64,
 }
 
 /// Transmit until stopped, paced by absolute deadlines (no accumulated drift).
@@ -186,11 +188,13 @@ pub fn run_from(
             Err(_) => report.send_errors += 1,
         }
         k = k.wrapping_add(1);
+        report.elapsed_us = start.elapsed().as_micros() as u64;
         if Instant::now() >= next_progress {
             on_progress(&report);
             next_progress += Duration::from_secs(1);
         }
     }
+    report.elapsed_us = start.elapsed().as_micros() as u64;
     Ok(report)
 }
 

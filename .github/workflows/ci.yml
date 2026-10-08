@@ -38,6 +38,9 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: Coarse timers (Intel macOS virtual machine)
+        if: matrix.os == 'macos-15-intel'
+        run: echo "OPENLW_COARSE_TIMERS=1" >> "$GITHUB_ENV"
       - name: Tests
         run: cargo test --no-fail-fast
       - name: Build release

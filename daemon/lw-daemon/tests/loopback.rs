@@ -16,6 +16,19 @@ use lw_proto::channel::{Channel, ADV_GROUP, ADV_PORT};
 use lw_proto::envelope;
 use lw_proto::format::StreamFormat;
 
+/// Packets match the rate over the measured transmission time (the stop timer also covers
+/// socket and scheduling setup, which takes tens of milliseconds on some systems).
+fn assert_rate(tx: &tx::TxReport, per_second: f64) {
+    let expected = tx.elapsed_us as f64 * per_second / 1e6;
+    let tolerance = (expected * 0.02).max(3.0);
+    assert!(
+        (tx.packets as f64 - expected).abs() <= tolerance,
+        "{per_second} packets/s expected: {} transmitted in {} µs",
+        tx.packets,
+        tx.elapsed_us
+    );
+}
+
 fn loopback() -> Iface {
     iface::list()
         .unwrap()
@@ -48,11 +61,7 @@ fn roundtrip(channel: u16, format: StreamFormat, seconds: f64) -> (tx::TxReport,
 #[test]
 fn standard_stream_roundtrip() {
     let (tx, rx) = roundtrip(4001, StreamFormat::Standard, 1.0);
-    assert!(
-        (195..=207).contains(&tx.packets),
-        "200 packets/s expected, {} transmitted",
-        tx.packets
-    );
+    assert_rate(&tx, 200.0);
     assert_eq!(
         rx.packets, tx.packets,
         "everything transmitted must be received on lo0"
@@ -81,11 +90,7 @@ fn standard_stream_roundtrip() {
 #[test]
 fn aes67_stream_roundtrip() {
     let (tx, rx) = roundtrip(4002, StreamFormat::Aes67, 1.0);
-    assert!(
-        (980..=1030).contains(&tx.packets),
-        "1000 packets/s expected, {} transmitted",
-        tx.packets
-    );
+    assert_rate(&tx, 1000.0);
     assert_eq!(rx.packets, tx.packets);
     assert_eq!((rx.lost, rx.resyncs), (0, 0));
     assert_eq!(
@@ -103,7 +108,7 @@ fn aes67_stream_roundtrip() {
 
 #[test]
 fn surround_goes_to_239_196() {
-    let (tx, rx) = roundtrip(5, StreamFormat::Surround, 0.3);
+    let (tx, rx) = roundtrip(5, StreamFormat::Surround, 1.0);
     assert_eq!(tx.group, "239.196.0.5");
     assert_eq!(
         rx.payload_sizes.keys().copied().collect::<Vec<_>>(),

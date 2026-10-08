@@ -12,7 +12,8 @@
 #   KEYCHAIN           keychain holding both identities (CI: temporary keychain)
 # Notarization (App Store Connect API key, "Developer" role), one of:
 #   NOTARY_PROFILE     profile saved by `xcrun notarytool store-credentials`
-#   NOTARY_KEY, NOTARY_KEY_ID, NOTARY_ISSUER   path to the .p8 key, key ID, issuer ID
+#   NOTARY_KEY, NOTARY_KEY_ID[, NOTARY_ISSUER]  path to the .p8 key, key ID, issuer ID (team keys
+#                                               only; empty for an individual key)
 # SKIP_NOTARIZE=1 stops after signing (local check without submitting to Apple).
 # Notarization reports: build/notary-<arch>.json, build/notary-log-<arch>.json.
 #
@@ -36,10 +37,11 @@ if [ "${SKIP_NOTARIZE:-0}" != 1 ]; then
     if [ -n "${NOTARY_PROFILE:-}" ]; then
         NOTARY_AUTH="--keychain-profile $NOTARY_PROFILE"
         [ -n "${KEYCHAIN:-}" ] && NOTARY_AUTH="$NOTARY_AUTH --keychain $KEYCHAIN"
-    elif [ -n "${NOTARY_KEY:-}" ] && [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER:-}" ]; then
-        NOTARY_AUTH="--key $NOTARY_KEY --key-id $NOTARY_KEY_ID --issuer $NOTARY_ISSUER"
+    elif [ -n "${NOTARY_KEY:-}" ] && [ -n "${NOTARY_KEY_ID:-}" ]; then
+        NOTARY_AUTH="--key $NOTARY_KEY --key-id $NOTARY_KEY_ID"
+        [ -n "${NOTARY_ISSUER:-}" ] && NOTARY_AUTH="$NOTARY_AUTH --issuer $NOTARY_ISSUER"
     else
-        echo "notarization: set NOTARY_PROFILE, or NOTARY_KEY, NOTARY_KEY_ID and NOTARY_ISSUER" >&2
+        echo "notarization: set NOTARY_PROFILE, or NOTARY_KEY and NOTARY_KEY_ID (and NOTARY_ISSUER for a team key)" >&2
         exit 1
     fi
 fi

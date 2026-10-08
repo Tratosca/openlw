@@ -58,6 +58,7 @@ crash.log
 *.pfx
 *.pem
 *.key
+*.p8
 *.cer
 *.mobileprovision
 *.provisionprofile

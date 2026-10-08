@@ -9,7 +9,7 @@
 #   MACOS_CERT_PASSWORD       password of both .p12 files
 #   NOTARY_KEY_P8             base64 of the App Store Connect API key (.p8, "Developer" role)
 #   NOTARY_KEY_ID             key ID
-#   NOTARY_ISSUER_ID          issuer ID
+#   NOTARY_ISSUER_ID          issuer ID (team key only; leave unset for an individual key)
 # Third-party code is kept out of this job (no rust-toolchain action), actions are pinned by commit.
 name: macOS release
 

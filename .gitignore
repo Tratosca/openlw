@@ -1,28 +1,90 @@
-# Build artifacts
-daemon/target/
-build/
-__pycache__/
-*.pyc
-.DS_Store
+# Only sources, documentation, tests and build scripts belong in the repository.
 
-# Network captures and third-party files: never commit to the repository
-*.pcap
-*.pcapng
+# Build output
+build/
+target/
+dist/
+bin/
+obj/
+.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+coverage/
+*.profraw
+
+# Downloaded third-party SDKs (fetched at build time)
+windows/driver/sdk/
+
+# Packages, installers and binaries: built locally, never committed
+*.pkg
+*.dmg
 *.msi
 *.cab
+*.deb
+*.rpm
+*.zip
+*.tgz
+*.tar.gz
+*.7z
 *.exe
 *.dll
 *.sys
+*.pdb
+*.lib
+*.exp
+*.o
+*.a
+*.dylib
+*.so
 
-# ASIO SDK, downloaded by windows/driver/fetch-sdk.*
-windows/driver/sdk/
+# Network captures, dumps and logs
+*.pcap
+*.pcapng
+*.cap
+*.dmp
+*.log
+crash.log
 
-# .NET build output (Windows app)
-windows/app/bin/
-windows/app/obj/
+# Secrets and signing material
+.env
+.env.*
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.mobileprovision
+*.provisionprofile
 
-# Linux app build output
-linux/app/target/
+# Office documents and their lock files (working notes, not project files)
+*.xlsx
+*.xls
+*.docx
+*.pptx
+~$*
 
-# Linux packages
-linux/packaging/dist/
+# Operating systems
+.DS_Store
+._*
+.AppleDouble
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+.directory
+
+# Editors and local tool settings
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+.claude/
+CLAUDE.local.md
